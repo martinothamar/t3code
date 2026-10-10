@@ -24,10 +24,14 @@ rebase or force-push `main`; Sessions and worktrees build on it. When asked to s
    `origin/main`.
 2. `git merge upstream/main`. Resolve conflicts so the fork's behavior survives on top of upstream's
    changes; prefer adapting fork code to upstream's new shape over reverting upstream.
-3. Run `vp i`, then the tests, lint and typecheck for the code the resolution touched.
-4. Push the branch and open a pull request into the fork's `main` that lists each conflict and how
-   it was resolved. It must be merged with a merge commit, not squashed, or the next sync repeats
-   the same conflicts.
+3. If `git diff --quiet origin/main upstream/main -- .github/workflows/ci.yml` fails, upstream
+   changed its CI: copy it over `.github/workflows/fork-ci.yml` and reapply the edits listed at
+   the top of that file. Upstream's own workflows stay disabled on the fork; `fork-guard.yml`
+   disables any new ones.
+4. Run `vp i`, then the tests, lint and typecheck for the code the resolution touched.
+5. Push the branch and open a pull request into the fork's `main` that lists each conflict and how
+   it was resolved. Say in it that it must be merged with "Create a merge commit": a squashed
+   sync loses upstream's history, and the next sync repeats the same conflicts.
 
 ## Toolchain
 
