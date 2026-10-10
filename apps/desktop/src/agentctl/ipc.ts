@@ -8,9 +8,14 @@ import {
   AgentctlSandboxesSnapshot,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as ElectronDialog from "../electron/ElectronDialog.ts";
+import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopIpc from "../ipc/DesktopIpc.ts";
+import { expandHome } from "./manifests.ts";
 import { AGENTCTL_CHANNELS } from "./channels.ts";
 import { DesktopAgentctlSandboxes } from "./DesktopAgentctlSandboxes.ts";
 
@@ -75,6 +80,28 @@ const markProjectCreated = DesktopIpc.makeIpcMethod({
     Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.markProjectCreated(input)),
 });
 
+const pickEnvFile = DesktopIpc.makeIpcMethod({
+  channel: AGENTCTL_CHANNELS.pickEnvFile,
+  payload: Schema.NullOr(Schema.String),
+  result: Schema.NullOr(Schema.String),
+  handler: Effect.fn("desktop.ipc.agentctl.pickEnvFile")(function* (current) {
+    const dialog = yield* ElectronDialog.ElectronDialog;
+    const electronWindow = yield* ElectronWindow.ElectronWindow;
+    const environment = yield* DesktopEnvironment.DesktopEnvironment;
+    const paths = yield* dialog.pickFiles({
+      owner: yield* electronWindow.focusedMainOrFirst,
+      defaultPath: Option.some(
+        current === null || current.trim() === ""
+          ? environment.homeDirectory
+          : expandHome(current.trim(), environment.homeDirectory),
+      ),
+      multiple: false,
+      filters: [],
+    });
+    return paths[0] ?? null;
+  }),
+});
+
 export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctlHandlers")(
   function* () {
     const ipc = yield* DesktopIpc.DesktopIpc;
@@ -88,5 +115,6 @@ export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctl
     yield* ipc.handle(setSettings);
     yield* ipc.handle(getWorkspace);
     yield* ipc.handle(markProjectCreated);
+    yield* ipc.handle(pickEnvFile);
   },
 );

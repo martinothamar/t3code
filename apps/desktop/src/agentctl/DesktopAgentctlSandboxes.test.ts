@@ -269,6 +269,11 @@ describe("DesktopAgentctlSandboxes", () => {
         const sandbox = (yield* sandboxes.snapshot).sandboxes[0];
         assert.strictEqual(sandbox?.phase, "retrying");
         assert.strictEqual(sandbox?.action, null);
+        // Its manifest is offered first for the next Sandbox.
+        assert.strictEqual(
+          (yield* sandboxes.getSettings).lastManifestPath,
+          "/agents/worker/agent.yaml",
+        );
       }),
     ),
   );

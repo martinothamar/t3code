@@ -172,15 +172,25 @@ async function runDelete(sandbox: AgentctlSandbox): Promise<boolean> {
   return reportResult(`Could not delete ${sandbox.name}`, await pending);
 }
 
-/** Suggests the manifest's own name, numbered past the Sandboxes that already use it. */
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Names a new Sandbox `<name>-N`, one past the highest number Sandboxes of
+ * that name already use. A manifest name that ends in a number keeps it as
+ * the starting point instead of getting a second one.
+ */
 export function suggestSandboxName(
   agentName: string | null,
   existing: ReadonlyArray<AgentctlSandbox>,
 ): string {
-  const base = agentName ?? "sandbox";
-  const taken = new Set(existing.map((sandbox) => sandbox.name));
-  if (!taken.has(base)) return base;
-  for (let index = 2; ; index += 1) {
-    if (!taken.has(`${base}-${index}`)) return `${base}-${index}`;
+  const name = agentName ?? "sandbox";
+  const numbered = /^(.*)-(\d+)$/.exec(name);
+  const base = numbered?.[1] ?? name;
+  const pattern = new RegExp(`^${escapeRegExp(base)}-(\\d+)$`);
+  let highest = numbered ? Number(numbered[2]) - 1 : 0;
+  for (const sandbox of existing) {
+    const match = pattern.exec(sandbox.name);
+    if (match) highest = Math.max(highest, Number(match[1]));
   }
+  return `${base}-${highest + 1}`;
 }

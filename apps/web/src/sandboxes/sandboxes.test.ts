@@ -75,10 +75,23 @@ describe("sandboxStatus", () => {
 });
 
 describe("suggestSandboxName", () => {
-  it("numbers the manifest's name past the ones in use", () => {
-    const existing = [sandbox({ name: "worker" }), sandbox({ name: "worker-2" })];
-    expect(suggestSandboxName("worker", existing)).toBe("worker-3");
-    expect(suggestSandboxName(null, [])).toBe("sandbox");
+  const named = (...names: string[]) => names.map((name) => sandbox({ name }));
+
+  it("numbers a new Sandbox one past the highest in use", () => {
+    expect(suggestSandboxName("worker", [])).toBe("worker-1");
+    expect(suggestSandboxName("worker", named("worker-1", "worker-3", "other-9"))).toBe("worker-4");
+    expect(suggestSandboxName("worker", named("worker"))).toBe("worker-1");
+    expect(suggestSandboxName(null, [])).toBe("sandbox-1");
+  });
+
+  it("only increments a manifest name that already ends in a number", () => {
+    expect(suggestSandboxName("worker-2", [])).toBe("worker-2");
+    expect(suggestSandboxName("worker-2", named("worker-2"))).toBe("worker-3");
+    expect(suggestSandboxName("worker-2", named("worker-5"))).toBe("worker-6");
+  });
+
+  it("treats the name literally", () => {
+    expect(suggestSandboxName("a.b", named("axb-4"))).toBe("a.b-1");
   });
 });
 

@@ -78,6 +78,8 @@ export const AgentctlSandboxSettings = Schema.Struct({
   manifestRoots: Schema.Array(Schema.String),
   /** Passed as `--env-file`; null uses agentctl's default `.env` beside the manifest. */
   envFile: Schema.NullOr(Schema.String),
+  /** The manifest the last Sandbox was created from, offered first next time. */
+  lastManifestPath: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 export type AgentctlSandboxSettings = typeof AgentctlSandboxSettings.Type;
 
@@ -118,4 +120,6 @@ export interface DesktopAgentctlBridge {
   setSettings: (settings: AgentctlSandboxSettings) => Promise<AgentctlSandboxSettings>;
   getWorkspace: (name: string) => Promise<AgentctlSandboxWorkspace>;
   markProjectCreated: (input: AgentctlMarkProjectCreatedInput) => Promise<void>;
+  /** Opens a file picker for an env file; null when cancelled. */
+  pickEnvFile: (current: string | null) => Promise<string | null>;
 }

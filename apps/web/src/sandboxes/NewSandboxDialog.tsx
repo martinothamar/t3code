@@ -31,6 +31,7 @@ import {
   sandboxStatusDetail,
   suggestSandboxName,
 } from "./sandboxActions";
+import { rememberCreatedSandbox } from "./createdSandboxes";
 import { readAgentctlBridge } from "./sandboxConnections";
 import { refreshSandboxSnapshot, useSandbox, useSandboxes } from "./useSandboxes";
 
@@ -91,7 +92,14 @@ function NewSandboxDialogContent() {
     setManifests(nextManifests);
     setSettings(nextSettings);
     setEnvFile((current) => current || (nextSettings.envFile ?? ""));
-    setManifestPath((current) => current ?? nextManifests[0]?.path ?? null);
+    // The manifest of the last Sandbox comes first, so "another one" is one click.
+    setManifestPath(
+      (current) =>
+        current ??
+        nextManifests.find((candidate) => candidate.path === nextSettings.lastManifestPath)?.path ??
+        nextManifests[0]?.path ??
+        null,
+    );
   };
   const load = () => {
     const bridge = readAgentctlBridge();
@@ -162,6 +170,7 @@ function NewSandboxDialogContent() {
       setError(result.error);
       return;
     }
+    rememberCreatedSandbox(effectiveName.trim());
     setCreatedName(effectiveName.trim());
   };
 
@@ -219,7 +228,35 @@ function NewSandboxDialogContent() {
     );
   }
 
-  const noRoots = settings !== null && settings.manifestRoots.length === 0;
+  const browseEnvFile = async () => {
+    const picked = await readAgentctlBridge()?.pickEnvFile(envFile.trim() || null);
+    if (picked) setEnvFile(picked);
+  };
+
+  // Without a manifest folder there is nothing to choose from yet, so that comes first.
+  if (settings !== null && settings.manifestRoots.length === 0) {
+    return (
+      <DialogPopup className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>New Sandbox</DialogTitle>
+          <DialogDescription>
+            Choose a folder with agentctl manifests, such as a repository with an agents folder. T3
+            Code finds every agent.yaml and agent.&lt;variant&gt;.yaml in it.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter variant="bare">
+          <Button variant="outline" onClick={closeNewSandboxDialog}>
+            Cancel
+          </Button>
+          <Button onClick={() => void addManifestRoot()}>
+            <FolderSearchIcon className="size-4" />
+            Choose folder…
+          </Button>
+        </DialogFooter>
+      </DialogPopup>
+    );
+  }
+
   return (
     <DialogPopup className="max-w-lg">
       <DialogHeader>
@@ -242,9 +279,7 @@ function NewSandboxDialogContent() {
               <div className="text-muted-foreground text-sm">Looking for manifests…</div>
             ) : manifests.length === 0 ? (
               <div className="text-muted-foreground text-sm">
-                {noRoots
-                  ? "Choose a folder to search for agent.yaml manifests."
-                  : "No agent.yaml manifests in the manifest folders."}
+                No agent.yaml manifests in {settings?.manifestRoots.join(", ")}.
               </div>
             ) : (
               <Select value={manifestPath} onValueChange={(value) => setManifestPath(value)}>
@@ -294,16 +329,23 @@ function NewSandboxDialogContent() {
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="new-sandbox-env-file">Env file</Label>
-            <Input
-              id="new-sandbox-env-file"
-              value={envFile}
-              placeholder=".env beside the manifest"
-              onChange={(event) => setEnvFile(event.target.value)}
-              autoComplete="off"
-              spellCheck={false}
-            />
+            <div className="flex gap-2">
+              <Input
+                id="new-sandbox-env-file"
+                className="flex-1"
+                value={envFile}
+                placeholder=".env beside the manifest"
+                onChange={(event) => setEnvFile(event.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <Button type="button" variant="outline" onClick={() => void browseEnvFile()}>
+                Browse…
+              </Button>
+            </div>
             <div className="text-muted-foreground text-xs">
-              Values for the manifest's environment and secrets. Keep it outside any repository.
+              Values for the manifest's environment and secrets, remembered for next time. Keep it
+              outside any repository.
             </div>
           </div>
           {error ? <div className="break-words text-destructive text-sm">{error}</div> : null}

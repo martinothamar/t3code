@@ -416,10 +416,22 @@ export const make = Effect.gen(function* () {
           input.envFile === null || input.envFile.trim() === ""
             ? null
             : path.resolve(expandHome(input.envFile.trim(), environment.homeDirectory));
+        // The choices become the defaults for the next Sandbox.
+        const remember = updateStore((document) => ({
+          ...document,
+          settings: {
+            ...(document.settings ?? DEFAULT_SANDBOX_SETTINGS),
+            envFile:
+              input.envFile === null || input.envFile.trim() === "" ? null : input.envFile.trim(),
+            lastManifestPath: input.manifestPath,
+          },
+        }));
         return yield* runAction(
           input.name,
           "creating",
-          cli.apply({ manifestPath: input.manifestPath, name: input.name, envFile }),
+          cli
+            .apply({ manifestPath: input.manifestPath, name: input.name, envFile })
+            .pipe(Effect.tap(() => remember)),
           { settleOnPoll: true },
         );
       }),
