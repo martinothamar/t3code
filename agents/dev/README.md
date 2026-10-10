@@ -4,10 +4,10 @@ An [agentctl](https://github.com/digdir/digdir-agents) Agent for developing this
 Sandbox: Ubuntu with Node 24, `vp`, Claude Code, Codex, `agentctl`/`agentd` for nested Agents, and
 a desktop for the Electron client. It clones the fork into `/home/agent/code/t3code` at boot.
 
-| Variant    | Checkout                                                |
-| ---------- | ------------------------------------------------------- |
-| default    | Fresh clone of `martinothamar/t3code`, `upstream` added |
-| `nested`   | Fresh clone, reduced to fit inside the default Agent    |
+| Variant  | Checkout                                                |
+| -------- | ------------------------------------------------------- |
+| default  | Fresh clone of `martinothamar/t3code`, `upstream` added |
+| `nested` | Fresh clone, reduced to fit inside the default Agent    |
 
 ```sh
 cp agents/dev/.env.sample agents/dev/.env   # fill in GITHUB_TOKEN and Git identity
