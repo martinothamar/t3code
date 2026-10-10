@@ -74,3 +74,16 @@ export function SandboxMenuItems({
     </>
   );
 }
+
+/** The state of a Sandbox environment in the picker's environment list, when it is not running. */
+export function SandboxEnvironmentHint({
+  picker,
+  environmentId,
+}: {
+  readonly picker: ReturnType<typeof useSandboxPicker>;
+  readonly environmentId: string;
+}) {
+  const hint = picker.environmentHint(environmentId);
+  if (hint === null) return null;
+  return <span className="ms-auto shrink-0 ps-3 text-muted-foreground text-xs">{hint}</span>;
+}

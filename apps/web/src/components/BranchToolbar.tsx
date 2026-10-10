@@ -43,7 +43,7 @@ import {
   type BranchToolbarBranchSelectorHandle,
 } from "./BranchToolbarBranchSelector";
 import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
-import { SandboxMenuItems } from "../sandboxes/SandboxPickerGroup";
+import { SandboxEnvironmentHint, SandboxMenuItems } from "../sandboxes/SandboxPickerGroup";
 import { useOffersSandboxes, useSandboxPicker } from "../sandboxes/useSandboxPicker";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
@@ -328,11 +328,11 @@ const RunContextSelector = memo(function RunContextSelector({
               <MenuGroupLabel>Run on</MenuGroupLabel>
               <MenuRadioGroup
                 value={autoEnvironmentLabel ? "auto" : environmentId}
-                onValueChange={(value) =>
-                  value === "auto"
-                    ? onAutoEnvironment?.()
-                    : onEnvironmentChange(value as EnvironmentId)
-                }
+                onValueChange={(value) => {
+                  if (value === "auto") return onAutoEnvironment?.();
+                  sandboxPicker.environmentChosen(value);
+                  return onEnvironmentChange(value as EnvironmentId);
+                }}
               >
                 {onAutoEnvironment && (
                   <MenuRadioItem
@@ -358,9 +358,13 @@ const RunContextSelector = memo(function RunContextSelector({
                     value={env.environmentId}
                     closeOnClick
                   >
-                    <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="flex w-full min-w-0 items-center gap-1.5">
                       <EnvironmentMachineIcon kind={env.machine} className="size-3" />
                       <span className="min-w-0 truncate">{env.label}</span>
+                      <SandboxEnvironmentHint
+                        picker={sandboxPicker}
+                        environmentId={env.environmentId}
+                      />
                     </span>
                   </MenuRadioItem>
                 ))}

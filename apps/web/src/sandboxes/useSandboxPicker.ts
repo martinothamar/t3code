@@ -115,6 +115,27 @@ export function useSandboxPicker(input: {
     return () => clearTimeout(timeout);
   }, [waitingName, pendingEnvironmentId, connected, arrived, seed]);
 
+  const sandboxForEnvironment = (environmentId: string) =>
+    sandboxes.find((sandbox) => sandbox.environmentId === environmentId) ?? null;
+
+  /** A short state for a Sandbox environment that is not running, such as "Stopped". */
+  const environmentHint = (environmentId: string): string | null => {
+    const sandbox = sandboxForEnvironment(environmentId);
+    if (sandbox === null) return null;
+    if (sandbox.action === null && sandbox.phase === "ready") return null;
+    return sandbox.action === null && sandbox.phase === "stopped"
+      ? "Stopped · start"
+      : sandboxStatus(sandbox).label;
+  };
+
+  /** Picking a stopped Sandbox's environment starts it; the draft moves right away. */
+  const environmentChosen = (environmentId: string) => {
+    const sandbox = sandboxForEnvironment(environmentId);
+    if (sandbox !== null && sandbox.action === null && sandbox.phase === "stopped") {
+      void startSandbox(sandbox);
+    }
+  };
+
   const select = (value: string): boolean => {
     if (!value.startsWith(SANDBOX_VALUE_PREFIX)) return false;
     if (value === NEW_SANDBOX_VALUE) {
@@ -136,5 +157,7 @@ export function useSandboxPicker(input: {
     items: sandboxPickerItems(sandboxes, input.availableEnvironmentIds),
     pendingName: pending === null || arrived ? null : pending.name,
     select,
+    environmentHint,
+    environmentChosen,
   };
 }

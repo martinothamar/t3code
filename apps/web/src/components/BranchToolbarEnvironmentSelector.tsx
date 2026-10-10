@@ -5,7 +5,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
-import { SandboxPickerGroup } from "../sandboxes/SandboxPickerGroup";
+import { SandboxEnvironmentHint, SandboxPickerGroup } from "../sandboxes/SandboxPickerGroup";
 import { useSandboxPicker } from "../sandboxes/useSandboxPicker";
 
 import type { EnvironmentOption } from "./BranchToolbar.logic";
@@ -94,9 +94,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
       value={autoEnvironmentLabel ? "auto" : environmentId}
       onValueChange={(value) => {
         if (value === null || sandboxPicker.select(value)) return;
-        return value === "auto"
-          ? onAutoEnvironment?.()
-          : onEnvironmentChange(value as EnvironmentId);
+        if (value === "auto") return onAutoEnvironment?.();
+        sandboxPicker.environmentChosen(value);
+        return onEnvironmentChange(value as EnvironmentId);
       }}
       items={environmentItems}
     >
@@ -144,9 +144,10 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
           )}
           {availableEnvironments.map((env) => (
             <SelectItem key={env.environmentId} value={env.environmentId}>
-              <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex w-full items-center gap-1.5">
                 <EnvironmentMachineIcon kind={env.machine} className="size-3" />
                 {env.label}
+                <SandboxEnvironmentHint picker={sandboxPicker} environmentId={env.environmentId} />
               </span>
             </SelectItem>
           ))}

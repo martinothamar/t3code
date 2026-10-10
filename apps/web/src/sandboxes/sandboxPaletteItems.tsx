@@ -92,7 +92,16 @@ export function sandboxPaletteItems(
       kind: "submenu",
       value: "action:manage-agentctl-sandboxes",
       title: "Manage Sandboxes…",
-      searchTerms: ["sandbox", "agentctl", "start", "stop", "delete", "vm"],
+      // Names too, so "stop worker" finds the submenu from the top level.
+      searchTerms: [
+        "sandbox",
+        "agentctl",
+        "start",
+        "stop",
+        "delete",
+        "vm",
+        ...sandboxes.map((sandbox) => sandbox.name),
+      ],
       icon: <BoxIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <BoxIcon className={ADDON_ICON_CLASS} />,
       groups,

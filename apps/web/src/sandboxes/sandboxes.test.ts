@@ -1,4 +1,4 @@
-import type { AgentctlSandbox } from "@t3tools/contracts";
+import { EnvironmentId, type AgentctlSandbox } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { sandboxStatus, suggestSandboxName } from "./sandboxActions";
@@ -13,7 +13,7 @@ function sandbox(overrides: Partial<AgentctlSandbox> = {}): AgentctlSandbox {
     sshAccess: true,
     sshAlias: "agentctl-worker",
     sshTarget: null,
-    environmentId: "env-worker",
+    environmentId: EnvironmentId.make("env-worker"),
     connectError: null,
     action: null,
     actionError: null,
@@ -27,7 +27,11 @@ describe("sandboxRegistrations", () => {
   it("registers every Sandbox T3 has reached, running or not", () => {
     const registrations = sandboxRegistrations([
       sandbox(),
-      sandbox({ name: "stopped", phase: "stopped", environmentId: "env-stopped" }),
+      sandbox({
+        name: "stopped",
+        phase: "stopped",
+        environmentId: EnvironmentId.make("env-stopped"),
+      }),
       sandbox({ name: "new", environmentId: null }),
       sandbox({ name: "no-ssh", sshAccess: false }),
     ]);
@@ -54,9 +58,9 @@ describe("sandboxPickerItems", () => {
   it("offers Sandboxes that do not hold the draft's project yet", () => {
     const items = sandboxPickerItems(
       [
-        sandbox({ name: "here", environmentId: "env-here" }),
+        sandbox({ name: "here", environmentId: EnvironmentId.make("env-here") }),
         sandbox({ name: "stopped", phase: "stopped" }),
-        sandbox({ name: "elsewhere", environmentId: "env-elsewhere" }),
+        sandbox({ name: "elsewhere", environmentId: EnvironmentId.make("env-elsewhere") }),
         sandbox({ name: "booting", phase: "provisioning", environmentId: null }),
         sandbox({ name: "going", phase: "terminating" }),
       ],
