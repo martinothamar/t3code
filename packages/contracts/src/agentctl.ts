@@ -36,6 +36,13 @@ export const AgentctlSandbox = Schema.Struct({
   phase: AgentctlSandboxPhase,
   /** Provisioning progress or the failure message, when there is one. */
   detail: Schema.NullOr(Schema.String),
+  /** When it last became ready or stopped being so, as an ISO timestamp. */
+  since: Schema.NullOr(Schema.String),
+  /** Resources and network mode from its manifest, as agentctl spells them, such as `6Gi`. */
+  cpu: Schema.NullOr(Schema.String),
+  memory: Schema.NullOr(Schema.String),
+  disk: Schema.NullOr(Schema.String),
+  network: Schema.NullOr(Schema.String),
   /** False when the manifest has no `ssh` access, so T3 cannot reach it. */
   sshAccess: Schema.Boolean,
   /** The SSH target as T3 resolved it when it first reached the Sandbox. */

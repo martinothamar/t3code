@@ -29,7 +29,7 @@ import { refreshSandboxSnapshot, useSandboxes } from "./useSandboxes";
 let open = false;
 const listeners = new Set<() => void>();
 
-/** Opens the dialog from anywhere: Settings or the command palette. */
+/** Opens the dialog from anywhere: the sidebar, the Sandboxes page or the command palette. */
 export function openNewSandboxDialog() {
   open = true;
   for (const listener of listeners) listener();

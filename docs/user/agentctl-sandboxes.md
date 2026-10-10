@@ -19,13 +19,14 @@ gives it.
 
 - **Start a thread in one.** Pick the Sandbox's project for a new thread, as you would any project.
   If the Sandbox is stopped, the composer says so and offers **Start**.
-- **Create one.** Choose **New Sandbox** in the sidebar, or **New Sandbox…** in the command palette
-  or **Settings → Connections → agentctl Sandboxes**. The first time, choose a folder with your
-  manifests; T3 Code finds every `agent.yaml` and `agent.<variant>.yaml` in it. Values come from the
+- **Create one.** Choose **New Sandbox** in the sidebar or on the Sandboxes page, or **New Sandbox…**
+  in the command palette. The first time, choose a folder with your manifests; T3 Code finds every
+  `agent.yaml` and `agent.<variant>.yaml` in it. Values come from the
   `.env` beside the manifest, as with `agentctl apply`. The name gets the next free number, like
   `worker-3`. The sidebar follows the Sandbox while agentctl sets it up.
-- **Start, stop or delete.** From **Settings → Connections → agentctl Sandboxes** or **Manage
-  Sandboxes…** in the command palette.
+- **Manage them.** **Sandboxes** at the bottom of the sidebar lists each Sandbox with its state,
+  resources and threads, and where to start, stop or delete it. Manifest folders are managed there
+  too. **Manage Sandboxes…** in the command palette has the same actions.
 
 ## Good to know
 

@@ -11,6 +11,7 @@ import {
   deriveAgentState,
   hasSshAccess,
   manifestVariant,
+  stateSince,
   type AgentResource,
 } from "./agentState.ts";
 
@@ -83,10 +84,16 @@ export function buildSandbox(
 ): AgentctlSandbox {
   const state = deriveAgentState(agent);
   const manifestPath = agent.status?.provenance?.manifestPath ?? null;
+  const resources = agent.spec.sandbox?.resources;
   return {
     name: agent.metadata.name,
     phase: state.phase,
     detail: state.detail,
+    since: stateSince(agent),
+    cpu: resources?.cpu ?? null,
+    memory: resources?.memory ?? null,
+    disk: resources?.rootFilesystem?.capacity ?? null,
+    network: agent.spec.network?.mode ?? null,
     sshAccess: hasSshAccess(agent),
     sshTarget: record?.sshTarget ?? null,
     environmentId: record?.environmentId ?? null,

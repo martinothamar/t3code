@@ -1,4 +1,5 @@
 import type { AgentctlSandbox } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
 import { BoxIcon, PlayIcon, PlusIcon, SquareIcon, Trash2Icon } from "lucide-react";
 
 import {
@@ -67,16 +68,28 @@ function sandboxActions(sandbox: AgentctlSandbox): CommandPaletteActionItem[] {
 
 /** The palette is only mounted while open, so following every snapshot is cheap. */
 export function useSandboxPaletteItems() {
-  return sandboxPaletteItems(useOffersSandboxes(), useSandboxes());
+  const navigate = useNavigate();
+  return sandboxPaletteItems(useOffersSandboxes(), useSandboxes(), () => {
+    void navigate({ to: "/sandboxes" });
+  });
 }
 
-/** "New Sandbox…" and a submenu with each Sandbox's start, stop and delete. */
+/** The Sandboxes page, "New Sandbox…" and a submenu with each Sandbox's start, stop and delete. */
 function sandboxPaletteItems(
   offered: boolean,
   sandboxes: ReadonlyArray<AgentctlSandbox>,
+  openPage: () => void,
 ): Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> {
   if (!offered) return [];
   const items: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [
+    {
+      kind: "action",
+      value: "action:open-agentctl-sandboxes",
+      title: "Open Sandboxes",
+      searchTerms: ["sandboxes", "agentctl", "manifest folders", "vm"],
+      icon: <BoxIcon className={ITEM_ICON_CLASS} />,
+      run: async () => openPage(),
+    },
     {
       kind: "action",
       value: "action:new-agentctl-sandbox",

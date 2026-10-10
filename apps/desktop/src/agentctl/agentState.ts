@@ -9,6 +9,15 @@ const Condition = Schema.Struct({
   status: Schema.String,
   reason: Schema.optionalKey(Schema.String),
   message: Schema.optionalKey(Schema.String),
+  lastTransitionTime: Schema.optionalKey(Schema.String),
+});
+
+const Resources = Schema.Struct({
+  cpu: Schema.optionalKey(Schema.String),
+  memory: Schema.optionalKey(Schema.String),
+  rootFilesystem: Schema.optionalKey(
+    Schema.Struct({ capacity: Schema.optionalKey(Schema.String) }),
+  ),
 });
 
 const ProgressStep = Schema.Struct({ name: Schema.String });
@@ -32,6 +41,8 @@ export const AgentResource = Schema.Struct({
   spec: Schema.Struct({
     runState: Schema.optionalKey(Schema.String),
     access: Schema.optionalKey(Schema.Array(Schema.Struct({ type: Schema.String }))),
+    sandbox: Schema.optionalKey(Schema.Struct({ resources: Schema.optionalKey(Resources) })),
+    network: Schema.optionalKey(Schema.Struct({ mode: Schema.optionalKey(Schema.String) })),
   }),
   status: Schema.optionalKey(
     Schema.Struct({
@@ -118,6 +129,10 @@ export function deriveAgentState(agent: AgentResource): AgentState {
     ? { phase: "ready", detail: null }
     : { phase: "starting", detail: message };
 }
+
+/** When the Agent last changed readiness, such as when it started or stopped. */
+export const stateSince = (agent: AgentResource) =>
+  condition(agent, "Ready")?.lastTransitionTime ?? null;
 
 export const hasSshAccess = (agent: AgentResource) =>
   agent.spec.access?.some((access) => access.type === "ssh") ?? false;

@@ -11,6 +11,7 @@ import {
   shouldCloseTunnel,
   type AgentResource,
 } from "./agentState.ts";
+import { IDLE_RUNTIME, buildSandbox } from "./sandboxModel.ts";
 
 const decodeAgentList = Schema.decodeUnknownSync(AgentResourceList);
 
@@ -165,6 +166,15 @@ describe("agentctl output", () => {
     expect(resource?.metadata.name).toBe("worker");
     expect(resource && isConnectable(resource)).toBe(true);
     expect(manifestVariant(resource?.status?.provenance?.manifestPath ?? "")).toBe("nested");
+    const sandbox = resource && buildSandbox(resource, undefined, IDLE_RUNTIME);
+    expect(sandbox).toMatchObject({
+      phase: "ready",
+      since: "2026-10-10T16:28:32.743422188Z",
+      cpu: "4",
+      memory: "6Gi",
+      disk: "32Gi",
+      network: "mediated",
+    });
   });
 
   it("reports agentctl's own error line rather than provisioning output", () => {
