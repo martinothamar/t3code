@@ -5,22 +5,26 @@ ENV DEBIAN_FRONTEND=noninteractive
 # What agentd needs from the image (systemd as init, OpenSSH for `access: ssh`, tmux for Sessions,
 # sudo), T3 Code's build tooling, Podman so a nested agentd can build Agent images, and a minimal
 # desktop: Xtigervnc as X and VNC server in one process, openbox, tint2, and noVNC served by
-# websockify for `agentctl vnc --web`.
+# websockify for `agentctl vnc --web`. The `desktop` helper captures with ffmpeg and acts with
+# xdotool; gnome-keyring is the Secret Service Electron's safeStorage needs.
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         build-essential \
         ca-certificates \
         curl \
         dbus \
+        ffmpeg \
         fonts-liberation \
         fonts-noto-color-emoji \
         fonts-noto-core \
         git \
+        gnome-keyring \
         iproute2 \
         jq \
         less \
         libnss3-tools \
         libsecret-1-dev \
+        libsecret-tools \
         novnc \
         openbox \
         openssh-server \
@@ -40,6 +44,7 @@ RUN apt-get update \
         websockify \
         x11-utils \
         x11-xserver-utils \
+        xdotool \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
@@ -128,12 +133,15 @@ RUN systemctl mask ssh.service ssh.socket serial-getty@hvc0.service \
     && printf 'fs.inotify.max_user_instances = 1024\nfs.inotify.max_user_watches = 1048576\nfs.inotify.max_queued_events = 32768\n' \
         >/usr/lib/sysctl.d/50-agent-inotify.conf \
     && ln -s /dev/null /etc/sysctl.d/50-pid-max.conf \
-    && systemctl enable agent-workspace-init.service agent-browser-ca-init.service agent-desktop-display.service \
-        agent-desktop-session.service agent-desktop-dbus.service \
+    && systemctl enable agent-workspace-init.service agent-ssh-config-init.service agent-browser-ca-init.service \
+        agent-desktop-display.service agent-desktop-session.service agent-desktop-dbus.service \
+        agent-desktop-keyring.service \
     && Xtigervnc -version 2>&1 | head -1 \
     && websockify --help >/dev/null \
     && test -f /usr/share/novnc/vnc.html \
-    && chromium --headless --version
+    && chromium --headless --version \
+    && xdotool --version \
+    && desktop help >/dev/null
 
 ENV LANG=C.UTF-8
 ENV DISABLE_AUTOUPDATER=1
