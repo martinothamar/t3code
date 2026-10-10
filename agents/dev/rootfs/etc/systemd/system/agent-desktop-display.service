@@ -5,7 +5,9 @@ Before=multi-user.target
 [Service]
 # Xtigervnc is both X and VNC server. `-rfbport -1` disables its TCP listener (the default is
 # 5900 plus the display number on every interface); the desktop is reachable only through the
-# Unix socket that the VNC access units proxy.
+# Unix socket that the VNC access units proxy. `-AcceptSetDesktopSize=0` keeps a viewer from
+# resizing the display to its window: the `desktop` helper's screenshots and coordinates assume
+# the configured geometry, and a viewer scales locally instead.
 Type=exec
 User=agent
 Group=agent
@@ -13,7 +15,7 @@ RuntimeDirectory=agent-desktop
 RuntimeDirectoryMode=0755
 Environment=HOME=/home/agent
 EnvironmentFile=/etc/agent-desktop.conf
-ExecStart=/usr/bin/Xtigervnc ${AGENT_DESKTOP_DISPLAY} -geometry ${AGENT_DESKTOP_GEOMETRY} -depth 24 -rfbport -1 -rfbunixpath ${AGENT_DESKTOP_SOCKET} -rfbunixmode 0600 -SecurityTypes None -AlwaysShared -desktop t3code-dev
+ExecStart=/usr/bin/Xtigervnc ${AGENT_DESKTOP_DISPLAY} -geometry ${AGENT_DESKTOP_GEOMETRY} -depth 24 -rfbport -1 -rfbunixpath ${AGENT_DESKTOP_SOCKET} -rfbunixmode 0600 -SecurityTypes None -AcceptSetDesktopSize=0 -AlwaysShared -desktop t3code-dev
 Restart=on-failure
 RestartSec=2
 
