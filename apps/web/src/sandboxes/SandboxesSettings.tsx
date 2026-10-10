@@ -64,15 +64,23 @@ export function SandboxesSettings() {
         />
       ) : snapshot.status === "loading" ? (
         <SettingsRow title="Looking for Sandboxes…" />
-      ) : snapshot.sandboxes.length === 0 ? (
-        <SettingsRow
-          title="No Sandboxes"
-          description="Create one from a manifest, or with agentctl apply."
-        />
       ) : (
-        <SandboxRows sandboxes={snapshot.sandboxes} />
+        <>
+          {snapshot.error !== null ? (
+            // The Sandboxes below are as agentctl last reported them.
+            <SettingsRow title="agentctl is not responding" description={snapshot.error} />
+          ) : null}
+          {snapshot.sandboxes.length === 0 ? (
+            <SettingsRow
+              title="No Sandboxes"
+              description="Create one from a manifest, or with agentctl apply."
+            />
+          ) : (
+            <SandboxRows sandboxes={snapshot.sandboxes} />
+          )}
+          <SandboxManifestSettings />
+        </>
       )}
-      {snapshot.status === "available" ? <SandboxManifestSettings /> : null}
     </SettingsSection>
   );
 }

@@ -35,10 +35,12 @@ function agent(
   };
 }
 
+const SSH_TARGET = { alias: "agentctl-worker", hostname: "worker", username: "agent", port: 22 };
+
 const record = (sandboxId: string | null): SandboxRecord => ({
   sandboxId,
   environmentId: EnvironmentId.make("env-1"),
-  sshTarget: null,
+  sshTarget: SSH_TARGET,
   projectCreated: false,
 });
 
@@ -71,7 +73,7 @@ describe("discovery", () => {
     const sameEnvironment = {
       sandboxId: "b",
       environmentId: previous.environmentId,
-      sshTarget: null,
+      sshTarget: SSH_TARGET,
     };
     expect(discoveredRecord(previous, sameEnvironment).projectCreated).toBe(true);
     const newEnvironment = { ...sameEnvironment, environmentId: EnvironmentId.make("env-2") };

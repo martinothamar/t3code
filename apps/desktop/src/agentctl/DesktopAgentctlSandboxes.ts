@@ -52,7 +52,7 @@ export class DesktopAgentctlSandboxes extends Context.Service<
   DesktopAgentctlSandboxes,
   {
     readonly snapshot: Effect.Effect<AgentctlSandboxesSnapshot>;
-    /** The current snapshot, then every change to it. */
+    /** The current snapshot, then every change to it, which tests wait on. */
     readonly changes: Stream.Stream<AgentctlSandboxesSnapshot>;
     /** Reads agentctl now instead of waiting for the next poll. */
     readonly refresh: Effect.Effect<AgentctlSandboxesSnapshot>;
@@ -410,7 +410,13 @@ export const make = Effect.gen(function* () {
       }),
     create: (input) =>
       Effect.gen(function* () {
-        const nameError = sandboxNameError(input.name, yield* Ref.get(agentsRef));
+        // Checked against agentctl now: a Sandbox made since the last poll would
+        // otherwise have its manifest replaced.
+        const agents = yield* cli.listAgents.pipe(Effect.result);
+        if (agents._tag === "Failure") {
+          return { error: agents.failure.message } satisfies AgentctlActionResult;
+        }
+        const nameError = sandboxNameError(input.name, agents.success);
         if (nameError !== null) return { error: nameError } satisfies AgentctlActionResult;
         // Its manifest is offered first for the next Sandbox.
         const remember = updateStore((document) => ({

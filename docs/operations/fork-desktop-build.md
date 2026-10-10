@@ -5,16 +5,16 @@ The desktop app installs the T3 server on SSH hosts, agentctl Sandboxes included
 only desktop and client code, so its Sandboxes run upstream's server unmodified, and that works as
 long as the version names an upstream release whose server matches the fork's.
 
-Stamp a build with the nightly the fork last merged:
+Syncs merge `upstream/main`, so a build is stamped with the newest nightly that merge contains:
 
 ```sh
 T3CODE_DESKTOP_VERSION="$(git describe --tags --abbrev=0 --match 'v*-nightly.*' | sed 's/^v//')" \
   vp run dist:desktop:linux
 ```
 
-Sync merges should target a nightly tag rather than the tip of `upstream/main`, so the fork's
-server code is exactly that release. A local build has no update feed unless
-`T3CODE_DESKTOP_UPDATE_REPOSITORY` is set, so it never replaces itself with an upstream build.
+Sandboxes then run that nightly's server, which can trail the fork's client by the upstream commits
+merged since it. A local build has no update feed unless `T3CODE_DESKTOP_UPDATE_REPOSITORY` is set,
+so it never replaces itself with an upstream build.
 
 For `vp run dev:desktop`, or to override a build, set the server release directly:
 

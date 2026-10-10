@@ -1,22 +1,11 @@
-import type { AgentctlSandboxesSnapshot, DesktopAgentctlBridge } from "@t3tools/contracts";
+import type { DesktopAgentctlBridge } from "@t3tools/contracts";
 import type { IpcRenderer } from "electron";
 
 import { AGENTCTL_CHANNELS } from "./channels.ts";
 
-const UNAVAILABLE: AgentctlSandboxesSnapshot = {
-  status: "unavailable",
-  error: null,
-  sandboxes: [],
-};
-
 export function makeAgentctlBridge(ipcRenderer: IpcRenderer): DesktopAgentctlBridge {
   return {
-    getSnapshot: () => {
-      const result: unknown = ipcRenderer.sendSync(AGENTCTL_CHANNELS.getSnapshot);
-      return typeof result === "object" && result !== null
-        ? (result as AgentctlSandboxesSnapshot)
-        : UNAVAILABLE;
-    },
+    getSnapshot: () => ipcRenderer.sendSync(AGENTCTL_CHANNELS.getSnapshot),
     start: (name) => ipcRenderer.invoke(AGENTCTL_CHANNELS.start, name),
     stop: (name) => ipcRenderer.invoke(AGENTCTL_CHANNELS.stop, name),
     remove: (name) => ipcRenderer.invoke(AGENTCTL_CHANNELS.remove, name),

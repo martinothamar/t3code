@@ -79,7 +79,12 @@ function SandboxEnvironmentCoordinator(props: {
       environmentId: props.environmentId,
       projectCreated: props.projectCreated,
       force: false,
-    }).catch((error: unknown) => console.warn("Could not add the Sandbox project.", error));
+    })
+      .then((result) => {
+        // Settings offers Add project for a Sandbox without one, so a retry is a click away.
+        if (result.error !== null) console.warn("Could not add the Sandbox project.", result.error);
+      })
+      .catch((error: unknown) => console.warn("Could not add the Sandbox project.", error));
   }, [ready, ensureProject, props.name, props.environmentId, props.projectCreated]);
 
   return null;

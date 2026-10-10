@@ -38,7 +38,6 @@ export const AgentctlSandbox = Schema.Struct({
   detail: Schema.NullOr(Schema.String),
   /** False when the manifest has no `ssh` access, so T3 cannot reach it. */
   sshAccess: Schema.Boolean,
-  sshAlias: Schema.String,
   /** The SSH target as T3 resolved it when it first reached the Sandbox. */
   sshTarget: Schema.NullOr(DesktopSshEnvironmentTargetSchema),
   /** Known once T3 has reached the Sandbox's server; null before that. */
@@ -77,7 +76,7 @@ export const AgentctlSandboxSettings = Schema.Struct({
   /** Directories searched for manifests when creating a Sandbox. */
   manifestRoots: Schema.Array(Schema.String),
   /** The manifest the last Sandbox was created from, offered first next time. */
-  lastManifestPath: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  lastManifestPath: Schema.optionalKey(Schema.String),
 });
 export type AgentctlSandboxSettings = typeof AgentctlSandboxSettings.Type;
 

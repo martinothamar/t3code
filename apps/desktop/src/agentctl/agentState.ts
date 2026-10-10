@@ -51,7 +51,6 @@ export type AgentResource = typeof AgentResource.Type;
 export const AgentResourceList = Schema.Array(AgentResource);
 
 export const SshInfo = Schema.Struct({
-  alias: Schema.String,
   workingDirectory: Schema.String,
 });
 export type SshInfo = typeof SshInfo.Type;

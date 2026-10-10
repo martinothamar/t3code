@@ -1,15 +1,12 @@
 import type { AgentctlSandbox, AgentctlSandboxesSnapshot } from "@t3tools/contracts";
 import { useSyncExternalStore } from "react";
 
-import {
-  EMPTY_SANDBOX_SNAPSHOT,
-  readAgentctlBridge,
-  readSandboxSnapshot,
-} from "./sandboxConnections";
+import { EMPTY_SANDBOX_SNAPSHOT, readAgentctlBridge } from "./sandboxConnections";
 
 // The bridge has no change event, so one shared poller reads the desktop's
 // snapshot while anything is subscribed. Reads are a cheap synchronous IPC,
-// and rare without agentctl.
+// and rare without agentctl. Desktop main keeps the last Sandboxes when
+// agentctl fails, so a read never drops them.
 // Desktop main refreshes every 3 seconds, so reading more often finds nothing new.
 const POLL_MS = 3_000;
 const UNAVAILABLE_POLL_MS = 15_000;
@@ -19,7 +16,7 @@ let currentKey = "";
 const listeners = new Set<() => void>();
 
 function read() {
-  const next = readSandboxSnapshot();
+  const next = readAgentctlBridge()?.getSnapshot() ?? EMPTY_SANDBOX_SNAPSHOT;
   const key = JSON.stringify(next);
   if (key === currentKey) return;
   current = next;
@@ -44,6 +41,12 @@ function subscribe(listener: () => void) {
       timer = null;
     }
   };
+}
+
+/** The current snapshot, read through the poller when it runs, for code outside React. */
+export function readSandboxSnapshot(): AgentctlSandboxesSnapshot {
+  if (timer === null) read();
+  return current;
 }
 
 /** Re-reads right away, such as after a lifecycle request changed the snapshot. */

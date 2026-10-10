@@ -52,7 +52,8 @@ import { isHostedStaticApp } from "../hostedPairing";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
-import { readSandboxSnapshot, sandboxRegistrations } from "../sandboxes/sandboxConnections";
+import { sandboxRegistrations } from "../sandboxes/sandboxConnections";
+import { readSandboxSnapshot } from "../sandboxes/useSandboxes";
 import {
   desktopLocalConnectionId,
   readDesktopSecondaryBootstrapsResult,

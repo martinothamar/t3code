@@ -201,7 +201,15 @@ function NewSandboxDialogContent() {
         </DialogPanel>
         <DialogFooter variant="bare">
           {failed && created !== null ? (
-            <Button variant="destructive-outline" onClick={() => void deleteSandbox(created)}>
+            <Button
+              variant="destructive-outline"
+              onClick={() =>
+                void deleteSandbox(created).then((deleted) => {
+                  // Nothing is left to wait for once it is gone.
+                  if (deleted) closeNewSandboxDialog();
+                })
+              }
+            >
               Delete Sandbox
             </Button>
           ) : null}

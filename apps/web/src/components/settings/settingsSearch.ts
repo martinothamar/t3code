@@ -939,7 +939,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "agentctl-sandboxes",
     title: "agentctl Sandboxes",
     to: "/settings/connections",
-    searchTerms: ["sandbox agentctl agent vm manifest start stop delete new create env file"],
+    searchTerms: ["sandbox agentctl agent vm manifest start stop delete new create"],
     desktopOnly: true,
   },
   {

@@ -104,7 +104,7 @@ export const make = Effect.gen(function* () {
           ),
         );
         return {
-          exitCode: exitCode as unknown as number,
+          exitCode,
           stdout: decodeUtf8(stdout),
           stderr: decodeUtf8(stderr),
         } satisfies CommandResult;

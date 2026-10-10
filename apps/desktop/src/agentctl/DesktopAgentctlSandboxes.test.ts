@@ -62,6 +62,7 @@ interface Harness {
   readonly ensureFails: Ref.Ref<boolean>;
   /** When set, a start waits for it and then fails, like a start a stop cut short. */
   readonly startGate: Ref.Ref<Deferred.Deferred<void> | null>;
+  readonly applyFails: Ref.Ref<boolean>;
 }
 
 const makeHarness = Effect.gen(function* () {
@@ -73,6 +74,7 @@ const makeHarness = Effect.gen(function* () {
     disconnected: yield* Deferred.make<void>(),
     ensureFails: yield* Ref.make(false),
     startGate: yield* Ref.make<Deferred.Deferred<void> | null>(null),
+    applyFails: yield* Ref.make(false),
   } satisfies Harness;
 });
 
@@ -102,8 +104,7 @@ function layer(harness: Harness, baseDir: string) {
           : Ref.get(harness.agents),
       ),
     ),
-    sshInfo: () =>
-      Effect.succeed({ alias: `agentctl-${NAME}`, workingDirectory: "/home/agent/code" }),
+    sshInfo: () => Effect.succeed({ workingDirectory: "/home/agent/code" }),
     start: () =>
       Ref.get(harness.startGate).pipe(
         Effect.flatMap((gate) =>
@@ -120,7 +121,14 @@ function layer(harness: Harness, baseDir: string) {
       ),
     stop: () => Ref.set(harness.agents, [agent("stopped")]),
     remove: () => Ref.set(harness.agents, []),
-    apply: () => Ref.set(harness.agents, [agent("retrying")]),
+    apply: () =>
+      Ref.get(harness.applyFails).pipe(
+        Effect.flatMap((fails) =>
+          fails
+            ? Effect.fail(new AgentctlCli.AgentctlCommandError({ message: "invalid manifest" }))
+            : Ref.set(harness.agents, [agent("retrying")]),
+        ),
+      ),
   });
   const target: DesktopSshEnvironmentTarget = {
     alias: `agentctl-${NAME}`,
@@ -273,6 +281,56 @@ describe("DesktopAgentctlSandboxes", () => {
           (yield* sandboxes.getSettings).lastManifestPath,
           "/agents/worker/agent.yaml",
         );
+      }),
+    ),
+  );
+
+  it.effect("refuses a name agentctl already has, even one made since the last poll", () =>
+    withSandboxes((sandboxes, harness) =>
+      Effect.gen(function* () {
+        yield* Ref.set(harness.agents, []);
+        yield* sandboxes.refresh;
+        yield* Ref.set(harness.agents, [agent("ready")]);
+        const result = yield* sandboxes.create({
+          manifestPath: "/agents/worker/agent.yaml",
+          name: NAME,
+        });
+        assert.strictEqual(result.error, `A Sandbox named ${NAME} already exists.`);
+        assert.strictEqual((yield* sandboxes.snapshot).sandboxes[0]?.action ?? null, null);
+      }),
+    ),
+  );
+
+  it.effect("remembers the manifest only when agentctl accepted it", () =>
+    withSandboxes((sandboxes, harness) =>
+      Effect.gen(function* () {
+        yield* Ref.set(harness.agents, []);
+        yield* Ref.set(harness.applyFails, true);
+        const result = yield* sandboxes.create({
+          manifestPath: "/agents/worker/agent.yaml",
+          name: NAME,
+        });
+        assert.strictEqual(result.error, "invalid manifest");
+        assert.isUndefined((yield* sandboxes.getSettings).lastManifestPath);
+      }),
+    ),
+  );
+
+  it.effect("records a project only for the environment it was made in", () =>
+    withSandboxes((sandboxes) =>
+      Effect.gen(function* () {
+        yield* until(sandboxes, discovered("env-1"));
+        // A request for an environment the Sandbox no longer has, such as one reset meanwhile.
+        yield* sandboxes.markProjectCreated({
+          name: NAME,
+          environmentId: EnvironmentId.make("env-old"),
+        });
+        assert.isFalse((yield* sandboxes.refresh).sandboxes[0]?.projectCreated);
+        yield* sandboxes.markProjectCreated({
+          name: NAME,
+          environmentId: EnvironmentId.make("env-1"),
+        });
+        assert.isTrue((yield* sandboxes.refresh).sandboxes[0]?.projectCreated);
       }),
     ),
   );

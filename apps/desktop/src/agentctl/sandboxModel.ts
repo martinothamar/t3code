@@ -11,7 +11,6 @@ import {
   deriveAgentState,
   hasSshAccess,
   manifestVariant,
-  sshAliasFor,
   type AgentResource,
 } from "./agentState.ts";
 
@@ -23,7 +22,7 @@ import {
 export const SandboxRecord = Schema.Struct({
   sandboxId: Schema.NullOr(Schema.String),
   environmentId: EnvironmentId,
-  sshTarget: Schema.NullOr(DesktopSshEnvironmentTargetSchema),
+  sshTarget: DesktopSshEnvironmentTargetSchema,
   // Optional so a state file from before this field still loads.
   projectCreated: Schema.optionalKey(Schema.Boolean),
 });
@@ -110,7 +109,6 @@ export function buildSandbox(
     phase: state.phase,
     detail: state.detail,
     sshAccess: hasSshAccess(agent),
-    sshAlias: sshAliasFor(agent.metadata.name),
     sshTarget: record?.sshTarget ?? null,
     environmentId: record?.environmentId ?? null,
     projectCreated: record?.projectCreated === true,

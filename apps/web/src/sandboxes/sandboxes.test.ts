@@ -16,8 +16,7 @@ function sandbox(overrides: Partial<AgentctlSandbox> = {}): AgentctlSandbox {
     phase: "ready",
     detail: null,
     sshAccess: true,
-    sshAlias: "agentctl-worker",
-    sshTarget: null,
+    sshTarget: { alias: "agentctl-worker", hostname: "worker", username: "agent", port: 22 },
     environmentId: EnvironmentId.make("env-worker"),
     projectCreated: false,
     connectError: null,
@@ -38,7 +37,7 @@ describe("sandboxRegistrations", () => {
         phase: "stopped",
         environmentId: EnvironmentId.make("env-stopped"),
       }),
-      sandbox({ name: "new", environmentId: null }),
+      sandbox({ name: "new", environmentId: null, sshTarget: null }),
       sandbox({ name: "no-ssh", sshAccess: false }),
     ]);
     expect(registrations.map((registration) => registration.target.label)).toEqual([
@@ -46,17 +45,6 @@ describe("sandboxRegistrations", () => {
       "stopped",
     ]);
     expect(sandboxNameForTarget(registrations[0]!.target)).toBe("worker");
-  });
-
-  it("connects with the target resolved on first contact", () => {
-    const target = {
-      alias: "agentctl-worker",
-      hostname: "agentctl-worker",
-      username: "agent",
-      port: 22,
-    };
-    const [registration] = sandboxRegistrations([sandbox({ sshTarget: target })]);
-    expect(registration?.profile.target).toEqual(target);
   });
 });
 

@@ -41,23 +41,6 @@ export const EMPTY_SANDBOX_SNAPSHOT: AgentctlSandboxesSnapshot = {
   sandboxes: [],
 };
 
-let lastSnapshot = EMPTY_SANDBOX_SNAPSHOT;
-
-/**
- * A failed read keeps the last snapshot: an empty one would remove every
- * Sandbox environment, and with it cached threads and drafts.
- */
-export function readSandboxSnapshot(): AgentctlSandboxesSnapshot {
-  const bridge = readAgentctlBridge();
-  if (bridge === null) return EMPTY_SANDBOX_SNAPSHOT;
-  try {
-    lastSnapshot = bridge.getSnapshot();
-  } catch {
-    // Keep lastSnapshot.
-  }
-  return lastSnapshot;
-}
-
 /**
  * Every Sandbox T3 has reached once is an environment, whether or not it is
  * running now: like a saved SSH host, a stopped one stays listed and simply
@@ -68,7 +51,9 @@ export function sandboxRegistrations(
   sandboxes: ReadonlyArray<AgentctlSandbox>,
 ): SshConnectionRegistration[] {
   return sandboxes.flatMap((sandbox) => {
-    if (sandbox.environmentId === null || !sandbox.sshAccess) return [];
+    if (sandbox.environmentId === null || sandbox.sshTarget === null || !sandbox.sshAccess) {
+      return [];
+    }
     const environmentId = EnvironmentId.make(sandbox.environmentId);
     const connectionId = sandboxConnectionId(sandbox.name);
     return [
@@ -78,12 +63,7 @@ export function sandboxRegistrations(
           connectionId,
           environmentId,
           label: sandbox.name,
-          target: sandbox.sshTarget ?? {
-            alias: sandbox.sshAlias,
-            hostname: sandbox.sshAlias,
-            username: null,
-            port: null,
-          },
+          target: sandbox.sshTarget,
         }),
       }),
     ];
