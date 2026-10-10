@@ -1,8 +1,4 @@
-import type {
-  AgentctlEnvFileCandidate,
-  AgentctlSandboxManifest,
-  AgentctlSandboxSettings,
-} from "@t3tools/contracts";
+import type { AgentctlSandboxManifest, AgentctlSandboxSettings } from "@t3tools/contracts";
 import { FolderSearchIcon } from "lucide-react";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { useEffect, useEffectEvent, useState, useSyncExternalStore } from "react";
@@ -81,9 +77,6 @@ function NewSandboxDialogContent() {
   const [manifestPath, setManifestPath] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [nameEdited, setNameEdited] = useState(false);
-  const [envFile, setEnvFile] = useState("");
-  const [envFileEdited, setEnvFileEdited] = useState(false);
-  const [envCandidates, setEnvCandidates] = useState<ReadonlyArray<AgentctlEnvFileCandidate>>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdName, setCreatedName] = useState<string | null>(null);
@@ -97,7 +90,6 @@ function NewSandboxDialogContent() {
   ) => {
     setManifests(nextManifests);
     setSettings(nextSettings);
-    setEnvFile((current) => current || (nextSettings.envFile ?? ""));
     // The manifest of the last Sandbox comes first, so "another one" is one click.
     setManifestPath(
       (current) =>
@@ -133,30 +125,6 @@ function NewSandboxDialogContent() {
 
   const manifest = manifests?.find((candidate) => candidate.path === manifestPath) ?? null;
 
-  // Env files that already set what the manifest needs, so picking one by
-  // hand is rarely necessary. The first is filled in until the user types.
-  const loadEnvCandidates = useEffectEvent((path: string, isCancelled: () => boolean) => {
-    void readAgentctlBridge()
-      ?.suggestEnvFiles(path)
-      .then((candidates) => {
-        if (isCancelled()) return;
-        setEnvCandidates(candidates);
-        const complete = candidates.find((candidate) => candidate.complete);
-        if (!envFileEdited && complete !== undefined) setEnvFile(complete.path);
-      })
-      .catch(() => undefined);
-  });
-  useEffect(() => {
-    if (manifestPath === null) return;
-    let cancelled = false;
-    loadEnvCandidates(manifestPath, () => cancelled);
-    return () => {
-      cancelled = true;
-    };
-  }, [manifestPath]);
-  const otherEnvFiles = envCandidates.filter(
-    (candidate) => candidate.complete && candidate.path !== envFile.trim(),
-  );
   const suggestedName = manifest === null ? "" : suggestSandboxName(manifest.agentName, sandboxes);
   const effectiveName = nameEdited ? name : suggestedName;
 
@@ -189,11 +157,9 @@ function NewSandboxDialogContent() {
     if (bridge === null || manifest === null) return;
     setSubmitting(true);
     setError(null);
-    const trimmedEnvFile = envFile.trim();
     const result = await bridge.create({
       manifestPath: manifest.path,
       name: effectiveName.trim(),
-      envFile: trimmedEnvFile === "" ? null : trimmedEnvFile,
     });
     setSubmitting(false);
     refreshSandboxSnapshot();
@@ -258,14 +224,6 @@ function NewSandboxDialogContent() {
       </DialogPopup>
     );
   }
-
-  const browseEnvFile = async () => {
-    const picked = await readAgentctlBridge()?.pickEnvFile(envFile.trim() || null);
-    if (picked) {
-      setEnvFileEdited(true);
-      setEnvFile(picked);
-    }
-  };
 
   // Without a manifest folder there is nothing to choose from yet, so that comes first.
   if (settings !== null && settings.manifestRoots.length === 0) {
@@ -360,49 +318,6 @@ function NewSandboxDialogContent() {
               autoComplete="off"
               spellCheck={false}
             />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="new-sandbox-env-file">Env file</Label>
-            <div className="flex gap-2">
-              <Input
-                id="new-sandbox-env-file"
-                className="flex-1"
-                value={envFile}
-                placeholder=".env beside the manifest"
-                onChange={(event) => {
-                  setEnvFileEdited(true);
-                  setEnvFile(event.target.value);
-                }}
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <Button type="button" variant="outline" onClick={() => void browseEnvFile()}>
-                Browse…
-              </Button>
-            </div>
-            {otherEnvFiles.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-1 text-muted-foreground text-xs">
-                <span>Also complete:</span>
-                {otherEnvFiles.map((candidate) => (
-                  <Button
-                    key={candidate.path}
-                    type="button"
-                    size="xs"
-                    variant="ghost-muted"
-                    onClick={() => {
-                      setEnvFileEdited(true);
-                      setEnvFile(candidate.path);
-                    }}
-                  >
-                    {candidate.path}
-                  </Button>
-                ))}
-              </div>
-            ) : null}
-            <div className="text-muted-foreground text-xs">
-              Values for the manifest's environment and secrets. Files beside the manifest and in
-              your home folder that set them all are filled in for you.
-            </div>
           </div>
           {error ? <div className="break-words text-destructive text-sm">{error}</div> : null}
         </form>

@@ -10,6 +10,4 @@ export const AGENTCTL_CHANNELS = {
   setSettings: "desktop:agentctl-set-settings",
   getWorkspace: "desktop:agentctl-get-workspace",
   markProjectCreated: "desktop:agentctl-mark-project-created",
-  pickEnvFile: "desktop:agentctl-pick-env-file",
-  suggestEnvFiles: "desktop:agentctl-suggest-env-files",
 } as const;

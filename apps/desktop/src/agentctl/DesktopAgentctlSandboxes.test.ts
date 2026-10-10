@@ -263,7 +263,6 @@ describe("DesktopAgentctlSandboxes", () => {
         const result = yield* sandboxes.create({
           manifestPath: "/agents/worker/agent.yaml",
           name: NAME,
-          envFile: null,
         });
         assert.strictEqual(result.error, null);
         const sandbox = (yield* sandboxes.snapshot).sandboxes[0];

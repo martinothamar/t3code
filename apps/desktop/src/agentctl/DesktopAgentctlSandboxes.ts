@@ -2,7 +2,6 @@ import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/enviro
 import {
   AgentctlSandboxSettings,
   type AgentctlActionResult,
-  type AgentctlEnvFileCandidate,
   type AgentctlCreateSandboxInput,
   type AgentctlMarkProjectCreatedInput,
   type AgentctlSandboxAction,
@@ -30,7 +29,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as AgentctlCli from "./AgentctlCli.ts";
 import { isConnectable, shouldCloseTunnel, sshAliasFor, type AgentResource } from "./agentState.ts";
-import { discoverManifests, envFileCandidates, envFileProblem, expandHome } from "./manifests.ts";
+import { discoverManifests } from "./manifests.ts";
 import {
   DEFAULT_SANDBOX_SETTINGS,
   IDLE_RUNTIME,
@@ -63,9 +62,6 @@ export class DesktopAgentctlSandboxes extends Context.Service<
     readonly create: (input: AgentctlCreateSandboxInput) => Effect.Effect<AgentctlActionResult>;
     readonly listManifests: Effect.Effect<ReadonlyArray<AgentctlSandboxManifest>>;
     readonly getSettings: Effect.Effect<AgentctlSandboxSettings>;
-    readonly suggestEnvFiles: (
-      manifestPath: string,
-    ) => Effect.Effect<ReadonlyArray<AgentctlEnvFileCandidate>>;
     readonly setSettings: (
       settings: AgentctlSandboxSettings,
     ) => Effect.Effect<AgentctlSandboxSettings>;
@@ -416,21 +412,11 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const nameError = sandboxNameError(input.name, yield* Ref.get(agentsRef));
         if (nameError !== null) return { error: nameError } satisfies AgentctlActionResult;
-        const envFile =
-          input.envFile === null || input.envFile.trim() === ""
-            ? null
-            : path.resolve(expandHome(input.envFile.trim(), environment.homeDirectory));
-        const envProblem = yield* envFileProblem(input.manifestPath, envFile).pipe(
-          Effect.provide(context),
-        );
-        if (envProblem !== null) return { error: envProblem } satisfies AgentctlActionResult;
-        // The choices become the defaults for the next Sandbox.
+        // Its manifest is offered first for the next Sandbox.
         const remember = updateStore((document) => ({
           ...document,
           settings: {
             ...(document.settings ?? DEFAULT_SANDBOX_SETTINGS),
-            envFile:
-              input.envFile === null || input.envFile.trim() === "" ? null : input.envFile.trim(),
             lastManifestPath: input.manifestPath,
           },
         }));
@@ -438,7 +424,7 @@ export const make = Effect.gen(function* () {
           input.name,
           "creating",
           cli
-            .apply({ manifestPath: input.manifestPath, name: input.name, envFile })
+            .apply({ manifestPath: input.manifestPath, name: input.name })
             .pipe(Effect.tap(() => remember)),
           { settleOnPoll: true },
         );
@@ -450,13 +436,6 @@ export const make = Effect.gen(function* () {
       Effect.provide(context),
     ),
     getSettings,
-    suggestEnvFiles: (manifestPath) =>
-      getSettings.pipe(
-        Effect.flatMap((settings) =>
-          envFileCandidates(manifestPath, environment.homeDirectory, settings.envFile),
-        ),
-        Effect.provide(context),
-      ),
     setSettings: (settings) =>
       updateStore((document) => ({ ...document, settings })).pipe(Effect.andThen(getSettings)),
     getWorkspace: (name) =>

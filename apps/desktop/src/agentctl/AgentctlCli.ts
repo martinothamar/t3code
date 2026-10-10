@@ -29,7 +29,6 @@ export type AgentctlError = AgentctlUnavailableError | AgentctlCommandError;
 export interface AgentctlApplyInput {
   readonly manifestPath: string;
   readonly name: string;
-  readonly envFile: string | null;
 }
 
 export class AgentctlCli extends Context.Service<
@@ -168,15 +167,9 @@ export const make = Effect.gen(function* () {
     start: (name) => runChecked(["start", `agent/${name}`], LIFECYCLE_TIMEOUT).pipe(Effect.asVoid),
     stop: (name) => runChecked(["stop", `agent/${name}`], LIFECYCLE_TIMEOUT).pipe(Effect.asVoid),
     remove: (name) => runChecked(["delete", `agent/${name}`]).pipe(Effect.asVoid),
-    apply: ({ manifestPath, name, envFile }) =>
-      runChecked([
-        "apply",
-        "-f",
-        manifestPath,
-        "--name",
-        name,
-        ...(envFile === null ? [] : ["--env-file", envFile]),
-      ]).pipe(Effect.asVoid),
+    // agentctl reads values from the `.env` beside the manifest.
+    apply: ({ manifestPath, name }) =>
+      runChecked(["apply", "-f", manifestPath, "--name", name]).pipe(Effect.asVoid),
   });
 });
 

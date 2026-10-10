@@ -37,7 +37,6 @@ export type SandboxStoreDocument = typeof SandboxStoreDocument.Type;
 
 export const DEFAULT_SANDBOX_SETTINGS: AgentctlSandboxSettings = {
   manifestRoots: [],
-  envFile: null,
 };
 
 /** In-memory state for one Sandbox; none of it survives a restart. */

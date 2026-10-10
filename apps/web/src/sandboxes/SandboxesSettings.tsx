@@ -11,7 +11,6 @@ import { SettingsRow, SettingsSection } from "../components/settings/settingsLay
 import { searchableSetting } from "../components/settings/settingsSearch";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useProjects } from "../state/entities";
 import { useEnvironmentPresentation } from "../state/presentation";
@@ -205,17 +204,15 @@ function SandboxRow({
   );
 }
 
-/** Where "New Sandbox" looks for manifests, and the env file it passes by default. */
+/** Where "New Sandbox" looks for manifests. */
 function SandboxManifestSettings() {
   const [settings, setSettings] = useState<AgentctlSandboxSettings | null>(null);
-  const [envFile, setEnvFile] = useState("");
 
   useEffect(() => {
     void readAgentctlBridge()
       ?.getSettings()
       .then((next) => {
         setSettings(next);
-        setEnvFile(next.envFile ?? "");
       });
   }, []);
 
@@ -266,25 +263,6 @@ function SandboxManifestSettings() {
             <FolderPlusIcon className="size-3" />
             Add folder
           </Button>
-        }
-      />
-      <SettingsRow
-        title="Env file"
-        description="Default --env-file for new Sandboxes. Empty uses .env beside the manifest."
-        control={
-          <Input
-            className="w-full sm:w-64"
-            size="sm"
-            value={envFile}
-            placeholder="~/agents.env"
-            spellCheck={false}
-            onChange={(event) => setEnvFile(event.target.value)}
-            onBlur={() => {
-              const trimmed = envFile.trim();
-              if ((settings.envFile ?? "") === trimmed) return;
-              void save({ ...settings, envFile: trimmed === "" ? null : trimmed });
-            }}
-          />
         }
       />
     </>

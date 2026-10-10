@@ -76,8 +76,6 @@ export type AgentctlSandboxManifest = typeof AgentctlSandboxManifest.Type;
 export const AgentctlSandboxSettings = Schema.Struct({
   /** Directories searched for manifests when creating a Sandbox. */
   manifestRoots: Schema.Array(Schema.String),
-  /** Passed as `--env-file`; null uses agentctl's default `.env` beside the manifest. */
-  envFile: Schema.NullOr(Schema.String),
   /** The manifest the last Sandbox was created from, offered first next time. */
   lastManifestPath: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
@@ -86,7 +84,6 @@ export type AgentctlSandboxSettings = typeof AgentctlSandboxSettings.Type;
 export const AgentctlCreateSandboxInput = Schema.Struct({
   manifestPath: Schema.String,
   name: Schema.String,
-  envFile: Schema.NullOr(Schema.String),
 });
 export type AgentctlCreateSandboxInput = typeof AgentctlCreateSandboxInput.Type;
 
@@ -101,14 +98,6 @@ export const AgentctlMarkProjectCreatedInput = Schema.Struct({
   environmentId: EnvironmentId,
 });
 export type AgentctlMarkProjectCreatedInput = typeof AgentctlMarkProjectCreatedInput.Type;
-
-/** An env file found near a manifest or in the home folder. */
-export const AgentctlEnvFileCandidate = Schema.Struct({
-  path: Schema.String,
-  /** It sets every value the manifest needs. */
-  complete: Schema.Boolean,
-});
-export type AgentctlEnvFileCandidate = typeof AgentctlEnvFileCandidate.Type;
 
 /** Lifecycle requests resolve with agentctl's error message instead of rejecting. */
 export const AgentctlActionResult = Schema.Struct({
@@ -128,8 +117,4 @@ export interface DesktopAgentctlBridge {
   setSettings: (settings: AgentctlSandboxSettings) => Promise<AgentctlSandboxSettings>;
   getWorkspace: (name: string) => Promise<AgentctlSandboxWorkspace>;
   markProjectCreated: (input: AgentctlMarkProjectCreatedInput) => Promise<void>;
-  /** Env files that could serve a manifest, complete ones first. */
-  suggestEnvFiles: (manifestPath: string) => Promise<readonly AgentctlEnvFileCandidate[]>;
-  /** Opens a file picker for an env file; null when cancelled. */
-  pickEnvFile: (current: string | null) => Promise<string | null>;
 }
