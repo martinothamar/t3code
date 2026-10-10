@@ -21,6 +21,8 @@ import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as HttpClient from "effect/http/HttpClient";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -50,6 +52,9 @@ export class DesktopAgentctlSandboxes extends Context.Service<
   DesktopAgentctlSandboxes,
   {
     readonly snapshot: Effect.Effect<AgentctlSandboxesSnapshot>;
+    /** The current snapshot, then every change to it. */
+    readonly changes: Stream.Stream<AgentctlSandboxesSnapshot>;
+    /** Reads agentctl now instead of waiting for the next poll. */
     readonly refresh: Effect.Effect<AgentctlSandboxesSnapshot>;
     readonly start: (name: string) => Effect.Effect<AgentctlActionResult>;
     readonly stop: (name: string) => Effect.Effect<AgentctlActionResult>;
@@ -71,6 +76,9 @@ const POLL_INTERVAL = Duration.seconds(3);
 const UNAVAILABLE_POLL_INTERVAL = Duration.seconds(30);
 // A Sandbox that could not be reached is retried, but not on every poll.
 const DISCOVERY_RETRY_MS = 30_000;
+// Closing a tunnel also stops T3's server over SSH, which hangs while the
+// Sandbox is stopping; nothing waits for it, and it gives up after this.
+const TUNNEL_CLOSE_TIMEOUT = Duration.seconds(15);
 
 const sandboxTarget = (name: string): DesktopSshEnvironmentTarget => {
   const alias = sshAliasFor(name);
@@ -97,9 +105,32 @@ export const make = Effect.gen(function* () {
   const context = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
 
   const storePath = path.join(environment.stateDir, "agentctl-sandboxes.json");
+  // A file T3 cannot read is kept aside rather than overwritten by the next save.
   const loaded = yield* fileSystem.readFileString(storePath).pipe(
-    Effect.flatMap(decodeStore),
-    Effect.orElseSucceed((): SandboxStoreDocument => ({})),
+    Effect.map((raw): string | null => raw),
+    Effect.catchIf(
+      (error) => error.reason._tag === "NotFound",
+      () => Effect.succeed(null),
+    ),
+    Effect.flatMap((raw) =>
+      raw === null ? Effect.succeed<SandboxStoreDocument>({}) : decodeStore(raw),
+    ),
+    Effect.catch((error) =>
+      Clock.currentTimeMillis.pipe(
+        Effect.flatMap((now) => {
+          const aside = `${storePath}.unreadable-${now}`;
+          return fileSystem
+            .rename(storePath, aside)
+            .pipe(
+              Effect.ignore,
+              Effect.andThen(
+                Effect.logWarning("Set aside unreadable agentctl Sandbox state.", { aside, error }),
+              ),
+            );
+        }),
+        Effect.as<SandboxStoreDocument>({}),
+      ),
+    ),
   );
   const store = yield* Ref.make<SandboxStoreDocument>(loaded);
   // Writes go to a temporary file first, so a crash never leaves half a document.
@@ -123,12 +154,22 @@ export const make = Effect.gen(function* () {
   const agentsRef = yield* Ref.make<ReadonlyArray<AgentResource>>([]);
   const runtimes = yield* Ref.make<ReadonlyMap<string, SandboxRuntime>>(new Map());
   const discovering = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
-  const snapshotRef = yield* Ref.make<AgentctlSandboxesSnapshot>({
+  const snapshotRef = yield* SubscriptionRef.make<AgentctlSandboxesSnapshot>({
     status: "loading",
     error: null,
     sandboxes: [],
   });
   const refreshLock = yield* Semaphore.make(1);
+
+  const closeTunnelSoon = (name: string) =>
+    ssh
+      .disconnectEnvironment(sandboxTarget(name))
+      .pipe(
+        Effect.timeout(TUNNEL_CLOSE_TIMEOUT),
+        Effect.ignore,
+        Effect.forkIn(scope),
+        Effect.asVoid,
+      );
 
   const updateRuntime = (name: string, update: (runtime: SandboxRuntime) => SandboxRuntime) =>
     Ref.update(runtimes, (current) => {
@@ -141,7 +182,7 @@ export const make = Effect.gen(function* () {
     const agents = yield* Ref.get(agentsRef);
     const records = (yield* Ref.get(store)).sandboxes ?? {};
     const runtime = yield* Ref.get(runtimes);
-    yield* Ref.update(snapshotRef, (snapshot) => ({
+    yield* SubscriptionRef.update(snapshotRef, (snapshot) => ({
       ...snapshot,
       sandboxes: agents.map((agent) =>
         buildSandbox(
@@ -153,8 +194,9 @@ export const make = Effect.gen(function* () {
     }));
   });
 
-  // Reaches the Sandbox's T3 server once to learn its environment id; after
-  // that the renderer's SSH connection owns the tunnel.
+  // Reaches the Sandbox's T3 server to learn its environment id: the first
+  // time, and again each time it becomes reachable, in case its T3 home was
+  // reset. After that the renderer's SSH connection owns the tunnel.
   const discover = (agent: AgentResource) =>
     Effect.gen(function* () {
       const name = agent.metadata.name;
@@ -173,10 +215,14 @@ export const make = Effect.gen(function* () {
           name,
           error: result.failure,
         });
-        yield* updateRuntime(name, (runtime) => ({
-          ...runtime,
-          connectError: discoveryErrorMessage(result.failure),
-        }));
+        // A known Sandbox keeps its environment; its live connection reports trouble.
+        const known = (yield* Ref.get(store)).sandboxes?.[name] !== undefined;
+        if (!known) {
+          yield* updateRuntime(name, (runtime) => ({
+            ...runtime,
+            connectError: discoveryErrorMessage(result.failure),
+          }));
+        }
       } else {
         const discovered = {
           sandboxId: agent.status?.sandbox?.id ?? null,
@@ -214,7 +260,7 @@ export const make = Effect.gen(function* () {
       // environments, and with them cached threads and drafts, over one
       // failed call such as agentd restarting.
       const error = listed.failure.message;
-      yield* Ref.update(snapshotRef, (snapshot): AgentctlSandboxesSnapshot =>
+      yield* SubscriptionRef.update(snapshotRef, (snapshot): AgentctlSandboxesSnapshot =>
         snapshot.status === "loading"
           ? { status: "unavailable", error, sandboxes: [] }
           : { ...snapshot, error },
@@ -224,7 +270,7 @@ export const make = Effect.gen(function* () {
     const agents = listed.success;
     const previousAgents = yield* Ref.get(agentsRef);
     yield* Ref.set(agentsRef, agents);
-    yield* Ref.update(snapshotRef, (snapshot): AgentctlSandboxesSnapshot => ({
+    yield* SubscriptionRef.update(snapshotRef, (snapshot): AgentctlSandboxesSnapshot => ({
       ...snapshot,
       status: "available",
       error: null,
@@ -244,7 +290,7 @@ export const make = Effect.gen(function* () {
     for (const previous of previousAgents) {
       const current = agents.find((agent) => agent.metadata.name === previous.metadata.name);
       if (isConnectable(previous) && shouldCloseTunnel(current)) {
-        yield* ssh.disconnectEnvironment(sandboxTarget(previous.metadata.name)).pipe(Effect.ignore);
+        yield* closeTunnelSoon(previous.metadata.name);
       }
     }
 
@@ -268,9 +314,13 @@ export const make = Effect.gen(function* () {
     const pending = yield* Ref.get(discovering);
     for (const agent of agents) {
       const name = agent.metadata.name;
-      if (!isConnectable(agent) || !needsDiscovery(records[name], agent)) continue;
+      if (!isConnectable(agent)) continue;
+      const previous = previousAgents.find((candidate) => candidate.metadata.name === name);
+      const becameReachable = previous === undefined || !isConnectable(previous);
+      if (!becameReachable && !needsDiscovery(records[name], agent)) continue;
       const retryAt = pending.get(name);
-      if (retryAt !== undefined && now < retryAt) continue;
+      if (retryAt !== undefined && now < retryAt && !becameReachable) continue;
+      if (retryAt === Number.POSITIVE_INFINITY) continue;
       yield* Ref.update(discovering, (current) =>
         new Map(current).set(name, Number.POSITIVE_INFINITY),
       );
@@ -281,7 +331,7 @@ export const make = Effect.gen(function* () {
 
   const refresh = refreshLock
     .withPermits(1)(refreshBody)
-    .pipe(Effect.andThen(Ref.get(snapshotRef)));
+    .pipe(Effect.andThen(SubscriptionRef.get(snapshotRef)));
 
   const runAction = (
     name: string,
@@ -310,7 +360,7 @@ export const make = Effect.gen(function* () {
   // Without agentctl there is nothing to watch closely, so check rarely.
   const pollOnce = refresh.pipe(
     Effect.catchCause((cause) => Effect.logError("agentctl Sandbox polling failed.", { cause })),
-    Effect.andThen(Ref.get(snapshotRef)),
+    Effect.andThen(SubscriptionRef.get(snapshotRef)),
     Effect.flatMap((snapshot) =>
       Effect.sleep(snapshot.status === "unavailable" ? UNAVAILABLE_POLL_INTERVAL : POLL_INTERVAL),
     ),
@@ -318,29 +368,18 @@ export const make = Effect.gen(function* () {
   yield* Effect.forever(pollOnce).pipe(Effect.forkScoped);
 
   return DesktopAgentctlSandboxes.of({
-    snapshot: Ref.get(snapshotRef),
+    snapshot: SubscriptionRef.get(snapshotRef),
+    changes: SubscriptionRef.changes(snapshotRef),
     refresh,
     start: (name) => runAction(name, "starting", cli.start(name), { settleOnPoll: false }),
     stop: (name) =>
-      runAction(
-        name,
-        "stopping",
-        cli
-          .stop(name)
-          .pipe(
-            Effect.tap(() => ssh.disconnectEnvironment(sandboxTarget(name)).pipe(Effect.ignore)),
-          ),
-        { settleOnPoll: false },
-      ),
+      runAction(name, "stopping", cli.stop(name).pipe(Effect.tap(() => closeTunnelSoon(name))), {
+        settleOnPoll: false,
+      }),
     remove: (name) =>
-      runAction(
-        name,
-        "deleting",
-        ssh
-          .disconnectEnvironment(sandboxTarget(name))
-          .pipe(Effect.ignore, Effect.andThen(cli.remove(name))),
-        { settleOnPoll: true },
-      ),
+      runAction(name, "deleting", closeTunnelSoon(name).pipe(Effect.andThen(cli.remove(name))), {
+        settleOnPoll: true,
+      }),
     create: (input) =>
       Effect.gen(function* () {
         const nameError = sandboxNameError(input.name, yield* Ref.get(agentsRef));
@@ -366,16 +405,11 @@ export const make = Effect.gen(function* () {
     setSettings: (settings) =>
       updateStore((document) => ({ ...document, settings })).pipe(Effect.andThen(getSettings)),
     getWorkspace: (name) =>
-      cli.sshInfo(name).pipe(
-        Effect.flatMap(({ workingDirectory }) =>
-          Ref.get(store).pipe(
-            Effect.map((document): AgentctlSandboxWorkspace => ({
-              workingDirectory,
-              projectCreated: document.sandboxes?.[name]?.projectCreated ?? false,
-            })),
-          ),
+      cli
+        .sshInfo(name)
+        .pipe(
+          Effect.map(({ workingDirectory }): AgentctlSandboxWorkspace => ({ workingDirectory })),
         ),
-      ),
     markProjectCreated: ({ name, environmentId }) =>
       updateStore((document) => {
         const record = document.sandboxes?.[name];

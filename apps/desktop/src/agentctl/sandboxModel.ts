@@ -101,6 +101,7 @@ export function buildSandbox(
     sshAlias: sshAliasFor(agent.metadata.name),
     sshTarget: record?.sshTarget ?? null,
     environmentId: record?.environmentId ?? null,
+    projectCreated: record?.projectCreated === true,
     connectError: state.phase === "ready" ? runtime.connectError : null,
     action: runtime.action,
     actionError: runtime.actionError,
@@ -114,12 +115,15 @@ export function isActionSettled(action: AgentctlSandboxAction, agent: AgentResou
   if (action === "deleting") return agent === undefined;
   if (agent === undefined) return action !== "creating";
   const phase = deriveAgentState(agent).phase;
+  // A pass agentctl keeps retrying settles the request too: agentctl owns the
+  // retries, and the user must be able to stop or delete the Sandbox meanwhile.
+  const stuck = phase === "failed" || phase === "retrying" || phase === "unresponsive";
   switch (action) {
     case "creating":
     case "starting":
-      return phase === "ready" || phase === "failed" || phase === "stopped";
+      return phase === "ready" || phase === "stopped" || stuck;
     case "stopping":
-      return phase === "stopped" || phase === "failed";
+      return phase === "stopped" || stuck;
   }
 }
 
@@ -138,18 +142,4 @@ export function sandboxNameError(
     return `A Sandbox named ${name} already exists.`;
   }
   return null;
-}
-
-/** Suggests the manifest's own name, numbered when a Sandbox already has it. */
-export function suggestSandboxName(
-  agentName: string | null,
-  existing: ReadonlyArray<AgentResource>,
-): string {
-  const base = agentName ?? "sandbox";
-  const taken = new Set(existing.map((agent) => agent.metadata.name));
-  if (!taken.has(base)) return base;
-  for (let index = 2; ; index += 1) {
-    const candidate = `${base}-${index}`;
-    if (!taken.has(candidate)) return candidate;
-  }
 }

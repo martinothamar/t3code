@@ -44,6 +44,7 @@ export function SandboxConnectionCoordinator() {
         name={sandbox.name}
         environmentId={EnvironmentId.make(sandbox.environmentId)}
         running={sandbox.phase === "ready" && sandbox.action === null}
+        projectCreated={sandbox.projectCreated}
       />
     ),
   );
@@ -53,6 +54,7 @@ function SandboxEnvironmentCoordinator(props: {
   readonly name: string;
   readonly environmentId: EnvironmentId;
   readonly running: boolean;
+  readonly projectCreated: boolean;
 }) {
   const { presentation } = useEnvironmentPresentation(props.environmentId);
   const shell = useEnvironmentQuery(environmentShell.stateAtom(props.environmentId));
@@ -75,9 +77,10 @@ function SandboxEnvironmentCoordinator(props: {
     void ensureProject({
       name: props.name,
       environmentId: props.environmentId,
+      projectCreated: props.projectCreated,
       force: false,
     }).catch((error: unknown) => console.warn("Could not add the Sandbox project.", error));
-  }, [ready, ensureProject, props.name, props.environmentId]);
+  }, [ready, ensureProject, props.name, props.environmentId, props.projectCreated]);
 
   return null;
 }

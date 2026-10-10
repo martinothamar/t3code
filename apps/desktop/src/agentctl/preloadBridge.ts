@@ -17,7 +17,6 @@ export function makeAgentctlBridge(ipcRenderer: IpcRenderer): DesktopAgentctlBri
         ? (result as AgentctlSandboxesSnapshot)
         : UNAVAILABLE;
     },
-    refresh: () => ipcRenderer.invoke(AGENTCTL_CHANNELS.refresh),
     start: (name) => ipcRenderer.invoke(AGENTCTL_CHANNELS.start, name),
     stop: (name) => ipcRenderer.invoke(AGENTCTL_CHANNELS.stop, name),
     remove: (name) => ipcRenderer.invoke(AGENTCTL_CHANNELS.remove, name),

@@ -9,7 +9,6 @@ import {
   needsDiscovery,
   reconcileRecords,
   sandboxNameError,
-  suggestSandboxName,
   type SandboxRecord,
 } from "./sandboxModel.ts";
 
@@ -87,6 +86,20 @@ describe("isActionSettled", () => {
     expect(isActionSettled("creating", agent("worker", { ready: true }))).toBe(true);
   });
 
+  it("settles a request agentctl keeps retrying, so the Sandbox can be stopped or deleted", () => {
+    const retrying: AgentResource = {
+      metadata: { name: "worker", generation: 1 },
+      spec: {},
+      status: {
+        observedGeneration: 1,
+        failure: "transient",
+        conditions: [{ type: "Ready", status: "False", reason: "SandboxReconcileFailed" }],
+      },
+    };
+    expect(isActionSettled("creating", retrying)).toBe(true);
+    expect(isActionSettled("starting", retrying)).toBe(true);
+  });
+
   it("waits for a deleted Sandbox to disappear", () => {
     expect(isActionSettled("deleting", agent("worker", { deleting: true }))).toBe(false);
     expect(isActionSettled("deleting", undefined)).toBe(true);
@@ -101,12 +114,6 @@ describe("Sandbox names", () => {
     expect(sandboxNameError("Worker", existing)).toMatch(/lowercase/);
     expect(sandboxNameError("-worker", existing)).toMatch(/lowercase/);
     expect(sandboxNameError("worker-3", existing)).toBeNull();
-  });
-
-  it("suggests the manifest's name, numbered past the ones in use", () => {
-    expect(suggestSandboxName("worker", existing)).toBe("worker-3");
-    expect(suggestSandboxName("reviewer", existing)).toBe("reviewer");
-    expect(suggestSandboxName(null, existing)).toBe("sandbox");
   });
 });
 

@@ -1,8 +1,14 @@
 import { EnvironmentId, type AgentctlSandbox } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { sandboxStatus, suggestSandboxName } from "./sandboxActions";
+import {
+  canDeleteSandbox,
+  canStopSandbox,
+  sandboxStatus,
+  suggestSandboxName,
+} from "./sandboxActions";
 import { sandboxNameForTarget, sandboxRegistrations } from "./sandboxConnections";
+import { ensureSandboxProject } from "./sandboxProjects";
 
 function sandbox(overrides: Partial<AgentctlSandbox> = {}): AgentctlSandbox {
   return {
@@ -13,6 +19,7 @@ function sandbox(overrides: Partial<AgentctlSandbox> = {}): AgentctlSandbox {
     sshAlias: "agentctl-worker",
     sshTarget: null,
     environmentId: EnvironmentId.make("env-worker"),
+    projectCreated: false,
     connectError: null,
     action: null,
     actionError: null,
@@ -72,5 +79,99 @@ describe("suggestSandboxName", () => {
     const existing = [sandbox({ name: "worker" }), sandbox({ name: "worker-2" })];
     expect(suggestSandboxName("worker", existing)).toBe("worker-3");
     expect(suggestSandboxName(null, [])).toBe("sandbox");
+  });
+});
+
+describe("ensureSandboxProject", () => {
+  const environmentId = EnvironmentId.make("env-worker");
+
+  function dependencies(options: { readonly existing?: boolean; readonly createError?: string }) {
+    const calls: string[] = [];
+    return {
+      calls,
+      dependencies: {
+        workingDirectory: async () => {
+          calls.push("ssh-info");
+          return "/home/agent/code";
+        },
+        hasProjectAt: () => options.existing === true,
+        createProject: async (input: {
+          readonly title: string;
+          readonly workspaceRoot: string;
+        }) => {
+          calls.push(`create ${input.title} at ${input.workspaceRoot}`);
+          return options.createError ?? null;
+        },
+        markCreated: async () => {
+          calls.push("mark");
+        },
+      },
+    };
+  }
+
+  it("makes one project at the working directory, named after the Agent", async () => {
+    const { calls, dependencies: deps } = dependencies({});
+    const result = await ensureSandboxProject(deps, {
+      name: "worker",
+      environmentId,
+      projectCreated: false,
+      force: false,
+    });
+    expect(result).toEqual({ created: true, error: null });
+    expect(calls).toEqual(["ssh-info", "create worker at /home/agent/code", "mark"]);
+  });
+
+  it("leaves a removed project removed without asking agentctl", async () => {
+    const { calls, dependencies: deps } = dependencies({});
+    await ensureSandboxProject(deps, {
+      name: "worker",
+      environmentId,
+      projectCreated: true,
+      force: false,
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("makes it again on request, and adopts one that already exists", async () => {
+    const forced = dependencies({});
+    await ensureSandboxProject(forced.dependencies, {
+      name: "worker",
+      environmentId,
+      projectCreated: true,
+      force: true,
+    });
+    expect(forced.calls).toContain("create worker at /home/agent/code");
+
+    const existing = dependencies({ existing: true });
+    const result = await ensureSandboxProject(existing.dependencies, {
+      name: "worker",
+      environmentId,
+      projectCreated: false,
+      force: false,
+    });
+    expect(result.created).toBe(false);
+    expect(existing.calls).toEqual(["ssh-info", "mark"]);
+  });
+
+  it("does not record a project that failed to be made", async () => {
+    const { calls, dependencies: deps } = dependencies({ createError: "no such directory" });
+    const result = await ensureSandboxProject(deps, {
+      name: "worker",
+      environmentId,
+      projectCreated: false,
+      force: false,
+    });
+    expect(result).toEqual({ created: false, error: "no such directory" });
+    expect(calls).not.toContain("mark");
+  });
+});
+
+describe("Sandbox actions", () => {
+  it("keeps Stop and Delete within reach while a create is pending", () => {
+    const creating = sandbox({ phase: "retrying", action: "creating" });
+    expect(canStopSandbox(creating)).toBe(true);
+    expect(canDeleteSandbox(creating)).toBe(true);
+    expect(canDeleteSandbox(sandbox({ action: "deleting" }))).toBe(false);
+    expect(canStopSandbox(sandbox({ phase: "stopped" }))).toBe(false);
   });
 });

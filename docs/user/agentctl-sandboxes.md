@@ -26,7 +26,7 @@ gives it.
 ## Good to know
 
 - Stopping keeps the Sandbox's disk. Its threads stay listed and reconnect when it starts again.
-  Deleting removes the disk, and with it the Sandbox's projects and threads in T3 Code.
+  Deleting removes the disk, and with it the Sandbox's project and threads in T3 Code.
 - The working directory is usually not a Git repository itself, so T3 Code's turn diffs, restore
   and worktree mode are not available there. Agents still use Git in each repository.
 - A Sandbox's project is added once. If you remove it, **Add project** in Settings brings it back.

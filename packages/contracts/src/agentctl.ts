@@ -43,6 +43,8 @@ export const AgentctlSandbox = Schema.Struct({
   sshTarget: Schema.NullOr(DesktopSshEnvironmentTargetSchema),
   /** Known once T3 has reached the Sandbox's server; null before that. */
   environmentId: Schema.NullOr(EnvironmentId),
+  /** T3 made the Sandbox's project once; a removed one is not made again on its own. */
+  projectCreated: Schema.Boolean,
   /** Why T3 could not reach a Ready Sandbox, such as a missing SSH config include. */
   connectError: Schema.NullOr(Schema.String),
   action: Schema.NullOr(AgentctlSandboxAction),
@@ -86,10 +88,9 @@ export const AgentctlCreateSandboxInput = Schema.Struct({
 });
 export type AgentctlCreateSandboxInput = typeof AgentctlCreateSandboxInput.Type;
 
-/** Where a Sandbox's agents work, and whether T3 already made a project of it. */
+/** Where a Sandbox's agents work, which is where its project is rooted. */
 export const AgentctlSandboxWorkspace = Schema.Struct({
   workingDirectory: Schema.String,
-  projectCreated: Schema.Boolean,
 });
 export type AgentctlSandboxWorkspace = typeof AgentctlSandboxWorkspace.Type;
 
@@ -108,7 +109,6 @@ export type AgentctlActionResult = typeof AgentctlActionResult.Type;
 export interface DesktopAgentctlBridge {
   /** The latest discovery result; cheap and synchronous, so callers poll it. */
   getSnapshot: () => AgentctlSandboxesSnapshot;
-  refresh: () => Promise<AgentctlSandboxesSnapshot>;
   start: (name: string) => Promise<AgentctlActionResult>;
   stop: (name: string) => Promise<AgentctlActionResult>;
   remove: (name: string) => Promise<AgentctlActionResult>;

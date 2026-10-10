@@ -20,13 +20,6 @@ const getSnapshot = DesktopIpc.makeSyncIpcMethod({
   handler: () => Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.snapshot),
 });
 
-const refresh = DesktopIpc.makeIpcMethod({
-  channel: AGENTCTL_CHANNELS.refresh,
-  payload: Schema.Void,
-  result: AgentctlSandboxesSnapshot,
-  handler: () => Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.refresh),
-});
-
 const lifecycle = (channel: string, run: "start" | "stop" | "remove") =>
   DesktopIpc.makeIpcMethod({
     channel,
@@ -86,7 +79,6 @@ export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctl
   function* () {
     const ipc = yield* DesktopIpc.DesktopIpc;
     yield* ipc.handleSync(getSnapshot);
-    yield* ipc.handle(refresh);
     yield* ipc.handle(lifecycle(AGENTCTL_CHANNELS.start, "start"));
     yield* ipc.handle(lifecycle(AGENTCTL_CHANNELS.stop, "stop"));
     yield* ipc.handle(lifecycle(AGENTCTL_CHANNELS.remove, "remove"));

@@ -1,7 +1,6 @@
 // Imported by both desktop main and the preload, so it stays dependency free.
 export const AGENTCTL_CHANNELS = {
   getSnapshot: "desktop:agentctl-get-snapshot",
-  refresh: "desktop:agentctl-refresh",
   start: "desktop:agentctl-start",
   stop: "desktop:agentctl-stop",
   remove: "desktop:agentctl-remove",

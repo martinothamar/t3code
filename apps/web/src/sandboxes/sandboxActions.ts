@@ -1,7 +1,10 @@
+import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
 import type { AgentctlActionResult, AgentctlSandbox } from "@t3tools/contracts";
 
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { requestConfirmDialog } from "../confirmDialog";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { environmentThreadShells } from "../state/threads";
 import { readAgentctlBridge } from "./sandboxConnections";
 import { refreshSandboxSnapshot } from "./useSandboxes";
 
@@ -62,14 +65,15 @@ export function sandboxStatusDetail(sandbox: AgentctlSandbox): string | null {
 export const canStartSandbox = (sandbox: AgentctlSandbox) =>
   sandbox.action === null && sandbox.phase === "stopped";
 
-export const canStopSandbox = (sandbox: AgentctlSandbox) =>
-  sandbox.action === null &&
-  sandbox.phase !== "stopped" &&
-  sandbox.phase !== "stopping" &&
-  sandbox.phase !== "terminating";
+// Stop and Delete stay available while a create or start is pending, so a
+// Sandbox agentctl is stuck on is never out of reach.
+const isLeaving = (sandbox: AgentctlSandbox) =>
+  sandbox.action === "stopping" || sandbox.action === "deleting" || sandbox.phase === "terminating";
 
-export const canDeleteSandbox = (sandbox: AgentctlSandbox) =>
-  sandbox.action === null && sandbox.phase !== "terminating";
+export const canStopSandbox = (sandbox: AgentctlSandbox) =>
+  !isLeaving(sandbox) && sandbox.phase !== "stopped" && sandbox.phase !== "stopping";
+
+export const canDeleteSandbox = (sandbox: AgentctlSandbox) => !isLeaving(sandbox);
 
 function reportResult(title: string, result: AgentctlActionResult) {
   refreshSandboxSnapshot();
@@ -78,17 +82,35 @@ function reportResult(title: string, result: AgentctlActionResult) {
   return false;
 }
 
-// One request per Sandbox at a time, so a double click does not run it twice.
+// One request of each kind per Sandbox at a time, so a double click does not
+// run it twice; a pending start does not block a stop or delete.
 const inFlight = new Set<string>();
 
-async function once(name: string, run: () => Promise<boolean>): Promise<boolean> {
-  if (inFlight.has(name)) return false;
-  inFlight.add(name);
+async function once(key: string, run: () => Promise<boolean>): Promise<boolean> {
+  if (inFlight.has(key)) return false;
+  inFlight.add(key);
   try {
     return await run();
   } finally {
-    inFlight.delete(name);
+    inFlight.delete(key);
   }
+}
+
+/** Threads working in the Sandbox now, read at confirm time from any entry point. */
+function runningThreads(sandbox: AgentctlSandbox): number {
+  if (sandbox.environmentId === null) return 0;
+  return appAtomRegistry
+    .get(environmentThreadShells.threadShellsAtom)
+    .filter(
+      (thread) =>
+        thread.environmentId === sandbox.environmentId && threadRuntimeIsActive(thread.runtime),
+    ).length;
+}
+
+function runningWarning(sandbox: AgentctlSandbox): string {
+  const running = runningThreads(sandbox);
+  if (running === 0) return "";
+  return ` ${running === 1 ? "1 thread is" : `${running} threads are`} still working there.`;
 }
 
 async function confirm(message: string, destructive: boolean) {
@@ -99,12 +121,12 @@ async function confirm(message: string, destructive: boolean) {
 }
 
 export function startSandbox(sandbox: AgentctlSandbox): Promise<boolean> {
-  return once(sandbox.name, () => runStart(sandbox.name));
+  return once(`start:${sandbox.name}`, () => runStart(sandbox.name));
 }
 
 /** Starts a Sandbox by name, for callers that only hold its name. */
 export function startSandboxNamed(name: string): Promise<boolean> {
-  return once(name, () => runStart(name));
+  return once(`start:${name}`, () => runStart(name));
 }
 
 async function runStart(name: string): Promise<boolean> {
@@ -115,20 +137,17 @@ async function runStart(name: string): Promise<boolean> {
   return reportResult(`Could not start ${name}`, await pending);
 }
 
-export function stopSandbox(sandbox: AgentctlSandbox, running = 0): Promise<boolean> {
-  return once(sandbox.name, () => runStop(sandbox, running));
+export function stopSandbox(sandbox: AgentctlSandbox): Promise<boolean> {
+  return once(`stop:${sandbox.name}`, () => runStop(sandbox));
 }
 
-async function runStop(sandbox: AgentctlSandbox, running: number): Promise<boolean> {
+async function runStop(sandbox: AgentctlSandbox): Promise<boolean> {
   const bridge = readAgentctlBridge();
   if (bridge === null) return false;
-  const busy =
-    running > 0
-      ? ` ${running === 1 ? "1 thread is" : `${running} threads are`} still working there.`
-      : "";
+  const busy = runningWarning(sandbox);
   const confirmed = await confirm(
     `Stop ${sandbox.name}?\nIts disk is kept, so you can start it again. Agents running in it stop with it.${busy}`,
-    running > 0,
+    busy !== "",
   );
   if (!confirmed) return false;
   const pending = bridge.stop(sandbox.name);
@@ -137,14 +156,14 @@ async function runStop(sandbox: AgentctlSandbox, running: number): Promise<boole
 }
 
 export function deleteSandbox(sandbox: AgentctlSandbox): Promise<boolean> {
-  return once(sandbox.name, () => runDelete(sandbox));
+  return once(`delete:${sandbox.name}`, () => runDelete(sandbox));
 }
 
 async function runDelete(sandbox: AgentctlSandbox): Promise<boolean> {
   const bridge = readAgentctlBridge();
   if (bridge === null) return false;
   const confirmed = await confirm(
-    `Delete ${sandbox.name}?\nThe Sandbox and its disk are deleted, including work that was not pushed. Its projects and threads leave T3 Code.`,
+    `Delete ${sandbox.name}?\nThe Sandbox and its disk are deleted, including work that was not pushed. Its project and threads leave T3 Code.${runningWarning(sandbox)}`,
     true,
   );
   if (!confirmed) return false;

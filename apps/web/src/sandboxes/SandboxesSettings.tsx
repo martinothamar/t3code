@@ -127,12 +127,15 @@ function SandboxRow({
   const addProject = async () => {
     if (environmentId === null) return;
     setAdding(true);
-    const result = await ensureProject({ name: sandbox.name, environmentId, force: true }).catch(
-      (cause: unknown) => ({
-        created: false,
-        error: cause instanceof Error ? cause.message : String(cause),
-      }),
-    );
+    const result = await ensureProject({
+      name: sandbox.name,
+      environmentId,
+      projectCreated: sandbox.projectCreated,
+      force: true,
+    }).catch((cause: unknown) => ({
+      created: false,
+      error: cause instanceof Error ? cause.message : String(cause),
+    }));
     setAdding(false);
     if (result.error !== null) {
       toastManager.add(
@@ -183,11 +186,7 @@ function SandboxRow({
             </Button>
           ) : null}
           {canStopSandbox(sandbox) ? (
-            <Button
-              size="xs"
-              variant="ghost-muted"
-              onClick={() => void stopSandbox(sandbox, running)}
-            >
+            <Button size="xs" variant="ghost-muted" onClick={() => void stopSandbox(sandbox)}>
               Stop
             </Button>
           ) : null}

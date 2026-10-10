@@ -10,7 +10,8 @@ import {
 // The bridge has no change event, so one shared poller reads the desktop's
 // snapshot while anything is subscribed. Reads are a cheap synchronous IPC,
 // and rare without agentctl.
-const POLL_MS = 1_500;
+// Desktop main refreshes every 3 seconds, so reading more often finds nothing new.
+const POLL_MS = 3_000;
 const UNAVAILABLE_POLL_MS = 15_000;
 
 let current: AgentctlSandboxesSnapshot = EMPTY_SANDBOX_SNAPSHOT;
