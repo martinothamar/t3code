@@ -43,6 +43,8 @@ import {
   type BranchToolbarBranchSelectorHandle,
 } from "./BranchToolbarBranchSelector";
 import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
+import { SandboxMenuItems } from "../sandboxes/SandboxPickerGroup";
+import { useOffersSandboxes, useSandboxPicker } from "../sandboxes/useSandboxPicker";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
@@ -184,6 +186,11 @@ const RunContextSelector = memo(function RunContextSelector({
     () => availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null,
     [availableEnvironments, environmentId],
   );
+  const availableEnvironmentIds = useMemo(
+    () => new Set<string>((availableEnvironments ?? []).map((env) => env.environmentId)),
+    [availableEnvironments],
+  );
+  const sandboxPicker = useSandboxPicker({ availableEnvironmentIds, onEnvironmentChange });
   const WorkspaceIcon =
     effectiveEnvMode === "worktree"
       ? FolderGit2Icon
@@ -358,6 +365,7 @@ const RunContextSelector = memo(function RunContextSelector({
                   </MenuRadioItem>
                 ))}
               </MenuRadioGroup>
+              <SandboxMenuItems picker={sandboxPicker} disabled={envLocked} />
             </MenuGroup>
             <MenuSeparator />
           </>
@@ -694,8 +702,11 @@ export const BranchToolbar = memo(function BranchToolbar({
     ],
   );
 
+  const offersSandboxes = useOffersSandboxes();
   const showEnvironmentPicker = Boolean(
-    availableEnvironments && availableEnvironments.length > 1 && onEnvironmentChange,
+    availableEnvironments &&
+    (availableEnvironments.length > 1 || offersSandboxes) &&
+    onEnvironmentChange,
   );
   const activeEnvironmentOption =
     availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null;

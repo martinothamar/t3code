@@ -402,6 +402,7 @@ import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnectDelay";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
+import { useOffersSandboxes } from "../sandboxes/useSandboxPicker";
 import { useEnvironmentQuery } from "../state/query";
 import { useEnvironmentScope } from "~/state/session";
 import {
@@ -2813,6 +2814,10 @@ export default function ChatView(props: ChatViewProps) {
     scratchWorkspaceRootFor,
   ]);
   const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;
+  // agentctl Sandboxes can be started or created from the picker, so a draft
+  // gets it even when the project lives in one environment.
+  const offersSandboxes = useOffersSandboxes() && draftId !== null;
+  const canPickEnvironment = hasMultipleEnvironments || offersSandboxes;
   // Auto balance retargets to an existing project; a machine's "No project"
   // folder may not exist until it is picked.
   const canAutoBalanceEnvironments = hasMultipleEnvironments && !activeProjectIsScratch;
@@ -2822,7 +2827,7 @@ export default function ChatView(props: ChatViewProps) {
     ) ?? null;
   const showComposerEnvironmentIndicator = shouldShowEnvironmentIndicator({
     activeEnvironment: activeEnvironmentOption,
-    canPickEnvironment: hasMultipleEnvironments,
+    canPickEnvironment,
   });
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
@@ -11851,7 +11856,7 @@ export default function ChatView(props: ChatViewProps) {
                                 {...(canCheckoutPullRequestIntoThread
                                   ? { onCheckoutPullRequestRequest: openPullRequestDialog }
                                   : {})}
-                                {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
+                                {...(canPickEnvironment ? { onEnvironmentChange } : {})}
                                 autoEnvironmentLabel={autoEnvironmentLabel}
                                 onAutoEnvironment={
                                   draftId &&

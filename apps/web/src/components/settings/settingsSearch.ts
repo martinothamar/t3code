@@ -936,6 +936,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
   },
   {
+    id: "agentctl-sandboxes",
+    title: "agentctl Sandboxes",
+    to: "/settings/connections",
+    searchTerms: ["sandbox agentctl agent vm manifest start stop delete new create env file"],
+    desktopOnly: true,
+  },
+  {
     id: "load-balancing",
     title: "Load balancing",
     to: "/settings/connections",

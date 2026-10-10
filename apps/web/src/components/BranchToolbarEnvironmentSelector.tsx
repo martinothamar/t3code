@@ -5,6 +5,9 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
+import { SandboxPickerGroup } from "../sandboxes/SandboxPickerGroup";
+import { useSandboxPicker } from "../sandboxes/useSandboxPicker";
+
 import type { EnvironmentOption } from "./BranchToolbar.logic";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useComposerMenuProps } from "./chat/composerEventScope";
@@ -39,6 +42,12 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
     return availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
   }, [availableEnvironments, environmentId]);
 
+  const availableEnvironmentIds = useMemo(
+    () => new Set<string>(availableEnvironments.map((env) => env.environmentId)),
+    [availableEnvironments],
+  );
+  const sandboxPicker = useSandboxPicker({ availableEnvironmentIds, onEnvironmentChange });
+
   const environmentItems = useMemo(
     () => [
       ...(onAutoEnvironment
@@ -48,8 +57,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         value: env.environmentId,
         label: env.label,
       })),
+      ...sandboxPicker.items,
     ],
-    [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment],
+    [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment, sandboxPicker.items],
   );
 
   // The static label carries the xs control's height (h-7 sm:h-6) as well as
@@ -82,9 +92,12 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
     <Select
       modal={false}
       value={autoEnvironmentLabel ? "auto" : environmentId}
-      onValueChange={(value) =>
-        value === "auto" ? onAutoEnvironment?.() : onEnvironmentChange(value as EnvironmentId)
-      }
+      onValueChange={(value) => {
+        if (value === null || sandboxPicker.select(value)) return;
+        return value === "auto"
+          ? onAutoEnvironment?.()
+          : onEnvironmentChange(value as EnvironmentId);
+      }}
       items={environmentItems}
     >
       <Tooltip>
@@ -138,6 +151,7 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
             </SelectItem>
           ))}
         </SelectGroup>
+        <SandboxPickerGroup picker={sandboxPicker} />
       </SelectPopup>
     </Select>
   );

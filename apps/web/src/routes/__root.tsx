@@ -27,7 +27,8 @@ import { RelayClientInstallDialog } from "../components/cloud/RelayClientInstall
 import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
 import { SnapShotCoordinator } from "../components/desktop/SnapShotCoordinator";
 import { DesktopAppActivationCoordinator } from "../components/desktop/DesktopAppActivationCoordinator";
-import { SandboxProjectSeeder } from "../sandboxes/SandboxProjectSeeder";
+import { SandboxConnectionCoordinator } from "../sandboxes/SandboxConnectionCoordinator";
+import { NewSandboxDialogHost } from "../sandboxes/NewSandboxDialog";
 import { DesktopWebLinkCoordinator } from "../components/desktop/DesktopWebLinkCoordinator";
 import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepAlive";
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
@@ -230,7 +231,8 @@ function RootRouteView() {
         >
           {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
           {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
-          {isElectron ? <SandboxProjectSeeder /> : null}
+          {isElectron ? <SandboxConnectionCoordinator /> : null}
+          {isElectron ? <NewSandboxDialogHost /> : null}
           {primaryEnvironmentAuthenticated ? <DesktopWebLinkCoordinator /> : null}
           {isElectron ? <RunningThreadKeepAlive /> : null}
           <RelayClientInstallDialog />

@@ -151,6 +151,8 @@ import {
   type ServerPairingLinkRecord,
 } from "~/environments/primary";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
+import { SandboxesSettings } from "~/sandboxes/SandboxesSettings";
+import { sandboxNameForTarget } from "~/sandboxes/sandboxConnections";
 import { useUiStateStore } from "~/uiStateStore";
 import {
   resolveServerConfigVersionMismatch,
@@ -2063,12 +2065,14 @@ export function ConnectionsSettings() {
       ),
     [environments],
   );
-  // The WSL backend is managed from the WSL row under this machine, so it has
-  // no row of its own in the list.
+  // The WSL backend is managed from the WSL row under this machine, and
+  // agentctl Sandboxes from their own section, so neither has a row here.
   const listedEnvironments = useMemo(
     () =>
       savedEnvironments.filter(
-        (environment) => !isDesktopLocalConnectionTarget(environment.entry.target),
+        (environment) =>
+          !isDesktopLocalConnectionTarget(environment.entry.target) &&
+          sandboxNameForTarget(environment.entry.target) === null,
       ),
     [savedEnvironments],
   );
@@ -4168,6 +4172,7 @@ export function ConnectionsSettings() {
           }}
         />
       ) : null}
+      <SandboxesSettings />
       <LoadBalancingSettings environments={loadBalancingEnvironments} />
       <GitHubRoutingSettings environments={loadBalancingEnvironments} />
     </SettingsPageContainer>
