@@ -1,5 +1,4 @@
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -14,17 +13,31 @@ import { AgentResourceList, SshInfo, type AgentResource } from "./agentState.ts"
 // T3 talks to agentctl only through its CLI and `-o json` output. The daemon's
 // control socket is private: its protocol is versioned per build.
 
-/** agentctl is not installed, or could not be started. */
-export class AgentctlUnavailableError extends Data.TaggedError("AgentctlUnavailableError")<{
-  readonly message: string;
-}> {}
-
-/** agentctl ran and reported an error, already reduced to its own message. */
-export class AgentctlCommandError extends Data.TaggedError("AgentctlCommandError")<{
-  readonly message: string;
-}> {}
-
-export type AgentctlError = AgentctlUnavailableError | AgentctlCommandError;
+/**
+ * An agentctl command that did not succeed. Its message reaches the UI: for a
+ * command agentctl rejected, that is agentctl's own one-line error.
+ */
+export class AgentctlError extends Schema.TaggedError<AgentctlError>()("AgentctlError", {
+  /** The subcommand, such as `get` or `apply`. */
+  command: Schema.String,
+  reason: Schema.Literals(["unavailable", "failed", "timeout", "unexpected-output"]),
+  /** agentctl's own error line, for a command it rejected. */
+  reported: Schema.optionalKey(Schema.String),
+  cause: Schema.optionalKey(Schema.Defect()),
+}) {
+  override get message(): string {
+    switch (this.reason) {
+      case "unavailable":
+        return "Could not run agentctl. Install it and make sure it is on PATH.";
+      case "failed":
+        return this.reported ?? `agentctl ${this.command} failed.`;
+      case "timeout":
+        return `agentctl ${this.command} timed out.`;
+      case "unexpected-output":
+        return `agentctl ${this.command} printed output T3 Code does not understand.`;
+    }
+  }
+}
 
 export interface AgentctlApplyInput {
   readonly manifestPath: string;
@@ -73,11 +86,12 @@ const decodeUtf8 = (chunks: ReadonlyArray<Uint8Array>) => {
   return chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join("") + decoder.decode();
 };
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
-  const run = (args: ReadonlyArray<string>, timeout: Duration.Duration) =>
-    Effect.scoped(
+  const run = (args: ReadonlyArray<string>, timeout: Duration.Duration) => {
+    const command = args[0] ?? "";
+    return Effect.scoped(
       Effect.gen(function* () {
         const handle = yield* spawner
           .spawn(
@@ -89,20 +103,13 @@ export const make = Effect.gen(function* () {
           )
           .pipe(
             Effect.mapError(
-              (error) =>
-                new AgentctlUnavailableError({
-                  message: `Could not run agentctl: ${error.message}`,
-                }),
+              (cause) => new AgentctlError({ command, reason: "unavailable", cause }),
             ),
           );
         const [stdout, stderr, exitCode] = yield* Effect.all(
           [Stream.runCollect(handle.stdout), Stream.runCollect(handle.stderr), handle.exitCode],
           { concurrency: "unbounded" },
-        ).pipe(
-          Effect.mapError(
-            (error) => new AgentctlCommandError({ message: `agentctl failed: ${error.message}` }),
-          ),
-        );
+        ).pipe(Effect.mapError((cause) => new AgentctlError({ command, reason: "failed", cause })));
         return {
           exitCode,
           stdout: decodeUtf8(stdout),
@@ -113,23 +120,25 @@ export const make = Effect.gen(function* () {
       Effect.timeoutOption(timeout),
       Effect.flatMap(
         Option.match({
-          onNone: () =>
-            Effect.fail(
-              new AgentctlCommandError({
-                message: `agentctl ${args[0]} timed out after ${Duration.format(timeout)}`,
-              }),
-            ),
+          onNone: () => Effect.fail(new AgentctlError({ command, reason: "timeout" })),
           onSome: Effect.succeed,
         }),
       ),
     );
+  };
 
   const runChecked = (args: ReadonlyArray<string>, timeout = QUERY_TIMEOUT) =>
     run(args, timeout).pipe(
       Effect.flatMap((result) =>
         result.exitCode === 0
           ? Effect.succeed(result.stdout)
-          : Effect.fail(new AgentctlCommandError({ message: agentctlErrorMessage(result) })),
+          : Effect.fail(
+              new AgentctlError({
+                command: args[0] ?? "",
+                reason: "failed",
+                reported: agentctlErrorMessage(result),
+              }),
+            ),
       ),
     );
 
@@ -141,10 +150,8 @@ export const make = Effect.gen(function* () {
       Effect.flatMap((stdout) =>
         decode(stdout).pipe(
           Effect.mapError(
-            (error) =>
-              new AgentctlCommandError({
-                message: `Unexpected agentctl ${args[0]} output: ${error.message}`,
-              }),
+            (cause) =>
+              new AgentctlError({ command: args[0] ?? "", reason: "unexpected-output", cause }),
           ),
         ),
       ),

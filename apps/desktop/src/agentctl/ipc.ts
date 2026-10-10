@@ -49,13 +49,14 @@ const getSettings = DesktopIpc.makeIpcMethod({
   handler: () => Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.getSettings),
 });
 
-const setSettings = DesktopIpc.makeIpcMethod({
-  channel: AGENTCTL_CHANNELS.setSettings,
-  payload: AgentctlSandboxSettings,
-  result: AgentctlSandboxSettings,
-  handler: (settings) =>
-    Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.setSettings(settings)),
-});
+const manifestRoot = (channel: string, run: "addManifestRoot" | "removeManifestRoot") =>
+  DesktopIpc.makeIpcMethod({
+    channel,
+    payload: Schema.String,
+    result: AgentctlSandboxSettings,
+    handler: (folder) =>
+      Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes[run](folder)),
+  });
 
 export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctlHandlers")(
   function* () {
@@ -67,7 +68,8 @@ export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctl
     yield* ipc.handle(create);
     yield* ipc.handle(listManifests);
     yield* ipc.handle(getSettings);
-    yield* ipc.handle(setSettings);
+    yield* ipc.handle(manifestRoot(AGENTCTL_CHANNELS.addManifestRoot, "addManifestRoot"));
+    yield* ipc.handle(manifestRoot(AGENTCTL_CHANNELS.removeManifestRoot, "removeManifestRoot"));
     // Polling starts with the handlers that read it, after startup has loaded
     // the shell environment.
     const sandboxes = yield* DesktopAgentctlSandboxes;

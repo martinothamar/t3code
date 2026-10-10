@@ -4,7 +4,7 @@ import { useMemo } from "react";
 
 import type { ComposerBannerStackItem } from "../components/chat/ComposerBannerStack";
 import { Button } from "../components/ui/button";
-import { startSandboxNamed } from "./sandboxActions";
+import { startSandbox } from "./sandboxActions";
 import { useSandboxSelector } from "./useSandboxes";
 
 const findSandbox = (snapshot: AgentctlSandboxesSnapshot, environmentId: string | null) =>
@@ -35,7 +35,7 @@ export function useSandboxBanner(environmentId: string | null): ComposerBannerSt
       title: state === "stopped" ? `${name} is stopped` : `${name} is starting…`,
       actions:
         state === "stopped" ? (
-          <Button size="xs" variant="ghost" onClick={() => void startSandboxNamed(name)}>
+          <Button size="xs" variant="ghost" onClick={() => void startSandbox(name)}>
             Start
           </Button>
         ) : undefined,

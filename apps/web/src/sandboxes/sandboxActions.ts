@@ -120,12 +120,7 @@ async function confirm(message: string, destructive: boolean) {
   );
 }
 
-export function startSandbox(sandbox: AgentctlSandbox): Promise<boolean> {
-  return once(`start:${sandbox.name}`, () => runStart(sandbox.name));
-}
-
-/** Starts a Sandbox by name, for callers that only hold its name. */
-export function startSandboxNamed(name: string): Promise<boolean> {
+export function startSandbox(name: string): Promise<boolean> {
   return once(`start:${name}`, () => runStart(name));
 }
 

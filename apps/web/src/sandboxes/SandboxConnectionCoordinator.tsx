@@ -61,8 +61,8 @@ function SandboxEnvironmentCoordinator(props: {
   const ensureProject = useEnsureSandboxProject();
   const retryNow = useAtomCommand(environmentCatalog.retryNow, { reportFailure: false });
   const connected = presentation?.connection.phase === "connected";
-  // Wait for the project list, or the project would look missing.
-  const ready = connected && shell.data?.snapshot._tag === "Some";
+  // Only a live project list can show the project is missing; a cached one may predate a removal.
+  const ready = connected && shell.data?.status === "live" && shell.data.snapshot._tag === "Some";
 
   // A started Sandbox should not wait out the backoff its stopped time built up.
   const reconnect = useEffectEvent(() => {

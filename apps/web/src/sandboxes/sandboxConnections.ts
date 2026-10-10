@@ -19,7 +19,7 @@ import {
  */
 const SANDBOX_CONNECTION_ID_PREFIX = "agentctl:";
 
-export function sandboxConnectionId(name: string): string {
+function sandboxConnectionId(name: string): string {
   return `${SANDBOX_CONNECTION_ID_PREFIX}${name}`;
 }
 

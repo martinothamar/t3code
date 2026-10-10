@@ -108,5 +108,6 @@ export interface DesktopAgentctlBridge {
   create: (input: AgentctlCreateSandboxInput) => Promise<AgentctlActionResult>;
   listManifests: () => Promise<readonly AgentctlSandboxManifest[]>;
   getSettings: () => Promise<AgentctlSandboxSettings>;
-  setSettings: (settings: AgentctlSandboxSettings) => Promise<AgentctlSandboxSettings>;
+  addManifestRoot: (folder: string) => Promise<AgentctlSandboxSettings>;
+  removeManifestRoot: (folder: string) => Promise<AgentctlSandboxSettings>;
 }

@@ -56,12 +56,13 @@ export class DesktopAgentctlSandboxes extends Context.Service<
     readonly create: (input: AgentctlCreateSandboxInput) => Effect.Effect<AgentctlActionResult>;
     readonly listManifests: Effect.Effect<ReadonlyArray<AgentctlSandboxManifest>>;
     readonly getSettings: Effect.Effect<AgentctlSandboxSettings>;
-    readonly setSettings: (
-      settings: AgentctlSandboxSettings,
-    ) => Effect.Effect<AgentctlSandboxSettings>;
+    /** Folders are merged here, so two views never overwrite each other's changes. */
+    readonly addManifestRoot: (folder: string) => Effect.Effect<AgentctlSandboxSettings>;
+    readonly removeManifestRoot: (folder: string) => Effect.Effect<AgentctlSandboxSettings>;
     /**
      * Starts watching agentctl. Call it once the app has loaded its shell
      * environment, so a macOS app opened from Finder finds agentctl on PATH.
+     * Later calls do nothing.
      */
     readonly startPolling: Effect.Effect<void>;
   }
@@ -311,6 +312,8 @@ export const make = Effect.gen(function* () {
     yield* publish;
   });
 
+  const nextActionId = yield* Ref.make(0);
+
   const refresh = refreshLock
     .withPermits(1)(refreshBody)
     .pipe(Effect.andThen(SubscriptionRef.get(snapshotRef)));
@@ -321,13 +324,19 @@ export const make = Effect.gen(function* () {
     run: Effect.Effect<void, AgentctlCli.AgentctlError>,
   ) =>
     Effect.gen(function* () {
-      yield* updateRuntime(name, (runtime) => ({ ...runtime, action, actionError: null }));
+      const actionId = yield* Ref.updateAndGet(nextActionId, (id) => id + 1);
+      yield* updateRuntime(name, (runtime) => ({
+        ...runtime,
+        action,
+        actionId,
+        actionError: null,
+      }));
       yield* publish;
       const result = yield* Effect.result(run);
       const error = result._tag === "Failure" ? result.failure.message : null;
       // A later request took over, such as a stop while a start was waiting;
       // this one's outcome, even a failure caused by it, no longer matters.
-      const superseded = ((yield* Ref.get(runtimes)).get(name)?.action ?? null) !== action;
+      const superseded = (yield* Ref.get(runtimes)).get(name)?.actionId !== actionId;
       if (!superseded) {
         yield* updateRuntime(name, (runtime) => ({ ...runtime, action: null, actionError: error }));
       }
@@ -338,6 +347,15 @@ export const make = Effect.gen(function* () {
   const getSettings = Ref.get(store).pipe(
     Effect.map((document) => document.settings ?? DEFAULT_SANDBOX_SETTINGS),
   );
+  const updateManifestRoots = (update: (roots: ReadonlyArray<string>) => ReadonlyArray<string>) =>
+    updateStore((document) => {
+      const settings = document.settings ?? DEFAULT_SANDBOX_SETTINGS;
+      return {
+        ...document,
+        settings: { ...settings, manifestRoots: update(settings.manifestRoots) },
+      };
+    }).pipe(Effect.andThen(getSettings));
+  const polling = yield* Ref.make(false);
 
   // Without agentctl there is nothing to watch closely, so check rarely.
   const pollOnce = refresh.pipe(
@@ -389,9 +407,15 @@ export const make = Effect.gen(function* () {
       Effect.provide(context),
     ),
     getSettings,
-    setSettings: (settings) =>
-      updateStore((document) => ({ ...document, settings })).pipe(Effect.andThen(getSettings)),
-    startPolling: Effect.forever(pollOnce).pipe(Effect.forkIn(scope), Effect.asVoid),
+    addManifestRoot: (folder) =>
+      updateManifestRoots((roots) => (roots.includes(folder) ? roots : [...roots, folder])),
+    removeManifestRoot: (folder) =>
+      updateManifestRoots((roots) => roots.filter((root) => root !== folder)),
+    startPolling: Ref.getAndSet(polling, true).pipe(
+      Effect.flatMap((started) =>
+        started ? Effect.void : Effect.forever(pollOnce).pipe(Effect.forkIn(scope), Effect.asVoid),
+      ),
+    ),
   });
 });
 

@@ -208,7 +208,7 @@ function SandboxRow({ sandbox }: { readonly sandbox: AgentctlSandbox }) {
             </Button>
           ) : null}
           {canStartSandbox(sandbox) ? (
-            <Button size="xs" variant="outline" onClick={() => void startSandbox(sandbox)}>
+            <Button size="xs" variant="outline" onClick={() => void startSandbox(sandbox.name)}>
               Start
             </Button>
           ) : null}
@@ -244,16 +244,16 @@ function ManifestFolders() {
       });
   }, []);
 
-  const save = async (next: AgentctlSandboxSettings) => {
-    const saved = await readAgentctlBridge()?.setSettings(next);
-    if (saved) setSettings(saved);
-  };
-
   if (settings === null) return null;
   const addRoot = async () => {
     const folder = await window.desktopBridge?.pickFolder();
     if (!folder) return;
-    await save({ ...settings, manifestRoots: [...new Set([...settings.manifestRoots, folder])] });
+    const saved = await readAgentctlBridge()?.addManifestRoot(folder);
+    if (saved) setSettings(saved);
+  };
+  const removeRoot = async (folder: string) => {
+    const saved = await readAgentctlBridge()?.removeManifestRoot(folder);
+    if (saved) setSettings(saved);
   };
 
   return (
@@ -281,12 +281,7 @@ function ManifestFolders() {
                 size="icon-xs"
                 variant="ghost-muted"
                 aria-label={`Remove ${root}`}
-                onClick={() =>
-                  void save({
-                    ...settings,
-                    manifestRoots: settings.manifestRoots.filter((entry) => entry !== root),
-                  })
-                }
+                onClick={() => void removeRoot(root)}
               >
                 <XIcon className="size-3" />
               </Button>

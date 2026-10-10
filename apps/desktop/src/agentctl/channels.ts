@@ -7,5 +7,6 @@ export const AGENTCTL_CHANNELS = {
   create: "desktop:agentctl-create",
   listManifests: "desktop:agentctl-list-manifests",
   getSettings: "desktop:agentctl-get-settings",
-  setSettings: "desktop:agentctl-set-settings",
+  addManifestRoot: "desktop:agentctl-add-manifest-root",
+  removeManifestRoot: "desktop:agentctl-remove-manifest-root",
 } as const;

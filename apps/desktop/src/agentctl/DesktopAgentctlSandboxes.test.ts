@@ -11,6 +11,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Queue from "effect/Queue";
 import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
@@ -58,8 +59,12 @@ interface Harness {
   readonly disconnected: Deferred.Deferred<void>;
   /** The next SSH reach fails, like a Sandbox still booting. */
   readonly ensureFails: Ref.Ref<boolean>;
-  /** When set, a start waits for it and then fails, like a start a stop cut short. */
-  readonly startGate: Ref.Ref<Deferred.Deferred<void> | null>;
+  /**
+   * While set, each start hands its gate to `heldStarts`, then waits for it and
+   * fails, like a start a stop cut short.
+   */
+  readonly holdStarts: Ref.Ref<boolean>;
+  readonly heldStarts: Queue.Queue<Deferred.Deferred<void>>;
   readonly applyFails: Ref.Ref<boolean>;
 }
 
@@ -71,7 +76,8 @@ const makeHarness = Effect.gen(function* () {
     environment: { id: "env-1" },
     disconnected: yield* Deferred.make<void>(),
     ensureFails: yield* Ref.make(false),
-    startGate: yield* Ref.make<Deferred.Deferred<void> | null>(null),
+    holdStarts: yield* Ref.make(false),
+    heldStarts: yield* Queue.unbounded<Deferred.Deferred<void>>(),
     applyFails: yield* Ref.make(false),
   } satisfies Harness;
 });
@@ -98,23 +104,32 @@ function layer(harness: Harness, baseDir: string) {
     listAgents: Ref.get(harness.listFails).pipe(
       Effect.flatMap((fails) =>
         fails
-          ? Effect.fail(new AgentctlCli.AgentctlCommandError({ message: "agentd is restarting" }))
+          ? Effect.fail(
+              new AgentctlCli.AgentctlError({
+                command: "get",
+                reason: "failed",
+                reported: "agentd is restarting",
+              }),
+            )
           : Ref.get(harness.agents),
       ),
     ),
     sshInfo: () => Effect.succeed({ workingDirectory: "/home/agent/code" }),
     start: () =>
-      Ref.get(harness.startGate).pipe(
-        Effect.flatMap((gate) =>
-          gate === null
-            ? Ref.set(harness.agents, [agent("ready")])
-            : Deferred.await(gate).pipe(
-                Effect.andThen(
-                  Effect.fail(
-                    new AgentctlCli.AgentctlCommandError({ message: "Agent was stopped" }),
-                  ),
-                ),
-              ),
+      Ref.get(harness.holdStarts).pipe(
+        Effect.flatMap((hold) =>
+          hold
+            ? Effect.gen(function* () {
+                const gate = yield* Deferred.make<void>();
+                yield* Queue.offer(harness.heldStarts, gate);
+                yield* Deferred.await(gate);
+                return yield* new AgentctlCli.AgentctlError({
+                  command: "start",
+                  reason: "failed",
+                  reported: "Agent was stopped",
+                });
+              })
+            : Ref.set(harness.agents, [agent("ready")]),
         ),
       ),
     stop: () => Ref.set(harness.agents, [agent("stopped")]),
@@ -123,7 +138,13 @@ function layer(harness: Harness, baseDir: string) {
       Ref.get(harness.applyFails).pipe(
         Effect.flatMap((fails) =>
           fails
-            ? Effect.fail(new AgentctlCli.AgentctlCommandError({ message: "invalid manifest" }))
+            ? Effect.fail(
+                new AgentctlCli.AgentctlError({
+                  command: "apply",
+                  reason: "failed",
+                  reported: "invalid manifest",
+                }),
+              )
             : Ref.set(harness.agents, [agent("retrying")]),
         ),
       ),
@@ -356,16 +377,48 @@ describe("DesktopAgentctlSandboxes", () => {
       Effect.gen(function* () {
         yield* until(sandboxes, discovered("env-1"));
         yield* sandboxes.stop(NAME);
-        const gate = yield* Deferred.make<void>();
-        yield* Ref.set(harness.startGate, gate);
+        yield* Ref.set(harness.holdStarts, true);
         const starting = yield* Effect.forkChild(sandboxes.start(NAME));
-        yield* until(sandboxes, (snapshot) => snapshot.sandboxes[0]?.action === "starting");
+        const gate = yield* Queue.take(harness.heldStarts);
         assert.strictEqual((yield* sandboxes.stop(NAME)).error, null);
         yield* Deferred.succeed(gate, undefined);
         assert.strictEqual((yield* Fiber.join(starting)).error, null);
         const sandbox = (yield* sandboxes.snapshot).sandboxes[0];
         assert.strictEqual(sandbox?.action, null);
         assert.strictEqual(sandbox?.actionError, null);
+      }),
+    ),
+  );
+
+  it.effect("keeps a start shown until the last of two overlapping starts ends", () =>
+    withSandboxes((sandboxes, harness) =>
+      Effect.gen(function* () {
+        yield* until(sandboxes, discovered("env-1"));
+        yield* sandboxes.stop(NAME);
+        yield* Ref.set(harness.holdStarts, true);
+        const firstStart = yield* Effect.forkChild(sandboxes.start(NAME));
+        const first = yield* Queue.take(harness.heldStarts);
+        // A second window starts it too, before the first request returns.
+        const secondStart = yield* Effect.forkChild(sandboxes.start(NAME));
+        const second = yield* Queue.take(harness.heldStarts);
+        yield* Deferred.succeed(first, undefined);
+        assert.strictEqual((yield* Fiber.join(firstStart)).error, null);
+        assert.strictEqual((yield* sandboxes.snapshot).sandboxes[0]?.action, "starting");
+        yield* Deferred.succeed(second, undefined);
+        yield* Fiber.join(secondStart);
+        assert.strictEqual((yield* sandboxes.snapshot).sandboxes[0]?.action, null);
+      }),
+    ),
+  );
+
+  it.effect("merges manifest folder changes instead of replacing the list", () =>
+    withSandboxes((sandboxes) =>
+      Effect.gen(function* () {
+        yield* sandboxes.addManifestRoot("/a");
+        yield* sandboxes.addManifestRoot("/b");
+        yield* sandboxes.addManifestRoot("/a");
+        const settings = yield* sandboxes.removeManifestRoot("/a");
+        assert.deepStrictEqual(settings.manifestRoots, ["/b"]);
       }),
     ),
   );

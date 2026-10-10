@@ -39,6 +39,8 @@ export const DEFAULT_SANDBOX_SETTINGS: AgentctlSandboxSettings = {
 export interface SandboxRuntime {
   /** The lifecycle request T3 is running, for as long as its agentctl call runs. */
   readonly action: AgentctlSandboxAction | null;
+  /** Which request owns `action`, so an earlier one that ends late leaves it alone. */
+  readonly actionId: number;
   readonly actionError: string | null;
   readonly connectError: string | null;
   /**
@@ -55,6 +57,7 @@ export interface SandboxRuntime {
 
 export const IDLE_RUNTIME: SandboxRuntime = {
   action: null,
+  actionId: 0,
   actionError: null,
   connectError: null,
   verified: false,

@@ -26,14 +26,15 @@ gives it.
   `worker-3`. The sidebar follows the Sandbox while agentctl sets it up.
 - **Manage them.** **Sandboxes** at the bottom of the sidebar lists each Sandbox with its state,
   resources and threads, and where to start, stop or delete it. Manifest folders are managed there
-  too. **Manage Sandboxes…** in the command palette has the same actions.
+  too. **Open Sandboxes** in the command palette goes there.
 
 ## Good to know
 
 - Stopping keeps the Sandbox's disk. Its threads stay listed and reconnect when it starts again.
   Deleting removes the disk, and with it the Sandbox's project and threads in T3 Code.
 - The working directory is usually not a Git repository itself, so T3 Code's turn diffs, restore
-  and worktree mode are not available there. Agents still use Git in each repository.
+  and worktree mode are not available there, and **Pull Requests** lists nothing for a Sandbox.
+  Agents still use Git in each repository, and a pull request linked to a thread still shows on it.
 - A Sandbox always has its project: if you remove it, it comes back the next time T3 Code connects.
 - Threads started from T3 Code run outside agentctl Sessions. They do not appear in `agentctl turns`
   or the agentctl TUI, and the manifest's default model does not apply: choose the model in T3 Code.

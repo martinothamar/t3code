@@ -26,32 +26,23 @@ export interface SandboxProjectDependencies {
 
 /**
  * Gives a Sandbox its one project: its working directory, named after the
- * Agent, where agentctl Sessions start too. A call while one for the same
- * environment runs joins it, so a quick reconnect never makes a second.
- * Resolves with an error message, or null once the project exists.
+ * Agent, where agentctl Sessions start too. The server allows one project per
+ * folder, so a create racing another window's fails, and finds the project
+ * there afterwards. Resolves with an error message, or null once it exists.
  */
-export function ensureSandboxProject(
-  inFlight: Map<EnvironmentId, Promise<string | null>>,
+export async function ensureSandboxProject(
   dependencies: SandboxProjectDependencies,
   input: SandboxProjectInput,
 ): Promise<string | null> {
-  const running = inFlight.get(input.environmentId);
-  if (running !== undefined) return running;
-  if (dependencies.hasProjectAt(input.environmentId, input.workingDirectory)) {
-    return Promise.resolve(null);
-  }
-  const attempt = dependencies
-    .createProject({
-      environmentId: input.environmentId,
-      title: input.name,
-      workspaceRoot: input.workingDirectory,
-    })
-    .finally(() => inFlight.delete(input.environmentId));
-  inFlight.set(input.environmentId, attempt);
-  return attempt;
+  const exists = () => dependencies.hasProjectAt(input.environmentId, input.workingDirectory);
+  if (exists()) return null;
+  const error = await dependencies.createProject({
+    environmentId: input.environmentId,
+    title: input.name,
+    workspaceRoot: input.workingDirectory,
+  });
+  return error === null || exists() ? null : error;
 }
-
-const inFlight = new Map<EnvironmentId, Promise<string | null>>();
 
 export function useEnsureSandboxProject() {
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
@@ -59,7 +50,6 @@ export function useEnsureSandboxProject() {
   return useCallback(
     (input: SandboxProjectInput) =>
       ensureSandboxProject(
-        inFlight,
         {
           hasProjectAt: (environmentId, workspaceRoot) =>
             findProjectByPath(

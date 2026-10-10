@@ -118,12 +118,8 @@ function NewSandboxDialogContent() {
   const addManifestRoot = async () => {
     const bridge = readAgentctlBridge();
     const folder = await window.desktopBridge?.pickFolder();
-    if (!bridge || !folder || settings === null) return;
-    const next = await bridge.setSettings({
-      ...settings,
-      manifestRoots: [...new Set([...settings.manifestRoots, folder])],
-    });
-    setSettings(next);
+    if (!bridge || !folder) return;
+    await bridge.addManifestRoot(folder);
     const loaded = await load();
     if (loaded !== null) apply(...loaded);
   };

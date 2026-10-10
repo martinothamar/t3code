@@ -4,6 +4,7 @@ import { memo, useCallback } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
+import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { usePullRequestsSupported } from "../../state/environments";
 import { T3Wordmark } from "../T3Wordmark";
@@ -229,14 +230,16 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="Usage"
             onClick={handleUsageClick}
           />
-          <SidebarUtilityItem
-            icon={<BoxIcon />}
-            label="Sandboxes"
-            onClick={() => {
-              closeMobileSidebar();
-              void navigate({ to: "/sandboxes" });
-            }}
-          />
+          {isElectron ? (
+            <SidebarUtilityItem
+              icon={<BoxIcon />}
+              label="Sandboxes"
+              onClick={() => {
+                closeMobileSidebar();
+                void navigate({ to: "/sandboxes" });
+              }}
+            />
+          ) : null}
         </>
       )}
       <SidebarUpdatePill />
