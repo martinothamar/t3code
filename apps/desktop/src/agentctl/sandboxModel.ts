@@ -43,11 +43,24 @@ export const DEFAULT_SANDBOX_SETTINGS: AgentctlSandboxSettings = {
 /** In-memory state for one Sandbox; none of it survives a restart. */
 export interface SandboxRuntime {
   readonly action: AgentctlSandboxAction | null;
+  /** Which request owns `action`, so a superseded one leaves it alone. */
+  readonly actionId: number;
   readonly actionError: string | null;
   readonly connectError: string | null;
+  /**
+   * T3 confirmed the Sandbox's environment since it last became reachable.
+   * Until then it keeps checking, so a reset T3 home inside it is noticed.
+   */
+  readonly verified: boolean;
 }
 
-export const IDLE_RUNTIME: SandboxRuntime = { action: null, actionError: null, connectError: null };
+export const IDLE_RUNTIME: SandboxRuntime = {
+  action: null,
+  actionId: 0,
+  actionError: null,
+  connectError: null,
+  verified: false,
+};
 
 /** Drops records for Sandboxes that are gone or being deleted. */
 export function reconcileRecords(
@@ -120,8 +133,11 @@ export function isActionSettled(action: AgentctlSandboxAction, agent: AgentResou
   const stuck = phase === "failed" || phase === "retrying" || phase === "unresponsive";
   switch (action) {
     case "creating":
-    case "starting":
       return phase === "ready" || phase === "stopped" || stuck;
+    // Right after a start, agentctl can still read stopped; the start call
+    // itself settles that case when it returns.
+    case "starting":
+      return phase === "ready" || stuck;
     case "stopping":
       return phase === "stopped" || stuck;
   }

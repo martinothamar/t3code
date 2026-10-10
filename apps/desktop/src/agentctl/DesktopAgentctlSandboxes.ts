@@ -238,7 +238,11 @@ export const make = Effect.gen(function* () {
             [name]: discoveredRecord(document.sandboxes?.[name], discovered),
           },
         }));
-        yield* updateRuntime(name, (runtime) => ({ ...runtime, connectError: null }));
+        yield* updateRuntime(name, (runtime) => ({
+          ...runtime,
+          connectError: null,
+          verified: true,
+        }));
       }
       yield* publish;
     }).pipe(
@@ -312,15 +316,26 @@ export const make = Effect.gen(function* () {
 
     const now = yield* Clock.currentTimeMillis;
     const pending = yield* Ref.get(discovering);
+    const states = yield* Ref.get(runtimes);
     for (const agent of agents) {
       const name = agent.metadata.name;
-      if (!isConnectable(agent)) continue;
-      const previous = previousAgents.find((candidate) => candidate.metadata.name === name);
-      const becameReachable = previous === undefined || !isConnectable(previous);
-      if (!becameReachable && !needsDiscovery(records[name], agent)) continue;
+      const state = states.get(name) ?? IDLE_RUNTIME;
+      if (!isConnectable(agent)) {
+        // Check again, without waiting out the throttle, once it is back.
+        if (state.verified)
+          yield* updateRuntime(name, (current) => ({ ...current, verified: false }));
+        if (pending.get(name) !== Number.POSITIVE_INFINITY) {
+          yield* Ref.update(discovering, (current) => {
+            const next = new Map(current);
+            next.delete(name);
+            return next;
+          });
+        }
+        continue;
+      }
+      if (state.verified && !needsDiscovery(records[name], agent)) continue;
       const retryAt = pending.get(name);
-      if (retryAt !== undefined && now < retryAt && !becameReachable) continue;
-      if (retryAt === Number.POSITIVE_INFINITY) continue;
+      if (retryAt !== undefined && now < retryAt) continue;
       yield* Ref.update(discovering, (current) =>
         new Map(current).set(name, Number.POSITIVE_INFINITY),
       );
@@ -333,6 +348,8 @@ export const make = Effect.gen(function* () {
     .withPermits(1)(refreshBody)
     .pipe(Effect.andThen(SubscriptionRef.get(snapshotRef)));
 
+  const nextActionId = yield* Ref.make(0);
+
   const runAction = (
     name: string,
     action: AgentctlSandboxAction,
@@ -340,17 +357,28 @@ export const make = Effect.gen(function* () {
     options: { readonly settleOnPoll: boolean },
   ) =>
     Effect.gen(function* () {
-      yield* updateRuntime(name, (runtime) => ({ ...runtime, action, actionError: null }));
+      const actionId = yield* Ref.updateAndGet(nextActionId, (id) => id + 1);
+      yield* updateRuntime(name, (runtime) => ({
+        ...runtime,
+        action,
+        actionId,
+        actionError: null,
+      }));
       yield* publish;
       const result = yield* Effect.result(run);
       const error = result._tag === "Failure" ? result.failure.message : null;
-      yield* updateRuntime(name, (runtime) => ({
-        ...runtime,
-        action: error === null && options.settleOnPoll ? runtime.action : null,
-        actionError: error,
-      }));
+      // A later request took over, such as a stop while a start was waiting;
+      // this one's outcome, even a failure caused by it, no longer matters.
+      const superseded = ((yield* Ref.get(runtimes)).get(name)?.actionId ?? actionId) !== actionId;
+      if (!superseded) {
+        yield* updateRuntime(name, (runtime) => ({
+          ...runtime,
+          action: error === null && options.settleOnPoll ? runtime.action : null,
+          actionError: error,
+        }));
+      }
       yield* refresh;
-      return { error } satisfies AgentctlActionResult;
+      return { error: superseded ? null : error } satisfies AgentctlActionResult;
     });
 
   const getSettings = Ref.get(store).pipe(

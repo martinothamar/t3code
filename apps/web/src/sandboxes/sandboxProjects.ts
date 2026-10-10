@@ -60,9 +60,31 @@ export async function ensureSandboxProject(
   return { created: true, error: null };
 }
 
-// One at a time per environment and kind: a reconnect and a click can
-// overlap, and a click must not be answered by the automatic attempt.
-const inFlight = new Map<string, Promise<SandboxProjectResult>>();
+/**
+ * One attempt per environment at a time. An automatic attempt joins one that
+ * is already running. A forced one, from a click, waits for it and then runs
+ * unless that attempt made the project, so the click never races it.
+ */
+export function queueSandboxProject(
+  inFlight: Map<EnvironmentId, Promise<SandboxProjectResult>>,
+  environmentId: EnvironmentId,
+  force: boolean,
+  start: () => Promise<SandboxProjectResult>,
+): Promise<SandboxProjectResult> {
+  const running = inFlight.get(environmentId);
+  if (running !== undefined && !force) return running;
+  const queued =
+    running === undefined
+      ? start()
+      : running.then((result) => (result.created ? result : start()), start);
+  const run = queued.finally(() => {
+    if (inFlight.get(environmentId) === run) inFlight.delete(environmentId);
+  });
+  inFlight.set(environmentId, run);
+  return run;
+}
+
+const inFlight = new Map<EnvironmentId, Promise<SandboxProjectResult>>();
 
 export function useSandboxProject() {
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
@@ -71,39 +93,37 @@ export function useSandboxProject() {
     (input: SandboxProjectInput): Promise<SandboxProjectResult> => {
       const bridge = readAgentctlBridge();
       if (bridge === null) return Promise.resolve({ created: false, error: null });
-      const key = `${input.environmentId}:${input.force}`;
-      const running = inFlight.get(key);
-      if (running !== undefined) return running;
-      const run = ensureSandboxProject(
-        {
-          workingDirectory: (name) =>
-            bridge.getWorkspace(name).then((workspace) => workspace.workingDirectory),
-          hasProjectAt: (environmentId, workspaceRoot) =>
-            findProjectByPath(
-              readProjects().filter((project) => project.environmentId === environmentId),
-              workspaceRoot,
-            ) !== undefined,
-          createProject: async ({ environmentId, title, workspaceRoot }) => {
-            const result = await createProject({
-              environmentId,
-              input: {
-                projectId: newProjectId(),
-                title,
+      return queueSandboxProject(inFlight, input.environmentId, input.force, () =>
+        ensureSandboxProject(
+          {
+            workingDirectory: (name) =>
+              bridge.getWorkspace(name).then((workspace) => workspace.workingDirectory),
+            hasProjectAt: (environmentId, workspaceRoot) =>
+              findProjectByPath(
+                readProjects().filter((project) => project.environmentId === environmentId),
                 workspaceRoot,
-                createWorkspaceRootIfMissing: false,
-                defaultModelSelection: null,
-              },
-            });
-            if (result._tag !== "Failure") return null;
-            const failure = squashAtomCommandFailure(result);
-            return failure instanceof Error ? failure.message : "Could not add the project.";
+              ) !== undefined,
+            createProject: async ({ environmentId, title, workspaceRoot }) => {
+              const result = await createProject({
+                environmentId,
+                input: {
+                  projectId: newProjectId(),
+                  title,
+                  workspaceRoot,
+                  createWorkspaceRootIfMissing: false,
+                  defaultModelSelection: null,
+                },
+              });
+              if (result._tag !== "Failure") return null;
+              const failure = squashAtomCommandFailure(result);
+              return failure instanceof Error ? failure.message : "Could not add the project.";
+            },
+            markCreated: (name, environmentId) =>
+              bridge.markProjectCreated({ name, environmentId }),
           },
-          markCreated: (name, environmentId) => bridge.markProjectCreated({ name, environmentId }),
-        },
-        input,
-      ).finally(() => inFlight.delete(key));
-      inFlight.set(key, run);
-      return run;
+          input,
+        ),
+      );
     },
     [createProject],
   );

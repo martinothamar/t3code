@@ -8,7 +8,7 @@ import {
   suggestSandboxName,
 } from "./sandboxActions";
 import { sandboxNameForTarget, sandboxRegistrations } from "./sandboxConnections";
-import { ensureSandboxProject } from "./sandboxProjects";
+import { ensureSandboxProject, queueSandboxProject } from "./sandboxProjects";
 
 function sandbox(overrides: Partial<AgentctlSandbox> = {}): AgentctlSandbox {
   return {
@@ -173,5 +173,57 @@ describe("Sandbox actions", () => {
     expect(canDeleteSandbox(creating)).toBe(true);
     expect(canDeleteSandbox(sandbox({ action: "deleting" }))).toBe(false);
     expect(canStopSandbox(sandbox({ phase: "stopped" }))).toBe(false);
+  });
+});
+
+describe("queueSandboxProject", () => {
+  const environmentId = EnvironmentId.make("env-worker");
+
+  function deferred() {
+    let resolve!: (result: { created: boolean; error: string | null }) => void;
+    const promise = new Promise<{ created: boolean; error: string | null }>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  }
+
+  it("lets a reconnect join the attempt already running", async () => {
+    const inFlight = new Map();
+    const automatic = deferred();
+    const first = queueSandboxProject(inFlight, environmentId, false, () => automatic.promise);
+    let started = 0;
+    const second = queueSandboxProject(inFlight, environmentId, false, async () => {
+      started += 1;
+      return { created: true, error: null };
+    });
+    automatic.resolve({ created: false, error: null });
+    expect(await second).toEqual(await first);
+    expect(started).toBe(0);
+  });
+
+  it("runs a click after the automatic attempt, unless that one made the project", async () => {
+    const order: string[] = [];
+    const inFlight = new Map();
+    const automatic = deferred();
+    void queueSandboxProject(inFlight, environmentId, false, () => automatic.promise);
+    const click = queueSandboxProject(inFlight, environmentId, true, async () => {
+      order.push("click");
+      return { created: true, error: null };
+    });
+    order.push("automatic done");
+    automatic.resolve({ created: false, error: null });
+    expect(await click).toEqual({ created: true, error: null });
+    expect(order).toEqual(["automatic done", "click"]);
+
+    const madeIt = deferred();
+    void queueSandboxProject(inFlight, environmentId, false, () => madeIt.promise);
+    let clicked = false;
+    const second = queueSandboxProject(inFlight, environmentId, true, async () => {
+      clicked = true;
+      return { created: false, error: "duplicate" };
+    });
+    madeIt.resolve({ created: true, error: null });
+    expect(await second).toEqual({ created: true, error: null });
+    expect(clicked).toBe(false);
   });
 });

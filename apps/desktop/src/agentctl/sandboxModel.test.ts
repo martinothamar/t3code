@@ -100,6 +100,11 @@ describe("isActionSettled", () => {
     expect(isActionSettled("starting", retrying)).toBe(true);
   });
 
+  it("does not settle a start on the stopped state agentctl reports right after it", () => {
+    expect(isActionSettled("starting", agent("worker", { stopped: true }))).toBe(false);
+    expect(isActionSettled("starting", agent("worker", { ready: true }))).toBe(true);
+  });
+
   it("waits for a deleted Sandbox to disappear", () => {
     expect(isActionSettled("deleting", agent("worker", { deleting: true }))).toBe(false);
     expect(isActionSettled("deleting", undefined)).toBe(true);

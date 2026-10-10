@@ -6,6 +6,7 @@ import {
   type DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -15,9 +16,12 @@ import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import { TestClock } from "effect/testing";
 
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import { SshLaunchError } from "@t3tools/ssh/errors";
+
 import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as AgentctlCli from "./AgentctlCli.ts";
 import type { AgentResource } from "./agentState.ts";
@@ -54,6 +58,10 @@ interface Harness {
   /** What the Sandbox's T3 server reports; plain, because fetch reads it. */
   readonly environment: { id: string };
   readonly disconnected: Deferred.Deferred<void>;
+  /** The next SSH reach fails, like a Sandbox still booting. */
+  readonly ensureFails: Ref.Ref<boolean>;
+  /** When set, a start waits for it and then fails, like a start a stop cut short. */
+  readonly startGate: Ref.Ref<Deferred.Deferred<void> | null>;
 }
 
 const makeHarness = Effect.gen(function* () {
@@ -63,6 +71,8 @@ const makeHarness = Effect.gen(function* () {
     ensured: yield* Ref.make(0),
     environment: { id: "env-1" },
     disconnected: yield* Deferred.make<void>(),
+    ensureFails: yield* Ref.make(false),
+    startGate: yield* Ref.make<Deferred.Deferred<void> | null>(null),
   } satisfies Harness;
 });
 
@@ -94,7 +104,20 @@ function layer(harness: Harness, baseDir: string) {
     ),
     sshInfo: () =>
       Effect.succeed({ alias: `agentctl-${NAME}`, workingDirectory: "/home/agent/code" }),
-    start: () => Ref.set(harness.agents, [agent("ready")]),
+    start: () =>
+      Ref.get(harness.startGate).pipe(
+        Effect.flatMap((gate) =>
+          gate === null
+            ? Ref.set(harness.agents, [agent("ready")])
+            : Deferred.await(gate).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    new AgentctlCli.AgentctlCommandError({ message: "Agent was stopped" }),
+                  ),
+                ),
+              ),
+        ),
+      ),
     stop: () => Ref.set(harness.agents, [agent("stopped")]),
     remove: () => Ref.set(harness.agents, []),
     apply: () => Ref.set(harness.agents, [agent("retrying")]),
@@ -110,6 +133,12 @@ function layer(harness: Harness, baseDir: string) {
     resolveHost: () => Effect.succeed(target),
     ensureEnvironment: () =>
       Ref.update(harness.ensured, (count) => count + 1).pipe(
+        Effect.andThen(Ref.getAndSet(harness.ensureFails, false)),
+        Effect.flatMap((fails) =>
+          fails
+            ? Effect.fail(new SshLaunchError({ message: "Sandbox still booting", stdout: "" }))
+            : Effect.void,
+        ),
         Effect.as({
           target,
           httpBaseUrl: "http://127.0.0.1:4010/",
@@ -259,6 +288,46 @@ describe("DesktopAgentctlSandboxes", () => {
         yield* sandboxes.start(NAME);
         const snapshot = yield* until(sandboxes, discovered("env-2"));
         assert.strictEqual(snapshot.sandboxes[0]?.projectCreated, false);
+      }),
+    ),
+  );
+
+  it.effect("keeps checking a known Sandbox quietly until the check succeeds", () =>
+    withSandboxes((sandboxes, harness) =>
+      Effect.gen(function* () {
+        yield* until(sandboxes, discovered("env-1"));
+        yield* sandboxes.stop(NAME);
+        yield* sandboxes.refresh;
+        harness.environment.id = "env-2";
+        yield* Ref.set(harness.ensureFails, true);
+        yield* sandboxes.start(NAME);
+        // The first check failed: the known environment stays, with no error of its own.
+        const failed = yield* sandboxes.refresh;
+        assert.strictEqual(failed.sandboxes[0]?.environmentId, "env-1");
+        assert.strictEqual(failed.sandboxes[0]?.connectError, null);
+        // It is checked again once the throttle passes, and finds the reset environment.
+        yield* TestClock.adjust("31 seconds");
+        yield* sandboxes.refresh;
+        yield* until(sandboxes, discovered("env-2"));
+      }),
+    ),
+  );
+
+  it.effect("does not report a start that a stop cut short as failed", () =>
+    withSandboxes((sandboxes, harness) =>
+      Effect.gen(function* () {
+        yield* until(sandboxes, discovered("env-1"));
+        yield* sandboxes.stop(NAME);
+        const gate = yield* Deferred.make<void>();
+        yield* Ref.set(harness.startGate, gate);
+        const starting = yield* Effect.forkChild(sandboxes.start(NAME));
+        yield* until(sandboxes, (snapshot) => snapshot.sandboxes[0]?.action === "starting");
+        assert.strictEqual((yield* sandboxes.stop(NAME)).error, null);
+        yield* Deferred.succeed(gate, undefined);
+        assert.strictEqual((yield* Fiber.join(starting)).error, null);
+        const sandbox = (yield* sandboxes.snapshot).sandboxes[0];
+        assert.strictEqual(sandbox?.action, null);
+        assert.strictEqual(sandbox?.actionError, null);
       }),
     ),
   );
