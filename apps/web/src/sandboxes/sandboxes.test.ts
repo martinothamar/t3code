@@ -3,7 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { sandboxStatus, suggestSandboxName } from "./sandboxActions";
 import { sandboxNameForTarget, sandboxRegistrations } from "./sandboxConnections";
-import { sandboxPickerItems } from "./useSandboxPicker";
 
 function sandbox(overrides: Partial<AgentctlSandbox> = {}): AgentctlSandbox {
   return {
@@ -51,26 +50,6 @@ describe("sandboxRegistrations", () => {
     };
     const [registration] = sandboxRegistrations([sandbox({ sshTarget: target })]);
     expect(registration?.profile.target).toEqual(target);
-  });
-});
-
-describe("sandboxPickerItems", () => {
-  it("offers Sandboxes that do not hold the draft's project yet", () => {
-    const items = sandboxPickerItems(
-      [
-        sandbox({ name: "here", environmentId: EnvironmentId.make("env-here") }),
-        sandbox({ name: "stopped", phase: "stopped" }),
-        sandbox({ name: "elsewhere", environmentId: EnvironmentId.make("env-elsewhere") }),
-        sandbox({ name: "booting", phase: "provisioning", environmentId: null }),
-        sandbox({ name: "going", phase: "terminating" }),
-      ],
-      new Set(["env-here"]),
-    );
-    expect(items.map(({ label, status, disabled }) => ({ label, status, disabled }))).toEqual([
-      { label: "stopped", status: "Start", disabled: false },
-      { label: "elsewhere", status: "Project not found", disabled: true },
-      { label: "booting", status: "Provisioning…", disabled: true },
-    ]);
   });
 });
 

@@ -5,7 +5,7 @@ import {
   type AgentctlSandboxSettings,
 } from "@t3tools/contracts";
 import { FolderPlusIcon, PlusIcon, XIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { SettingsRow, SettingsSection } from "../components/settings/settingsLayout";
 import { searchableSetting } from "../components/settings/settingsSearch";
@@ -13,6 +13,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
+import { useProjects } from "../state/entities";
 import { useEnvironmentPresentation } from "../state/presentation";
 import { openNewSandboxDialog } from "./NewSandboxDialog";
 import {
@@ -28,7 +29,7 @@ import {
 } from "./sandboxActions";
 import { runningLabel, useRunningThreadCounts } from "./sandboxActivity";
 import { readAgentctlBridge } from "./sandboxConnections";
-import { useSandboxProjectSeeding } from "./sandboxProjects";
+import { useSandboxProject } from "./sandboxProjects";
 import { useSandboxSnapshot } from "./useSandboxes";
 
 const TONE_VARIANT = {
@@ -79,6 +80,11 @@ export function SandboxesSettings() {
 
 function SandboxRows({ sandboxes }: { readonly sandboxes: ReadonlyArray<AgentctlSandbox> }) {
   const running = useRunningThreadCounts();
+  const projects = useProjects();
+  const environmentsWithProjects = useMemo(
+    () => new Set<string>(projects.map((project) => project.environmentId)),
+    [projects],
+  );
   return sandboxes.map((sandbox) => (
     <SandboxRow
       key={sandbox.name}
@@ -88,6 +94,9 @@ function SandboxRows({ sandboxes }: { readonly sandboxes: ReadonlyArray<Agentctl
           ? 0
           : (running.get(EnvironmentId.make(sandbox.environmentId)) ?? 0)
       }
+      hasProject={
+        sandbox.environmentId !== null && environmentsWithProjects.has(sandbox.environmentId)
+      }
     />
   ));
 }
@@ -95,15 +104,17 @@ function SandboxRows({ sandboxes }: { readonly sandboxes: ReadonlyArray<Agentctl
 function SandboxRow({
   sandbox,
   running,
+  hasProject,
 }: {
   readonly sandbox: AgentctlSandbox;
   readonly running: number;
+  readonly hasProject: boolean;
 }) {
   const environmentId =
     sandbox.environmentId === null ? null : EnvironmentId.make(sandbox.environmentId);
   const { presentation } = useEnvironmentPresentation(environmentId);
-  const seed = useSandboxProjectSeeding();
-  const [rescanning, setRescanning] = useState(false);
+  const ensureProject = useSandboxProject();
+  const [adding, setAdding] = useState(false);
   const status = sandboxStatus(sandbox);
   const detail = sandboxStatusDetail(sandbox);
   const connection =
@@ -112,33 +123,26 @@ function SandboxRow({
       : null;
   const connected = presentation?.connection.phase === "connected";
 
-  const rescan = async () => {
+  // The way back after removing the Sandbox's project.
+  const addProject = async () => {
     if (environmentId === null) return;
-    setRescanning(true);
-    const result = await seed({ name: sandbox.name, environmentId, includeSeeded: true }).catch(
+    setAdding(true);
+    const result = await ensureProject({ name: sandbox.name, environmentId, force: true }).catch(
       (cause: unknown) => ({
-        created: 0,
+        created: false,
         error: cause instanceof Error ? cause.message : String(cause),
       }),
     );
-    setRescanning(false);
-    toastManager.add(
-      stackedThreadToast(
-        result.error === null
-          ? {
-              type: "success",
-              title:
-                result.created === 0
-                  ? `No new repositories in ${sandbox.name}`
-                  : `Added ${result.created} ${result.created === 1 ? "project" : "projects"} from ${sandbox.name}`,
-            }
-          : {
-              type: "error",
-              title: `Could not add projects from ${sandbox.name}`,
-              description: result.error,
-            },
-      ),
-    );
+    setAdding(false);
+    if (result.error !== null) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: `Could not add the ${sandbox.name} project`,
+          description: result.error,
+        }),
+      );
+    }
   };
 
   return (
@@ -168,14 +172,14 @@ function SandboxRow({
               Start
             </Button>
           ) : null}
-          {connected ? (
+          {connected && !hasProject ? (
             <Button
               size="xs"
               variant="ghost-muted"
-              disabled={rescanning}
-              onClick={() => void rescan()}
+              disabled={adding}
+              onClick={() => void addProject()}
             >
-              {rescanning ? "Scanning…" : "Find projects"}
+              {adding ? "Adding…" : "Add project"}
             </Button>
           ) : null}
           {canStopSandbox(sandbox) ? (

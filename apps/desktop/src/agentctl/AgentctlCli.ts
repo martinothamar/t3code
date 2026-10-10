@@ -42,11 +42,6 @@ export class AgentctlCli extends Context.Service<
     readonly remove: (name: string) => Effect.Effect<void, AgentctlError>;
     /** Applies without waiting; provisioning progress shows up in `listAgents`. */
     readonly apply: (input: AgentctlApplyInput) => Effect.Effect<void, AgentctlError>;
-    /** Runs a command in the Sandbox as its `agent` user and returns stdout. */
-    readonly exec: (
-      name: string,
-      command: ReadonlyArray<string>,
-    ) => Effect.Effect<string, AgentctlError>;
   }
 >()("@t3tools/desktop/agentctl/AgentctlCli") {}
 
@@ -182,7 +177,6 @@ export const make = Effect.gen(function* () {
         name,
         ...(envFile === null ? [] : ["--env-file", envFile]),
       ]).pipe(Effect.asVoid),
-    exec: (name, command) => runChecked(["exec", `agent/${name}`, "--", ...command]),
   });
 });
 

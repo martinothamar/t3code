@@ -7,16 +7,12 @@ import { useEnvironmentPresentation } from "../state/presentation";
 import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
 import { useAtomCommand } from "../state/use-atom-command";
-import { useSandboxProjectSeeding } from "./sandboxProjects";
+import { useSandboxProject } from "./sandboxProjects";
 import { useSandboxes } from "./useSandboxes";
-
-const RESCAN_INTERVAL_MS = 20_000;
-const RESCANS_AFTER_CONNECT = 15;
 
 /**
  * Keeps each known Sandbox's environment in step with the Sandbox: connects
- * as soon as it is running again, and adds its repositories as projects each
- * time T3 connects to it.
+ * as soon as it is running again, and gives it its project once connected.
  */
 export function SandboxConnectionCoordinator() {
   const sandboxes = useSandboxes();
@@ -60,10 +56,10 @@ function SandboxEnvironmentCoordinator(props: {
 }) {
   const { presentation } = useEnvironmentPresentation(props.environmentId);
   const shell = useEnvironmentQuery(environmentShell.stateAtom(props.environmentId));
-  const seed = useSandboxProjectSeeding();
+  const ensureProject = useSandboxProject();
   const retryNow = useAtomCommand(environmentCatalog.retryNow, { reportFailure: false });
   const connected = presentation?.connection.phase === "connected";
-  // Wait for the project list, or every repository would look new.
+  // Wait for the project list, or the project would look missing.
   const ready = connected && shell.data?.snapshot._tag === "Some";
 
   // A started Sandbox should not wait out the backoff its stopped time built up.
@@ -74,25 +70,14 @@ function SandboxEnvironmentCoordinator(props: {
     if (props.running) reconnect();
   }, [props.running]);
 
-  // Repositories are often still being cloned when a Sandbox comes up, so
-  // look again for a few minutes after each connect.
   useEffect(() => {
     if (!ready) return;
-    const scan = () =>
-      void seed({
-        name: props.name,
-        environmentId: props.environmentId,
-        includeSeeded: false,
-      }).catch((error: unknown) => console.warn("Could not add Sandbox projects.", error));
-    scan();
-    let remaining = RESCANS_AFTER_CONNECT;
-    const interval = setInterval(() => {
-      remaining -= 1;
-      scan();
-      if (remaining === 0) clearInterval(interval);
-    }, RESCAN_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [ready, seed, props.name, props.environmentId]);
+    void ensureProject({
+      name: props.name,
+      environmentId: props.environmentId,
+      force: false,
+    }).catch((error: unknown) => console.warn("Could not add the Sandbox project.", error));
+  }, [ready, ensureProject, props.name, props.environmentId]);
 
   return null;
 }

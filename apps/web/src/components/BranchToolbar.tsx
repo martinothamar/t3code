@@ -43,8 +43,6 @@ import {
   type BranchToolbarBranchSelectorHandle,
 } from "./BranchToolbarBranchSelector";
 import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
-import { SandboxEnvironmentHint, SandboxMenuItems } from "../sandboxes/SandboxPickerGroup";
-import { useOffersSandboxes, useSandboxPicker } from "../sandboxes/useSandboxPicker";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
@@ -186,11 +184,6 @@ const RunContextSelector = memo(function RunContextSelector({
     () => availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null,
     [availableEnvironments, environmentId],
   );
-  const availableEnvironmentIds = useMemo(
-    () => new Set<string>((availableEnvironments ?? []).map((env) => env.environmentId)),
-    [availableEnvironments],
-  );
-  const sandboxPicker = useSandboxPicker({ availableEnvironmentIds, onEnvironmentChange });
   const WorkspaceIcon =
     effectiveEnvMode === "worktree"
       ? FolderGit2Icon
@@ -328,11 +321,11 @@ const RunContextSelector = memo(function RunContextSelector({
               <MenuGroupLabel>Run on</MenuGroupLabel>
               <MenuRadioGroup
                 value={autoEnvironmentLabel ? "auto" : environmentId}
-                onValueChange={(value) => {
-                  if (value === "auto") return onAutoEnvironment?.();
-                  sandboxPicker.environmentChosen(value);
-                  return onEnvironmentChange(value as EnvironmentId);
-                }}
+                onValueChange={(value) =>
+                  value === "auto"
+                    ? onAutoEnvironment?.()
+                    : onEnvironmentChange(value as EnvironmentId)
+                }
               >
                 {onAutoEnvironment && (
                   <MenuRadioItem
@@ -358,18 +351,13 @@ const RunContextSelector = memo(function RunContextSelector({
                     value={env.environmentId}
                     closeOnClick
                   >
-                    <span className="flex w-full min-w-0 items-center gap-1.5">
+                    <span className="flex min-w-0 items-center gap-1.5">
                       <EnvironmentMachineIcon kind={env.machine} className="size-3" />
                       <span className="min-w-0 truncate">{env.label}</span>
-                      <SandboxEnvironmentHint
-                        picker={sandboxPicker}
-                        environmentId={env.environmentId}
-                      />
                     </span>
                   </MenuRadioItem>
                 ))}
               </MenuRadioGroup>
-              <SandboxMenuItems picker={sandboxPicker} disabled={envLocked} />
             </MenuGroup>
             <MenuSeparator />
           </>
@@ -706,11 +694,8 @@ export const BranchToolbar = memo(function BranchToolbar({
     ],
   );
 
-  const offersSandboxes = useOffersSandboxes();
   const showEnvironmentPicker = Boolean(
-    availableEnvironments &&
-    (availableEnvironments.length > 1 || offersSandboxes) &&
-    onEnvironmentChange,
+    availableEnvironments && availableEnvironments.length > 1 && onEnvironmentChange,
   );
   const activeEnvironmentOption =
     availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null;

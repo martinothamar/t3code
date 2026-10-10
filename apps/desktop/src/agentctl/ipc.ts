@@ -1,11 +1,10 @@
 import {
   AgentctlActionResult,
   AgentctlCreateSandboxInput,
-  AgentctlMarkReposSeededInput,
+  AgentctlMarkProjectCreatedInput,
   AgentctlSandboxManifest,
-  AgentctlSandboxRepoScan,
-  AgentctlSandboxRepoScanInput,
   AgentctlSandboxSettings,
+  AgentctlSandboxWorkspace,
   AgentctlSandboxesSnapshot,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -67,22 +66,20 @@ const setSettings = DesktopIpc.makeIpcMethod({
     Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.setSettings(settings)),
 });
 
-const scanRepositories = DesktopIpc.makeIpcMethod({
-  channel: AGENTCTL_CHANNELS.scanRepositories,
-  payload: AgentctlSandboxRepoScanInput,
-  result: AgentctlSandboxRepoScan,
-  handler: (input) =>
-    Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.scanRepositories(input)),
+const getWorkspace = DesktopIpc.makeIpcMethod({
+  channel: AGENTCTL_CHANNELS.getWorkspace,
+  payload: Schema.String,
+  result: AgentctlSandboxWorkspace,
+  handler: (name) =>
+    Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.getWorkspace(name)),
 });
 
-const markRepositoriesSeeded = DesktopIpc.makeIpcMethod({
-  channel: AGENTCTL_CHANNELS.markRepositoriesSeeded,
-  payload: AgentctlMarkReposSeededInput,
+const markProjectCreated = DesktopIpc.makeIpcMethod({
+  channel: AGENTCTL_CHANNELS.markProjectCreated,
+  payload: AgentctlMarkProjectCreatedInput,
   result: Schema.Void,
   handler: (input) =>
-    Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) =>
-      sandboxes.markRepositoriesSeeded(input),
-    ),
+    Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.markProjectCreated(input)),
 });
 
 export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctlHandlers")(
@@ -97,7 +94,7 @@ export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctl
     yield* ipc.handle(listManifests);
     yield* ipc.handle(getSettings);
     yield* ipc.handle(setSettings);
-    yield* ipc.handle(scanRepositories);
-    yield* ipc.handle(markRepositoriesSeeded);
+    yield* ipc.handle(getWorkspace);
+    yield* ipc.handle(markProjectCreated);
   },
 );

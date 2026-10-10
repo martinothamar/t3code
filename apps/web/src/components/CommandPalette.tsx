@@ -181,7 +181,7 @@ import {
   type SearchOverlayMode,
 } from "./CommandPalette.logic";
 import { sandboxPaletteItems } from "../sandboxes/sandboxPaletteItems";
-import { useOffersSandboxes } from "../sandboxes/useSandboxPicker";
+import { useOffersSandboxes } from "../sandboxes/sandboxNotices";
 import { useSandboxes } from "../sandboxes/useSandboxes";
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";

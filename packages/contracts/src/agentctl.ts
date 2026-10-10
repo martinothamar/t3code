@@ -86,25 +86,18 @@ export const AgentctlCreateSandboxInput = Schema.Struct({
 });
 export type AgentctlCreateSandboxInput = typeof AgentctlCreateSandboxInput.Type;
 
-export const AgentctlSandboxRepoScanInput = Schema.Struct({
-  name: Schema.String,
-  /** False skips repositories T3 already created a project for once. */
-  includeSeeded: Schema.Boolean,
-});
-export type AgentctlSandboxRepoScanInput = typeof AgentctlSandboxRepoScanInput.Type;
-
-export const AgentctlSandboxRepoScan = Schema.Struct({
+/** Where a Sandbox's agents work, and whether T3 already made a project of it. */
+export const AgentctlSandboxWorkspace = Schema.Struct({
   workingDirectory: Schema.String,
-  repositories: Schema.Array(Schema.String),
+  projectCreated: Schema.Boolean,
 });
-export type AgentctlSandboxRepoScan = typeof AgentctlSandboxRepoScan.Type;
+export type AgentctlSandboxWorkspace = typeof AgentctlSandboxWorkspace.Type;
 
-export const AgentctlMarkReposSeededInput = Schema.Struct({
+export const AgentctlMarkProjectCreatedInput = Schema.Struct({
   name: Schema.String,
   environmentId: EnvironmentId,
-  repositories: Schema.Array(Schema.String),
 });
-export type AgentctlMarkReposSeededInput = typeof AgentctlMarkReposSeededInput.Type;
+export type AgentctlMarkProjectCreatedInput = typeof AgentctlMarkProjectCreatedInput.Type;
 
 /** Lifecycle requests resolve with agentctl's error message instead of rejecting. */
 export const AgentctlActionResult = Schema.Struct({
@@ -123,6 +116,6 @@ export interface DesktopAgentctlBridge {
   listManifests: () => Promise<readonly AgentctlSandboxManifest[]>;
   getSettings: () => Promise<AgentctlSandboxSettings>;
   setSettings: (settings: AgentctlSandboxSettings) => Promise<AgentctlSandboxSettings>;
-  scanRepositories: (input: AgentctlSandboxRepoScanInput) => Promise<AgentctlSandboxRepoScan>;
-  markRepositoriesSeeded: (input: AgentctlMarkReposSeededInput) => Promise<void>;
+  getWorkspace: (name: string) => Promise<AgentctlSandboxWorkspace>;
+  markProjectCreated: (input: AgentctlMarkProjectCreatedInput) => Promise<void>;
 }

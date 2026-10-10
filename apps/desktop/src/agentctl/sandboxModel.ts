@@ -17,14 +17,15 @@ import {
 
 /**
  * What T3 remembers about a Sandbox it reached: the environment its server
- * reported, so a stopped Sandbox still shows up as that environment, and the
- * repositories it already made projects for, so removing one sticks.
+ * reported, so a stopped Sandbox still shows up as that environment, and
+ * whether it already made the Sandbox's project, so removing it sticks.
  */
 export const SandboxRecord = Schema.Struct({
   sandboxId: Schema.NullOr(Schema.String),
   environmentId: EnvironmentId,
   sshTarget: Schema.NullOr(DesktopSshEnvironmentTargetSchema),
-  seededRepositories: Schema.Array(Schema.String),
+  // Optional so a state file from before this field still loads.
+  projectCreated: Schema.optionalKey(Schema.Boolean),
 });
 export type SandboxRecord = typeof SandboxRecord.Type;
 
@@ -73,15 +74,15 @@ export function needsDiscovery(record: SandboxRecord | undefined, agent: AgentRe
   return sandboxId !== null && record.sandboxId !== null && sandboxId !== record.sandboxId;
 }
 
-/** The record after discovery: the same environment keeps its seeded repositories. */
+/** The record after discovery: the same environment keeps its project state. */
 export function discoveredRecord(
   previous: SandboxRecord | undefined,
-  discovered: Omit<SandboxRecord, "seededRepositories">,
+  discovered: Omit<SandboxRecord, "projectCreated">,
 ): SandboxRecord {
   return {
     ...discovered,
-    seededRepositories:
-      previous?.environmentId === discovered.environmentId ? previous.seededRepositories : [],
+    projectCreated:
+      previous?.environmentId === discovered.environmentId && previous.projectCreated === true,
   };
 }
 
@@ -151,24 +152,4 @@ export function suggestSandboxName(
     const candidate = `${base}-${index}`;
     if (!taken.has(candidate)) return candidate;
   }
-}
-
-/**
- * Lists the Git repositories directly under the working directory. A
- * repository without a commit yet is skipped: it is usually a clone still in
- * progress, and its directory may still be renamed.
- */
-export const REPOSITORY_SCAN_SCRIPT = `for dir in "$1"/*/; do
-  dir="\${dir%/}"
-  [ -e "$dir/.git" ] || continue
-  git -C "$dir" rev-parse --verify --quiet HEAD >/dev/null 2>&1 || continue
-  printf '%s\\n' "$dir"
-done
-exit 0`;
-
-export function parseRepositoryList(stdout: string): string[] {
-  return stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("/"));
 }

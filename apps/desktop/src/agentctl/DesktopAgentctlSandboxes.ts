@@ -3,11 +3,10 @@ import {
   AgentctlSandboxSettings,
   type AgentctlActionResult,
   type AgentctlCreateSandboxInput,
-  type AgentctlMarkReposSeededInput,
+  type AgentctlMarkProjectCreatedInput,
   type AgentctlSandboxAction,
   type AgentctlSandboxManifest,
-  type AgentctlSandboxRepoScan,
-  type AgentctlSandboxRepoScanInput,
+  type AgentctlSandboxWorkspace,
   type AgentctlSandboxesSnapshot,
   type DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
@@ -32,13 +31,11 @@ import { discoverManifests, expandHome } from "./manifests.ts";
 import {
   DEFAULT_SANDBOX_SETTINGS,
   IDLE_RUNTIME,
-  REPOSITORY_SCAN_SCRIPT,
   SandboxStoreDocument,
   buildSandbox,
   discoveredRecord,
   isActionSettled,
   needsDiscovery,
-  parseRepositoryList,
   reconcileRecords,
   sandboxNameError,
   type SandboxRuntime,
@@ -63,10 +60,10 @@ export class DesktopAgentctlSandboxes extends Context.Service<
     readonly setSettings: (
       settings: AgentctlSandboxSettings,
     ) => Effect.Effect<AgentctlSandboxSettings>;
-    readonly scanRepositories: (
-      input: AgentctlSandboxRepoScanInput,
-    ) => Effect.Effect<AgentctlSandboxRepoScan, AgentctlCli.AgentctlError>;
-    readonly markRepositoriesSeeded: (input: AgentctlMarkReposSeededInput) => Effect.Effect<void>;
+    readonly getWorkspace: (
+      name: string,
+    ) => Effect.Effect<AgentctlSandboxWorkspace, AgentctlCli.AgentctlError>;
+    readonly markProjectCreated: (input: AgentctlMarkProjectCreatedInput) => Effect.Effect<void>;
   }
 >()("@t3tools/desktop/agentctl/DesktopAgentctlSandboxes") {}
 
@@ -368,34 +365,24 @@ export const make = Effect.gen(function* () {
     getSettings,
     setSettings: (settings) =>
       updateStore((document) => ({ ...document, settings })).pipe(Effect.andThen(getSettings)),
-    scanRepositories: ({ name, includeSeeded }) =>
-      Effect.gen(function* () {
-        const { workingDirectory } = yield* cli.sshInfo(name);
-        const stdout = yield* cli.exec(name, [
-          "sh",
-          "-c",
-          REPOSITORY_SCAN_SCRIPT,
-          "sh",
-          workingDirectory,
-        ]);
-        const seeded = new Set(
-          includeSeeded
-            ? []
-            : ((yield* Ref.get(store)).sandboxes?.[name]?.seededRepositories ?? []),
-        );
-        return {
-          workingDirectory,
-          repositories: parseRepositoryList(stdout).filter((repository) => !seeded.has(repository)),
-        } satisfies AgentctlSandboxRepoScan;
-      }),
-    markRepositoriesSeeded: ({ name, environmentId, repositories }) =>
+    getWorkspace: (name) =>
+      cli.sshInfo(name).pipe(
+        Effect.flatMap(({ workingDirectory }) =>
+          Ref.get(store).pipe(
+            Effect.map((document): AgentctlSandboxWorkspace => ({
+              workingDirectory,
+              projectCreated: document.sandboxes?.[name]?.projectCreated ?? false,
+            })),
+          ),
+        ),
+      ),
+    markProjectCreated: ({ name, environmentId }) =>
       updateStore((document) => {
         const record = document.sandboxes?.[name];
         if (record === undefined || record.environmentId !== environmentId) return document;
-        const seededRepositories = [...new Set([...record.seededRepositories, ...repositories])];
         return {
           ...document,
-          sandboxes: { ...document.sandboxes, [name]: { ...record, seededRepositories } },
+          sandboxes: { ...document.sandboxes, [name]: { ...record, projectCreated: true } },
         };
       }),
   });

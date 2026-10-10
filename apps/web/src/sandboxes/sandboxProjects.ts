@@ -2,82 +2,70 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useCallback } from "react";
 
-import { findProjectByPath, inferProjectTitleFromPath } from "../lib/projectPaths";
+import { findProjectByPath } from "../lib/projectPaths";
 import { newProjectId } from "../lib/utils";
 import { readProjects } from "../state/entities";
 import { projectEnvironment } from "../state/projects";
 import { useAtomCommand } from "../state/use-atom-command";
 import { readAgentctlBridge } from "./sandboxConnections";
 
-export interface SandboxProjectSeedResult {
-  readonly created: number;
+export interface SandboxProjectResult {
+  readonly created: boolean;
   readonly error: string | null;
 }
 
-// One scan per environment at a time: a reconnect and a manual rescan can overlap.
-const inFlight = new Map<EnvironmentId, Promise<SandboxProjectSeedResult>>();
+// One at a time per environment: a reconnect and a click can overlap.
+const inFlight = new Map<EnvironmentId, Promise<SandboxProjectResult>>();
 
 /**
- * Creates a project for each Git repository in a Sandbox's working directory.
- * A repository it created a project for once is skipped afterwards unless
- * `includeSeeded` is set, so removing such a project sticks until a manual
- * rescan.
+ * Gives a Sandbox its one project: its working directory, named after the
+ * Agent, where agentctl Sessions start too. It is made once, so a project the
+ * user removes stays removed unless `force` asks for it again.
  */
-export function useSandboxProjectSeeding() {
+export function useSandboxProject() {
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
 
   return useCallback(
     (input: {
       readonly name: string;
       readonly environmentId: EnvironmentId;
-      readonly includeSeeded: boolean;
-    }): Promise<SandboxProjectSeedResult> => {
+      readonly force: boolean;
+    }): Promise<SandboxProjectResult> => {
       const running = inFlight.get(input.environmentId);
       if (running !== undefined) return running;
-      const run = (async (): Promise<SandboxProjectSeedResult> => {
+      const run = (async (): Promise<SandboxProjectResult> => {
         const bridge = readAgentctlBridge();
-        if (bridge === null) return { created: 0, error: null };
-        const scan = await bridge.scanRepositories({
-          name: input.name,
-          includeSeeded: input.includeSeeded,
+        if (bridge === null) return { created: false, error: null };
+        const workspace = await bridge.getWorkspace(input.name);
+        if (workspace.projectCreated && !input.force) return { created: false, error: null };
+        const markCreated = () =>
+          bridge.markProjectCreated({ name: input.name, environmentId: input.environmentId });
+        const projects = readProjects().filter(
+          (project) => project.environmentId === input.environmentId,
+        );
+        if (findProjectByPath(projects, workspace.workingDirectory)) {
+          await markCreated();
+          return { created: false, error: null };
+        }
+        const result = await createProject({
+          environmentId: input.environmentId,
+          input: {
+            projectId: newProjectId(),
+            title: input.name,
+            workspaceRoot: workspace.workingDirectory,
+            createWorkspaceRootIfMissing: false,
+            defaultModelSelection: null,
+          },
         });
-        const seeded: string[] = [];
-        let created = 0;
-        let error: string | null = null;
-        for (const repository of scan.repositories) {
-          const projects = readProjects().filter(
-            (project) => project.environmentId === input.environmentId,
-          );
-          if (findProjectByPath(projects, repository)) {
-            seeded.push(repository);
-            continue;
-          }
-          const result = await createProject({
-            environmentId: input.environmentId,
-            input: {
-              projectId: newProjectId(),
-              title: inferProjectTitleFromPath(repository),
-              workspaceRoot: repository,
-              createWorkspaceRootIfMissing: false,
-              defaultModelSelection: null,
-            },
-          });
-          if (result._tag === "Failure") {
-            const failure = squashAtomCommandFailure(result);
-            error ??= failure instanceof Error ? failure.message : "Could not add a project.";
-            continue;
-          }
-          seeded.push(repository);
-          created += 1;
+        if (result._tag === "Failure") {
+          const failure = squashAtomCommandFailure(result);
+          return {
+            created: false,
+            error: failure instanceof Error ? failure.message : "Could not add the project.",
+          };
         }
-        if (seeded.length > 0) {
-          await bridge.markRepositoriesSeeded({
-            name: input.name,
-            environmentId: input.environmentId,
-            repositories: seeded,
-          });
-        }
-        return { created, error };
+        await markCreated();
+        return { created: true, error: null };
       })().finally(() => inFlight.delete(input.environmentId));
       inFlight.set(input.environmentId, run);
       return run;

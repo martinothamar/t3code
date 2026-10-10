@@ -7,7 +7,6 @@ import {
   discoveredRecord,
   isActionSettled,
   needsDiscovery,
-  parseRepositoryList,
   reconcileRecords,
   sandboxNameError,
   suggestSandboxName,
@@ -41,7 +40,7 @@ const record = (sandboxId: string | null): SandboxRecord => ({
   sandboxId,
   environmentId: EnvironmentId.make("env-1"),
   sshTarget: null,
-  seededRepositories: [],
+  projectCreated: false,
 });
 
 describe("reconcileRecords", () => {
@@ -68,18 +67,16 @@ describe("discovery", () => {
     expect(needsDiscovery(record("a"), agent("worker"))).toBe(false);
   });
 
-  it("keeps seeded repositories only for the same environment", () => {
-    const previous = { ...record("a"), seededRepositories: ["/home/agent/code/app"] };
+  it("keeps the project state only for the same environment", () => {
+    const previous = { ...record("a"), projectCreated: true };
     const sameEnvironment = {
       sandboxId: "b",
       environmentId: previous.environmentId,
       sshTarget: null,
     };
-    expect(discoveredRecord(previous, sameEnvironment).seededRepositories).toEqual([
-      "/home/agent/code/app",
-    ]);
+    expect(discoveredRecord(previous, sameEnvironment).projectCreated).toBe(true);
     const newEnvironment = { ...sameEnvironment, environmentId: EnvironmentId.make("env-2") };
-    expect(discoveredRecord(previous, newEnvironment).seededRepositories).toEqual([]);
+    expect(discoveredRecord(previous, newEnvironment).projectCreated).toBe(false);
   });
 });
 
@@ -110,14 +107,6 @@ describe("Sandbox names", () => {
     expect(suggestSandboxName("worker", existing)).toBe("worker-3");
     expect(suggestSandboxName("reviewer", existing)).toBe("reviewer");
     expect(suggestSandboxName(null, existing)).toBe("sandbox");
-  });
-});
-
-describe("parseRepositoryList", () => {
-  it("keeps absolute paths and drops anything else the shell printed", () => {
-    expect(
-      parseRepositoryList("/home/agent/code/app\n\nwarning: x\n/home/agent/code/lib\n"),
-    ).toEqual(["/home/agent/code/app", "/home/agent/code/lib"]);
   });
 });
 

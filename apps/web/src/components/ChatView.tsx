@@ -404,7 +404,7 @@ import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../termina
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { startSandboxNamed } from "../sandboxes/sandboxActions";
 import { sandboxNameForTarget } from "../sandboxes/sandboxConnections";
-import { useOffersSandboxes, useSandboxUnavailableNotice } from "../sandboxes/useSandboxPicker";
+import { useSandboxUnavailableNotice } from "../sandboxes/sandboxNotices";
 import { useEnvironmentQuery } from "../state/query";
 import { useEnvironmentScope } from "~/state/session";
 import {
@@ -2818,10 +2818,6 @@ export default function ChatView(props: ChatViewProps) {
     scratchWorkspaceRootFor,
   ]);
   const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;
-  // agentctl Sandboxes can be started or created from the picker, so a draft
-  // gets it even when the project lives in one environment.
-  const offersSandboxes = useOffersSandboxes() && draftId !== null;
-  const canPickEnvironment = hasMultipleEnvironments || offersSandboxes;
   // Auto balance retargets to an existing project; a machine's "No project"
   // folder may not exist until it is picked.
   const canAutoBalanceEnvironments = hasMultipleEnvironments && !activeProjectIsScratch;
@@ -2831,7 +2827,7 @@ export default function ChatView(props: ChatViewProps) {
     ) ?? null;
   const showComposerEnvironmentIndicator = shouldShowEnvironmentIndicator({
     activeEnvironment: activeEnvironmentOption,
-    canPickEnvironment,
+    canPickEnvironment: hasMultipleEnvironments,
   });
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
@@ -11875,7 +11871,7 @@ export default function ChatView(props: ChatViewProps) {
                                 {...(canCheckoutPullRequestIntoThread
                                   ? { onCheckoutPullRequestRequest: openPullRequestDialog }
                                   : {})}
-                                {...(canPickEnvironment ? { onEnvironmentChange } : {})}
+                                {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
                                 autoEnvironmentLabel={autoEnvironmentLabel}
                                 onAutoEnvironment={
                                   draftId &&

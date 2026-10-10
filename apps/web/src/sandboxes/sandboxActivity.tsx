@@ -3,7 +3,6 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { useMemo } from "react";
 
 import { useThreadShells } from "../state/entities";
-import { useSandboxSelector } from "./useSandboxes";
 
 /** How many threads are working in each environment, so a Sandbox can show it is busy. */
 export function useRunningThreadCounts(): ReadonlyMap<EnvironmentId, number> {
@@ -20,19 +19,4 @@ export function useRunningThreadCounts(): ReadonlyMap<EnvironmentId, number> {
 
 export function runningLabel(count: number): string {
   return count === 1 ? "1 thread running" : `${count} threads running`;
-}
-
-/**
- * Names the Sandbox on a thread row next to its machine glyph. Other remote
- * environments keep the glyph alone, as upstream shows them.
- */
-export function SandboxThreadLabel(props: {
-  readonly environmentId: EnvironmentId;
-  readonly label: string | null;
-}) {
-  const isSandbox = useSandboxSelector((snapshot) =>
-    snapshot.sandboxes.some((sandbox) => sandbox.environmentId === props.environmentId),
-  );
-  if (!isSandbox || props.label === null) return null;
-  return <span className="max-w-24 truncate text-2xs leading-none">{props.label}</span>;
 }

@@ -1,10 +1,7 @@
-import type {
-  AgentctlSandbox,
-  AgentctlSandboxManifest,
-  AgentctlSandboxSettings,
-} from "@t3tools/contracts";
+import type { AgentctlSandboxManifest, AgentctlSandboxSettings } from "@t3tools/contracts";
 import { FolderSearchIcon } from "lucide-react";
-import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { useEffect, useEffectEvent, useState, useSyncExternalStore } from "react";
 
 import { Button } from "../components/ui/button";
 import {
@@ -26,6 +23,8 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { Spinner } from "../components/ui/spinner";
+import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useProjects } from "../state/entities";
 import {
   deleteSandbox,
   sandboxStatus,
@@ -35,22 +34,17 @@ import {
 import { readAgentctlBridge } from "./sandboxConnections";
 import { refreshSandboxSnapshot, useSandbox, useSandboxes } from "./useSandboxes";
 
-export interface NewSandboxRequest {
-  /** Runs once the new Sandbox is connected as an environment. */
-  readonly onReady?: (sandbox: AgentctlSandbox) => void;
-}
-
-let request: NewSandboxRequest | null = null;
+let open = false;
 const listeners = new Set<() => void>();
 
-/** Opens the dialog from anywhere: the location picker, Settings or the command palette. */
-export function openNewSandboxDialog(next: NewSandboxRequest = {}) {
-  request = next;
+/** Opens the dialog from anywhere: Settings or the command palette. */
+export function openNewSandboxDialog() {
+  open = true;
   for (const listener of listeners) listener();
 }
 
 function closeNewSandboxDialog() {
-  request = null;
+  open = false;
   for (const listener of listeners) listener();
 }
 
@@ -60,14 +54,11 @@ function subscribe(listener: () => void) {
 }
 
 export function NewSandboxDialogHost() {
-  const current = useSyncExternalStore(subscribe, () => request);
+  const isOpen = useSyncExternalStore(subscribe, () => open);
   if (readAgentctlBridge() === null) return null;
   return (
-    <Dialog
-      open={current !== null}
-      onOpenChange={(open) => (open ? null : closeNewSandboxDialog())}
-    >
-      {current === null ? null : <NewSandboxDialogContent request={current} />}
+    <Dialog open={isOpen} onOpenChange={(next) => (next ? null : closeNewSandboxDialog())}>
+      {isOpen ? <NewSandboxDialogContent /> : null}
     </Dialog>
   );
 }
@@ -78,7 +69,7 @@ function manifestLabel(manifest: AgentctlSandboxManifest) {
   return manifest.variant === null ? name : `${name} · ${manifest.variant}`;
 }
 
-function NewSandboxDialogContent({ request }: { readonly request: NewSandboxRequest }) {
+function NewSandboxDialogContent() {
   const sandboxes = useSandboxes();
   const [manifests, setManifests] = useState<ReadonlyArray<AgentctlSandboxManifest> | null>(null);
   const [settings, setSettings] = useState<AgentctlSandboxSettings | null>(null);
@@ -90,7 +81,8 @@ function NewSandboxDialogContent({ request }: { readonly request: NewSandboxRequ
   const [error, setError] = useState<string | null>(null);
   const [createdName, setCreatedName] = useState<string | null>(null);
   const created = useSandbox(createdName);
-  const readyReported = useRef(false);
+  const projects = useProjects();
+  const openThread = useNewThreadHandler();
 
   const apply = (
     nextManifests: ReadonlyArray<AgentctlSandboxManifest>,
@@ -130,19 +122,15 @@ function NewSandboxDialogContent({ request }: { readonly request: NewSandboxRequ
   const effectiveName = nameEdited ? name : suggestedName;
 
   const ready = created !== null && created.phase === "ready" && created.environmentId !== null;
+  // The Sandbox's project appears once T3 has connected to it.
+  const project =
+    created?.environmentId == null
+      ? null
+      : (projects.find((candidate) => candidate.environmentId === created.environmentId) ?? null);
   const failed =
     created !== null &&
     created.action === null &&
     (created.phase === "failed" || created.actionError !== null);
-
-  useEffect(() => {
-    if (!ready || created === null || readyReported.current) return;
-    readyReported.current = true;
-    if (request.onReady) {
-      request.onReady(created);
-      closeNewSandboxDialog();
-    }
-  }, [ready, created, request]);
 
   const addManifestRoot = async () => {
     const bridge = readAgentctlBridge();
@@ -186,7 +174,7 @@ function NewSandboxDialogContent({ request }: { readonly request: NewSandboxRequ
           <DialogTitle>{createdName}</DialogTitle>
           <DialogDescription>
             {ready
-              ? "The Sandbox is running and connected."
+              ? "The Sandbox is running. Its project is its working directory."
               : failed
                 ? "The Sandbox could not be set up."
                 : "Setting up the Sandbox. You can close this; it keeps going."}
@@ -211,9 +199,21 @@ function NewSandboxDialogContent({ request }: { readonly request: NewSandboxRequ
               Delete Sandbox
             </Button>
           ) : null}
-          <Button variant={ready ? "default" : "outline"} onClick={closeNewSandboxDialog}>
-            {ready ? "Done" : "Close"}
+          <Button variant="outline" onClick={closeNewSandboxDialog}>
+            Close
           </Button>
+          {ready ? (
+            <Button
+              disabled={project === null}
+              onClick={() => {
+                if (project === null) return;
+                closeNewSandboxDialog();
+                void openThread(scopeProjectRef(project.environmentId, project.id));
+              }}
+            >
+              {project === null ? "Connecting…" : "New thread"}
+            </Button>
+          ) : null}
         </DialogFooter>
       </DialogPopup>
     );

@@ -174,7 +174,6 @@ import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
-import { SandboxThreadLabel } from "../sandboxes/sandboxActivity";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import {
   buildDraftActionMenuItems,
@@ -2196,11 +2195,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
               >
                 {isRemote && !showsScratchMachine ? (
-                  <span className="inline-flex shrink-0 items-center gap-1 text-sidebar-muted-foreground/70">
-                    <SandboxThreadLabel
-                      environmentId={thread.environmentId}
-                      label={props.environmentLabel}
-                    />
+                  <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
                     <EnvironmentMachineIcon
                       aria-hidden
                       kind={props.environmentMachine}
