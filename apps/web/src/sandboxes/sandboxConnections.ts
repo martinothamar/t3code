@@ -41,14 +41,21 @@ export const EMPTY_SANDBOX_SNAPSHOT: AgentctlSandboxesSnapshot = {
   sandboxes: [],
 };
 
+let lastSnapshot = EMPTY_SANDBOX_SNAPSHOT;
+
+/**
+ * A failed read keeps the last snapshot: an empty one would remove every
+ * Sandbox environment, and with it cached threads and drafts.
+ */
 export function readSandboxSnapshot(): AgentctlSandboxesSnapshot {
   const bridge = readAgentctlBridge();
   if (bridge === null) return EMPTY_SANDBOX_SNAPSHOT;
   try {
-    return bridge.getSnapshot();
+    lastSnapshot = bridge.getSnapshot();
   } catch {
-    return EMPTY_SANDBOX_SNAPSHOT;
+    // Keep lastSnapshot.
   }
+  return lastSnapshot;
 }
 
 /**

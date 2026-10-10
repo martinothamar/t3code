@@ -28,7 +28,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as AgentctlCli from "./AgentctlCli.ts";
-import { isConnectable, sshAliasFor, type AgentResource } from "./agentState.ts";
+import { isConnectable, shouldCloseTunnel, sshAliasFor, type AgentResource } from "./agentState.ts";
 import { discoverManifests, expandHome } from "./manifests.ts";
 import {
   DEFAULT_SANDBOX_SETTINGS,
@@ -202,12 +202,15 @@ export const make = Effect.gen(function* () {
   const refreshBody = Effect.gen(function* () {
     const listed = yield* cli.listAgents.pipe(Effect.result);
     if (listed._tag === "Failure") {
-      yield* Ref.set(agentsRef, []);
-      yield* Ref.set(snapshotRef, {
-        status: "unavailable",
-        error: listed.failure.message,
-        sandboxes: [],
-      });
+      // Keep the last known Sandboxes: dropping them would remove their
+      // environments, and with them cached threads and drafts, over one
+      // failed call such as agentd restarting.
+      const error = listed.failure.message;
+      yield* Ref.update(snapshotRef, (snapshot): AgentctlSandboxesSnapshot =>
+        snapshot.status === "loading"
+          ? { status: "unavailable", error, sandboxes: [] }
+          : { ...snapshot, error },
+      );
       return;
     }
     const agents = listed.success;
@@ -225,10 +228,11 @@ export const make = Effect.gen(function* () {
       yield* updateStore((document) => ({ ...document, sandboxes: reconciled }));
     }
 
-    // Close tunnels to Sandboxes that stopped or went away; they are dead anyway.
+    // Close tunnels to Sandboxes that are stopping or went away; a Sandbox
+    // that is only re-provisioning keeps its SSH server.
     for (const previous of previousAgents) {
       const current = agents.find((agent) => agent.metadata.name === previous.metadata.name);
-      if (isConnectable(previous) && (current === undefined || !isConnectable(current))) {
+      if (isConnectable(previous) && shouldCloseTunnel(current)) {
         yield* ssh.disconnectEnvironment(sandboxTarget(previous.metadata.name)).pipe(Effect.ignore);
       }
     }

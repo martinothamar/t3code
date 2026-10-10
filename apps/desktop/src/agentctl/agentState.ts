@@ -136,4 +136,11 @@ export function manifestVariant(manifestPath: string): string | null {
   return /^agent\.([a-z0-9]+(?:-[a-z0-9]+)*)\.ya?ml$/.exec(fileName)?.[1] ?? null;
 }
 
+/** Whether a tunnel to this Sandbox is dead: it is stopping, stopped, deleted or gone. */
+export function shouldCloseTunnel(agent: AgentResource | undefined): boolean {
+  if (agent === undefined) return true;
+  const { phase } = deriveAgentState(agent);
+  return phase === "stopping" || phase === "stopped" || phase === "terminating";
+}
+
 export const sshAliasFor = (name: string) => `agentctl-${name}`;

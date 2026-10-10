@@ -8,6 +8,7 @@ import {
   deriveAgentState,
   isConnectable,
   manifestVariant,
+  shouldCloseTunnel,
   type AgentResource,
 } from "./agentState.ts";
 
@@ -137,6 +138,24 @@ describe("isConnectable", () => {
     expect(
       isConnectable(agent({ ssh: false, conditions: [ready("True", "SandboxReady"), sshReady] })),
     ).toBe(false);
+  });
+});
+
+describe("shouldCloseTunnel", () => {
+  it("keeps the tunnel while a Sandbox only re-provisions", () => {
+    expect(
+      shouldCloseTunnel(
+        agent({ conditions: [ready("False", "ProviderSelected")], progress: "Set up Agent" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("closes it once the Sandbox stops or goes away", () => {
+    expect(shouldCloseTunnel(undefined)).toBe(true);
+    expect(
+      shouldCloseTunnel(agent({ runState: "Stopped", conditions: [ready("False", "Stopped")] })),
+    ).toBe(true);
+    expect(shouldCloseTunnel(agent({ deleting: true }))).toBe(true);
   });
 });
 
