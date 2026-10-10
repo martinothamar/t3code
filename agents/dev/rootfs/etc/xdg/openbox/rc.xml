@@ -44,5 +44,13 @@
     <application class="*">
       <maximized>yes</maximized>
     </application>
+    <!--
+      `vp run dev:desktop` opens a detached DevTools window at every start. Left maximized and
+      focused it covers the client; this keeps it behind the client, in the taskbar.
+    -->
+    <application title="Developer Tools*">
+      <maximized>no</maximized>
+      <focus>no</focus>
+    </application>
   </applications>
 </openbox_config>
