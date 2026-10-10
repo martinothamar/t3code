@@ -530,8 +530,9 @@ describe("ConnectionResolver", () => {
           expect((yield* prepare).socketUrl).toContain("wsTicket=ssh");
           expect(savedProfile).toMatchObject({ target: preparedTarget });
           expect(calls).toEqual(
-            // An unchanged target is not written: platform SSH environments are never saved.
-            scenario === "unchanged" ? ["authorize"] : ["revoke", "profile", "authorize"],
+            scenario === "unchanged"
+              ? ["profile", "authorize"]
+              : ["revoke", "profile", "authorize"],
           );
         }
         expect(yield* permissions.get(entry)).toBe(scenario === "changed" ? "off" : "read-write");

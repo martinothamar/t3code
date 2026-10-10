@@ -5,7 +5,6 @@ import type {
 import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Equal from "effect/Equal";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -242,10 +241,7 @@ const makeSshBroker = Effect.fn("clientRuntime.connection.broker.makeSsh")(funct
       const permissions = yield* GitHubRoutingPermissions;
       yield* permissions.forget(target.environmentId);
     }
-    // Platform environments are never saved, so only a changed target is written.
-    if (!Equal.equals(preparedProfile, profile)) {
-      yield* profiles.put(preparedProfile);
-    }
+    yield* profiles.put(preparedProfile);
     const authorized = yield* remote.authorizeBearer({
       expectedEnvironmentId: target.environmentId,
       httpBaseUrl: prepared.bootstrap.httpBaseUrl,
