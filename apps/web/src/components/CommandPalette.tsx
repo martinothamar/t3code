@@ -180,7 +180,7 @@ import {
   reduceCommandPaletteUiState,
   type SearchOverlayMode,
 } from "./CommandPalette.logic";
-import { sandboxAddProjectGroups, sandboxPaletteItems } from "../sandboxes/sandboxPaletteItems";
+import { sandboxPaletteItems } from "../sandboxes/sandboxPaletteItems";
 import { useOffersSandboxes } from "../sandboxes/sandboxNotices";
 import { useSandboxes } from "../sandboxes/useSandboxes";
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
@@ -1828,27 +1828,18 @@ function OpenCommandPaletteDialog(props: {
   );
 
   const openAddProjectFlow = useCallback(() => {
-    // agentctl Sandboxes add their own choice, so the list always shows then.
-    const sandboxGroups = sandboxAddProjectGroups(offersSandboxes);
     // With no connected environment there is nothing to browse, so the only
     // useful next step is connecting one.
-    if (addProjectEnvironmentOptions.length === 0 && sandboxGroups.length === 0) {
+    if (addProjectEnvironmentOptions.length === 0) {
       setOpen(false);
       void navigate({ to: "/settings/connections" });
       return;
     }
 
-    if (
-      addProjectEnvironmentOptions.length > 1 ||
-      defaultAddProjectEnvironmentId === null ||
-      sandboxGroups.length > 0
-    ) {
+    if (addProjectEnvironmentOptions.length > 1 || defaultAddProjectEnvironmentId === null) {
       pushPaletteView({
         addonIcon: <FolderPlusIcon className={ADDON_ICON_CLASS} />,
-        groups: [
-          ...addProjectEnvironmentGroups.filter((group) => group.items.length > 0),
-          ...sandboxGroups,
-        ],
+        groups: addProjectEnvironmentGroups,
       });
       return;
     }
@@ -1858,7 +1849,6 @@ function OpenCommandPaletteDialog(props: {
     addProjectEnvironmentGroups,
     addProjectEnvironmentOptions.length,
     defaultAddProjectEnvironmentId,
-    offersSandboxes,
     navigate,
     pushPaletteView,
     setOpen,

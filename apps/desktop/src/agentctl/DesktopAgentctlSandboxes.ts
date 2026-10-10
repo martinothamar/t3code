@@ -29,7 +29,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as AgentctlCli from "./AgentctlCli.ts";
 import { isConnectable, shouldCloseTunnel, sshAliasFor, type AgentResource } from "./agentState.ts";
-import { discoverManifests, expandHome } from "./manifests.ts";
+import { discoverManifests, envFileProblem, expandHome } from "./manifests.ts";
 import {
   DEFAULT_SANDBOX_SETTINGS,
   IDLE_RUNTIME,
@@ -416,6 +416,10 @@ export const make = Effect.gen(function* () {
           input.envFile === null || input.envFile.trim() === ""
             ? null
             : path.resolve(expandHome(input.envFile.trim(), environment.homeDirectory));
+        const envProblem = yield* envFileProblem(input.manifestPath, envFile).pipe(
+          Effect.provide(context),
+        );
+        if (envProblem !== null) return { error: envProblem } satisfies AgentctlActionResult;
         // The choices become the defaults for the next Sandbox.
         const remember = updateStore((document) => ({
           ...document,

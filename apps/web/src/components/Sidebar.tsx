@@ -174,6 +174,7 @@ import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { NewSandboxEmptyStateButton } from "../sandboxes/SandboxSidebarButtons";
 import { SandboxSidebarProgress } from "../sandboxes/SandboxSidebarProgress";
 import { ProjectEnvironmentBadge } from "./ProjectEnvironmentBadge";
 import {
@@ -5568,6 +5569,7 @@ export default function Sidebar() {
                     <PlusIcon className="-mx-0.5 size-3" />
                     Add project
                   </button>
+                  <NewSandboxEmptyStateButton />
                 </>
               ) : scopedProjectGroup ? (
                 `No threads in ${scopedProjectGroup.displayName} yet`

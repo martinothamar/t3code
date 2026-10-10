@@ -5,7 +5,6 @@ import {
   ADDON_ICON_CLASS,
   ITEM_ICON_CLASS,
   type CommandPaletteActionItem,
-  type CommandPaletteGroup,
   type CommandPaletteSubmenuItem,
 } from "../components/CommandPalette.logic";
 import { openNewSandboxDialog } from "./NewSandboxDialog";
@@ -109,29 +108,4 @@ export function sandboxPaletteItems(
     });
   }
   return items;
-}
-
-/**
- * "New Sandbox…" in the add-project flow: a Sandbox is a project too, one
- * that comes with its own machine.
- */
-export function sandboxAddProjectGroups(offered: boolean): CommandPaletteGroup[] {
-  if (!offered) return [];
-  return [
-    {
-      value: "agentctl-sandbox",
-      label: "agentctl",
-      items: [
-        {
-          kind: "action",
-          value: "action:add-project:agentctl-sandbox",
-          title: "New Sandbox…",
-          description: "A new agentctl Sandbox, with its working directory as the project",
-          searchTerms: ["new sandbox", "agentctl", "manifest", "vm"],
-          icon: <PlusIcon className={ITEM_ICON_CLASS} />,
-          run: async () => openNewSandboxDialog(),
-        },
-      ],
-    },
-  ];
 }
