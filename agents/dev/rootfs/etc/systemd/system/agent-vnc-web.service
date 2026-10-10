@@ -1,0 +1,18 @@
+[Unit]
+Description=Browser-based viewer for the Agent desktop
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/agent-desktop.conf
+ExecStart=/usr/bin/websockify --web=/usr/share/novnc --unix-target=${AGENT_DESKTOP_SOCKET} 127.0.0.1:6080
+User=agent
+Group=agent
+Restart=on-failure
+RestartSec=2
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
