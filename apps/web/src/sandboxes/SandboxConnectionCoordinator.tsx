@@ -1,5 +1,6 @@
 import { EnvironmentId } from "@t3tools/contracts";
-import { useEffect, useEffectEvent } from "react";
+import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useEffect, useEffectEvent, useRef } from "react";
 
 import { environmentCatalog } from "../connection/catalog";
 import { useEnvironmentPresentation } from "../state/presentation";
@@ -19,6 +20,27 @@ const RESCANS_AFTER_CONNECT = 15;
  */
 export function SandboxConnectionCoordinator() {
   const sandboxes = useSandboxes();
+  const navigate = useNavigate();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const knownEnvironmentIds = useRef(new Set<string>());
+
+  // A deleted Sandbox takes its environment along; leave a thread view on it.
+  const leaveRemovedEnvironment = useEffectEvent((removed: ReadonlyArray<string>) => {
+    if (removed.some((environmentId) => pathname.startsWith(`/${environmentId}/`))) {
+      void navigate({ to: "/" });
+    }
+  });
+  useEffect(() => {
+    const current = new Set<string>(
+      sandboxes.flatMap((sandbox) =>
+        sandbox.environmentId === null ? [] : [sandbox.environmentId],
+      ),
+    );
+    const removed = [...knownEnvironmentIds.current].filter((id) => !current.has(id));
+    knownEnvironmentIds.current = current;
+    if (removed.length > 0) leaveRemovedEnvironment(removed);
+  }, [sandboxes]);
+
   return sandboxes.map((sandbox) =>
     sandbox.environmentId === null ? null : (
       <SandboxEnvironmentCoordinator
