@@ -102,6 +102,14 @@ export const AgentctlMarkProjectCreatedInput = Schema.Struct({
 });
 export type AgentctlMarkProjectCreatedInput = typeof AgentctlMarkProjectCreatedInput.Type;
 
+/** An env file found near a manifest or in the home folder. */
+export const AgentctlEnvFileCandidate = Schema.Struct({
+  path: Schema.String,
+  /** It sets every value the manifest needs. */
+  complete: Schema.Boolean,
+});
+export type AgentctlEnvFileCandidate = typeof AgentctlEnvFileCandidate.Type;
+
 /** Lifecycle requests resolve with agentctl's error message instead of rejecting. */
 export const AgentctlActionResult = Schema.Struct({
   error: Schema.NullOr(Schema.String),
@@ -120,6 +128,8 @@ export interface DesktopAgentctlBridge {
   setSettings: (settings: AgentctlSandboxSettings) => Promise<AgentctlSandboxSettings>;
   getWorkspace: (name: string) => Promise<AgentctlSandboxWorkspace>;
   markProjectCreated: (input: AgentctlMarkProjectCreatedInput) => Promise<void>;
+  /** Env files that could serve a manifest, complete ones first. */
+  suggestEnvFiles: (manifestPath: string) => Promise<readonly AgentctlEnvFileCandidate[]>;
   /** Opens a file picker for an env file; null when cancelled. */
   pickEnvFile: (current: string | null) => Promise<string | null>;
 }

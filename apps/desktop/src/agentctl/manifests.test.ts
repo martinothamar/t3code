@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-import { envFileKeys, envFileProblem } from "./manifests.ts";
+import { envFileCandidates, envFileKeys, envFileProblem } from "./manifests.ts";
 
 const BASE = `apiVersion: agents.platform/v1alpha1
 kind: Agent
@@ -88,6 +88,34 @@ describe("envFileProblem", () => {
           "GIT_USER_NAME=Worker\nGITHUB_TOKEN=x\n",
         );
         assert.strictEqual(yield* envFileProblem(path.join(directory, "agent.yaml"), null), null);
+      }),
+    ),
+  );
+});
+
+describe("envFileCandidates", () => {
+  it.effect("offers complete env files first and skips templates", () =>
+    withManifests((directory) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const home = path.join(directory, "home");
+        yield* fileSystem.makeDirectory(home);
+        yield* fileSystem.writeFileString(path.join(directory, ".env.sample"), "GIT_USER_NAME=\n");
+        yield* fileSystem.writeFileString(path.join(directory, ".env"), "GIT_USER_NAME=Worker\n");
+        yield* fileSystem.writeFileString(
+          path.join(home, "worker.env"),
+          "GIT_USER_NAME=Worker\nGITHUB_TOKEN=x\n",
+        );
+        const candidates = yield* envFileCandidates(
+          path.join(directory, "agent.small.yaml"),
+          home,
+          null,
+        );
+        assert.deepStrictEqual(candidates, [
+          { path: path.join(home, "worker.env"), complete: true },
+          { path: path.join(directory, ".env"), complete: false },
+        ]);
       }),
     ),
   );

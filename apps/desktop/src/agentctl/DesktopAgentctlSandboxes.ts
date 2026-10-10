@@ -2,6 +2,7 @@ import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/enviro
 import {
   AgentctlSandboxSettings,
   type AgentctlActionResult,
+  type AgentctlEnvFileCandidate,
   type AgentctlCreateSandboxInput,
   type AgentctlMarkProjectCreatedInput,
   type AgentctlSandboxAction,
@@ -29,7 +30,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as AgentctlCli from "./AgentctlCli.ts";
 import { isConnectable, shouldCloseTunnel, sshAliasFor, type AgentResource } from "./agentState.ts";
-import { discoverManifests, envFileProblem, expandHome } from "./manifests.ts";
+import { discoverManifests, envFileCandidates, envFileProblem, expandHome } from "./manifests.ts";
 import {
   DEFAULT_SANDBOX_SETTINGS,
   IDLE_RUNTIME,
@@ -62,6 +63,9 @@ export class DesktopAgentctlSandboxes extends Context.Service<
     readonly create: (input: AgentctlCreateSandboxInput) => Effect.Effect<AgentctlActionResult>;
     readonly listManifests: Effect.Effect<ReadonlyArray<AgentctlSandboxManifest>>;
     readonly getSettings: Effect.Effect<AgentctlSandboxSettings>;
+    readonly suggestEnvFiles: (
+      manifestPath: string,
+    ) => Effect.Effect<ReadonlyArray<AgentctlEnvFileCandidate>>;
     readonly setSettings: (
       settings: AgentctlSandboxSettings,
     ) => Effect.Effect<AgentctlSandboxSettings>;
@@ -446,6 +450,13 @@ export const make = Effect.gen(function* () {
       Effect.provide(context),
     ),
     getSettings,
+    suggestEnvFiles: (manifestPath) =>
+      getSettings.pipe(
+        Effect.flatMap((settings) =>
+          envFileCandidates(manifestPath, environment.homeDirectory, settings.envFile),
+        ),
+        Effect.provide(context),
+      ),
     setSettings: (settings) =>
       updateStore((document) => ({ ...document, settings })).pipe(Effect.andThen(getSettings)),
     getWorkspace: (name) =>

@@ -1,4 +1,4 @@
-import type { AgentctlSandboxManifest } from "@t3tools/contracts";
+import type { AgentctlEnvFileCandidate, AgentctlSandboxManifest } from "@t3tools/contracts";
 import { fromYaml } from "@t3tools/shared/schemaYaml";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -191,4 +191,46 @@ export const envFileProblem = Effect.fn("desktop.agentctl.envFileProblem")(funct
   const present = envFileKeys(contents);
   const missing = required.filter((key) => !present.has(key));
   return missing.length === 0 ? null : `${file} does not set ${missing.join(", ")}.`;
+});
+
+// Env files are often kept next to the manifest or in the home folder, away
+// from any repository. Templates are not candidates.
+const ENV_FILE_NAME = /(^\.env$)|(\.env$)/;
+const TEMPLATE_NAME = /(sample|example|template)/i;
+
+/**
+ * Env files that could serve a manifest: the last one used, then those beside
+ * the manifest and in the home folder. Complete ones, which set everything the
+ * manifest needs, come first.
+ */
+export const envFileCandidates = Effect.fn("desktop.agentctl.envFileCandidates")(function* (
+  manifestPath: string,
+  homeDirectory: string,
+  lastUsed: string | null,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const listed = (directory: string) =>
+    fileSystem.readDirectory(directory).pipe(
+      Effect.map((entries) =>
+        entries
+          .filter((entry) => ENV_FILE_NAME.test(entry) && !TEMPLATE_NAME.test(entry))
+          .toSorted()
+          .map((entry) => path.join(directory, entry)),
+      ),
+      Effect.orElseSucceed((): string[] => []),
+    );
+  const paths = [
+    ...(lastUsed === null ? [] : [path.resolve(expandHome(lastUsed, homeDirectory))]),
+    ...(yield* listed(path.dirname(manifestPath))),
+    ...(yield* listed(homeDirectory)),
+  ];
+  const candidates: AgentctlEnvFileCandidate[] = [];
+  for (const candidate of new Set(paths)) {
+    const info = yield* fileSystem.stat(candidate).pipe(Effect.option);
+    if (info._tag === "None" || info.value.type !== "File") continue;
+    const problem = yield* envFileProblem(manifestPath, candidate);
+    candidates.push({ path: candidate, complete: problem === null });
+  }
+  return candidates.toSorted((left, right) => Number(right.complete) - Number(left.complete));
 });

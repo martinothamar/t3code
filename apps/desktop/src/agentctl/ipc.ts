@@ -1,6 +1,7 @@
 import {
   AgentctlActionResult,
   AgentctlCreateSandboxInput,
+  AgentctlEnvFileCandidate,
   AgentctlMarkProjectCreatedInput,
   AgentctlSandboxManifest,
   AgentctlSandboxSettings,
@@ -90,16 +91,27 @@ const pickEnvFile = DesktopIpc.makeIpcMethod({
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const paths = yield* dialog.pickFiles({
       owner: yield* electronWindow.focusedMainOrFirst,
-      defaultPath: Option.some(
+      // A directory as the default path makes GTK treat a double-clicked
+      // file as a cancel, so only an existing choice is passed.
+      defaultPath:
         current === null || current.trim() === ""
-          ? environment.homeDirectory
-          : expandHome(current.trim(), environment.homeDirectory),
-      ),
+          ? Option.none()
+          : Option.some(expandHome(current.trim(), environment.homeDirectory)),
       multiple: false,
       filters: [],
     });
     return paths[0] ?? null;
   }),
+});
+
+const suggestEnvFiles = DesktopIpc.makeIpcMethod({
+  channel: AGENTCTL_CHANNELS.suggestEnvFiles,
+  payload: Schema.String,
+  result: Schema.Array(AgentctlEnvFileCandidate),
+  handler: (manifestPath) =>
+    Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) =>
+      sandboxes.suggestEnvFiles(manifestPath),
+    ),
 });
 
 export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctlHandlers")(
@@ -116,5 +128,6 @@ export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctl
     yield* ipc.handle(getWorkspace);
     yield* ipc.handle(markProjectCreated);
     yield* ipc.handle(pickEnvFile);
+    yield* ipc.handle(suggestEnvFiles);
   },
 );
