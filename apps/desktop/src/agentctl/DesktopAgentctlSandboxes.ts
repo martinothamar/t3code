@@ -1,0 +1,384 @@
+import { fetchRemoteEnvironmentDescriptor } from "@t3tools/client-runtime/environment";
+import {
+  AgentctlSandboxSettings,
+  type AgentctlActionResult,
+  type AgentctlCreateSandboxInput,
+  type AgentctlMarkReposSeededInput,
+  type AgentctlSandboxAction,
+  type AgentctlSandboxManifest,
+  type AgentctlSandboxRepoScan,
+  type AgentctlSandboxRepoScanInput,
+  type AgentctlSandboxesSnapshot,
+  type DesktopSshEnvironmentTarget,
+} from "@t3tools/contracts";
+import { resolveLoopbackSshHttpBaseUrl } from "@t3tools/ssh/tunnel";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
+import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
+import * as HttpClient from "effect/http/HttpClient";
+
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
+import * as AgentctlCli from "./AgentctlCli.ts";
+import { isConnectable, sshAliasFor, type AgentResource } from "./agentState.ts";
+import { discoverManifests, expandHome } from "./manifests.ts";
+import {
+  DEFAULT_SANDBOX_SETTINGS,
+  IDLE_RUNTIME,
+  REPOSITORY_SCAN_SCRIPT,
+  SandboxStoreDocument,
+  buildSandbox,
+  isActionSettled,
+  parseRepositoryList,
+  reconcileRecords,
+  sandboxNameError,
+  type SandboxRecord,
+  type SandboxRuntime,
+} from "./sandboxModel.ts";
+
+// Discovers agentctl Agents and makes each Ready one with SSH access reachable
+// as an SSH environment. The renderer registers them from `snapshot` and
+// connects through the regular SSH gateway, so a stopped Sandbox behaves like
+// any unreachable SSH host. This service never starts an Agent on its own.
+
+export class DesktopAgentctlSandboxes extends Context.Service<
+  DesktopAgentctlSandboxes,
+  {
+    readonly snapshot: Effect.Effect<AgentctlSandboxesSnapshot>;
+    readonly refresh: Effect.Effect<AgentctlSandboxesSnapshot>;
+    readonly start: (name: string) => Effect.Effect<AgentctlActionResult>;
+    readonly stop: (name: string) => Effect.Effect<AgentctlActionResult>;
+    readonly remove: (name: string) => Effect.Effect<AgentctlActionResult>;
+    readonly create: (input: AgentctlCreateSandboxInput) => Effect.Effect<AgentctlActionResult>;
+    readonly listManifests: Effect.Effect<ReadonlyArray<AgentctlSandboxManifest>>;
+    readonly getSettings: Effect.Effect<AgentctlSandboxSettings>;
+    readonly setSettings: (
+      settings: AgentctlSandboxSettings,
+    ) => Effect.Effect<AgentctlSandboxSettings>;
+    readonly scanRepositories: (
+      input: AgentctlSandboxRepoScanInput,
+    ) => Effect.Effect<AgentctlSandboxRepoScan, AgentctlCli.AgentctlError>;
+    readonly markRepositoriesSeeded: (input: AgentctlMarkReposSeededInput) => Effect.Effect<void>;
+  }
+>()("@t3tools/desktop/agentctl/DesktopAgentctlSandboxes") {}
+
+const POLL_INTERVAL = Duration.seconds(3);
+// A Sandbox that could not be reached is retried, but not on every poll.
+const DISCOVERY_RETRY_MS = 30_000;
+
+const sandboxTarget = (name: string): DesktopSshEnvironmentTarget => {
+  const alias = sshAliasFor(name);
+  return { alias, hostname: alias, username: null, port: null };
+};
+
+/** SSH's own wording when agentctl's generated config is not included. */
+function discoveryErrorMessage(error: { readonly message: string }): string {
+  return /could not resolve hostname/i.test(error.message)
+    ? "SSH cannot resolve this Sandbox. Run `agentctl ssh-config install` and try again."
+    : error.message;
+}
+
+const decodeStore = Schema.decodeUnknownEffect(Schema.fromJsonString(SandboxStoreDocument));
+const encodeStore = Schema.encodeEffect(Schema.fromJsonString(SandboxStoreDocument, { space: 2 }));
+
+export const make = Effect.gen(function* () {
+  const cli = yield* AgentctlCli.AgentctlCli;
+  const ssh = yield* DesktopSshEnvironment.DesktopSshEnvironment;
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const httpClient = yield* HttpClient.HttpClient;
+  const context = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
+
+  const storePath = path.join(environment.stateDir, "agentctl-sandboxes.json");
+  const loaded = yield* fileSystem.readFileString(storePath).pipe(
+    Effect.flatMap(decodeStore),
+    Effect.orElseSucceed((): SandboxStoreDocument => ({})),
+  );
+  const store = yield* Ref.make<SandboxStoreDocument>(loaded);
+  const persist = Ref.get(store).pipe(
+    Effect.flatMap(encodeStore),
+    Effect.flatMap((json) => fileSystem.writeFileString(storePath, `${json}\n`)),
+    Effect.catch((error) =>
+      Effect.logWarning("Could not save agentctl Sandbox state.", { storePath, error }),
+    ),
+  );
+  const updateStore = (update: (document: SandboxStoreDocument) => SandboxStoreDocument) =>
+    Ref.update(store, update).pipe(Effect.andThen(persist));
+
+  const agentsRef = yield* Ref.make<ReadonlyArray<AgentResource>>([]);
+  const runtimes = yield* Ref.make<ReadonlyMap<string, SandboxRuntime>>(new Map());
+  const discovering = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
+  const snapshotRef = yield* Ref.make<AgentctlSandboxesSnapshot>({
+    status: "loading",
+    error: null,
+    sandboxes: [],
+  });
+  const refreshLock = yield* Semaphore.make(1);
+
+  const updateRuntime = (name: string, update: (runtime: SandboxRuntime) => SandboxRuntime) =>
+    Ref.update(runtimes, (current) => {
+      const next = new Map(current);
+      next.set(name, update(current.get(name) ?? IDLE_RUNTIME));
+      return next;
+    });
+
+  const publish = Effect.gen(function* () {
+    const agents = yield* Ref.get(agentsRef);
+    const records = (yield* Ref.get(store)).sandboxes ?? {};
+    const runtime = yield* Ref.get(runtimes);
+    yield* Ref.update(snapshotRef, (snapshot) => ({
+      ...snapshot,
+      sandboxes: agents.map((agent) =>
+        buildSandbox(
+          agent,
+          records[agent.metadata.name],
+          runtime.get(agent.metadata.name) ?? IDLE_RUNTIME,
+        ),
+      ),
+    }));
+  });
+
+  // Reaches the Sandbox's T3 server once to learn its environment id; after
+  // that the renderer's SSH connection owns the tunnel.
+  const discover = (agent: AgentResource) =>
+    Effect.gen(function* () {
+      const name = agent.metadata.name;
+      const result = yield* ssh.ensureEnvironment(sandboxTarget(name)).pipe(
+        Effect.flatMap((bootstrap) =>
+          resolveLoopbackSshHttpBaseUrl(bootstrap.httpBaseUrl).pipe(
+            Effect.flatMap((httpBaseUrl) => fetchRemoteEnvironmentDescriptor({ httpBaseUrl })),
+            Effect.map((descriptor) => ({ descriptor, sshTarget: bootstrap.target })),
+          ),
+        ),
+        Effect.provideService(HttpClient.HttpClient, httpClient),
+        Effect.result,
+      );
+      if (result._tag === "Failure") {
+        yield* Effect.logWarning("Could not reach an agentctl Sandbox.", {
+          name,
+          error: result.failure,
+        });
+        yield* updateRuntime(name, (runtime) => ({
+          ...runtime,
+          connectError: discoveryErrorMessage(result.failure),
+        }));
+      } else {
+        const record: SandboxRecord = {
+          sandboxId: agent.status?.sandbox?.id ?? null,
+          environmentId: result.success.descriptor.environmentId,
+          // Registering the resolved target keeps the SSH connection from
+          // recording a changed profile on every connect.
+          sshTarget: result.success.sshTarget,
+          seededRepositories: [],
+        };
+        yield* updateStore((document) => ({
+          ...document,
+          sandboxes: { ...document.sandboxes, [name]: record },
+        }));
+        yield* updateRuntime(name, (runtime) => ({ ...runtime, connectError: null }));
+      }
+      yield* publish;
+    }).pipe(
+      Effect.ensuring(
+        Clock.currentTimeMillis.pipe(
+          Effect.flatMap((now) =>
+            Ref.update(discovering, (current) =>
+              new Map(current).set(agent.metadata.name, now + DISCOVERY_RETRY_MS),
+            ),
+          ),
+        ),
+      ),
+    );
+
+  const refreshBody = Effect.gen(function* () {
+    const listed = yield* cli.listAgents.pipe(Effect.result);
+    if (listed._tag === "Failure") {
+      yield* Ref.set(agentsRef, []);
+      yield* Ref.set(snapshotRef, {
+        status: "unavailable",
+        error: listed.failure.message,
+        sandboxes: [],
+      });
+      return;
+    }
+    const agents = listed.success;
+    const previousAgents = yield* Ref.get(agentsRef);
+    yield* Ref.set(agentsRef, agents);
+    yield* Ref.update(snapshotRef, (snapshot): AgentctlSandboxesSnapshot => ({
+      ...snapshot,
+      status: "available",
+      error: null,
+    }));
+
+    const records = (yield* Ref.get(store)).sandboxes ?? {};
+    const reconciled = reconcileRecords(records, agents);
+    if (Object.keys(reconciled).length !== Object.keys(records).length) {
+      yield* updateStore((document) => ({ ...document, sandboxes: reconciled }));
+    }
+
+    // Close tunnels to Sandboxes that stopped or went away; they are dead anyway.
+    for (const previous of previousAgents) {
+      const current = agents.find((agent) => agent.metadata.name === previous.metadata.name);
+      if (isConnectable(previous) && (current === undefined || !isConnectable(current))) {
+        yield* ssh.disconnectEnvironment(sandboxTarget(previous.metadata.name)).pipe(Effect.ignore);
+      }
+    }
+
+    // Settle requests T3 is waiting on, such as a create that became Ready.
+    const runtime = yield* Ref.get(runtimes);
+    for (const [name, state] of runtime) {
+      const agent = agents.find((candidate) => candidate.metadata.name === name);
+      if (state.action !== null && isActionSettled(state.action, agent)) {
+        yield* updateRuntime(name, (current) => ({ ...current, action: null }));
+      }
+      if (agent === undefined && state.action === null) {
+        yield* Ref.update(runtimes, (current) => {
+          const next = new Map(current);
+          next.delete(name);
+          return next;
+        });
+      }
+    }
+
+    const now = yield* Clock.currentTimeMillis;
+    const pending = yield* Ref.get(discovering);
+    for (const agent of agents) {
+      const name = agent.metadata.name;
+      if (!isConnectable(agent) || reconciled[name] !== undefined) continue;
+      const retryAt = pending.get(name);
+      if (retryAt !== undefined && now < retryAt) continue;
+      yield* Ref.update(discovering, (current) =>
+        new Map(current).set(name, Number.POSITIVE_INFINITY),
+      );
+      yield* Effect.forkDetach(discover(agent));
+    }
+    yield* publish;
+  });
+
+  const refresh = refreshLock
+    .withPermits(1)(refreshBody)
+    .pipe(Effect.andThen(Ref.get(snapshotRef)));
+
+  const runAction = (
+    name: string,
+    action: AgentctlSandboxAction,
+    run: Effect.Effect<void, AgentctlCli.AgentctlError>,
+    options: { readonly settleOnPoll: boolean },
+  ) =>
+    Effect.gen(function* () {
+      yield* updateRuntime(name, (runtime) => ({ ...runtime, action, actionError: null }));
+      yield* publish;
+      const result = yield* Effect.result(run);
+      const error = result._tag === "Failure" ? result.failure.message : null;
+      yield* updateRuntime(name, (runtime) => ({
+        ...runtime,
+        action: error === null && options.settleOnPoll ? runtime.action : null,
+        actionError: error,
+      }));
+      yield* refresh;
+      return { error } satisfies AgentctlActionResult;
+    });
+
+  const getSettings = Ref.get(store).pipe(
+    Effect.map((document) => document.settings ?? DEFAULT_SANDBOX_SETTINGS),
+  );
+
+  yield* refresh.pipe(
+    Effect.repeat(Schedule.spaced(POLL_INTERVAL)),
+    Effect.catchCause((cause) => Effect.logError("agentctl Sandbox polling stopped.", { cause })),
+    Effect.forkScoped,
+  );
+
+  return DesktopAgentctlSandboxes.of({
+    snapshot: Ref.get(snapshotRef),
+    refresh,
+    start: (name) => runAction(name, "starting", cli.start(name), { settleOnPoll: false }),
+    stop: (name) =>
+      runAction(
+        name,
+        "stopping",
+        cli
+          .stop(name)
+          .pipe(
+            Effect.tap(() => ssh.disconnectEnvironment(sandboxTarget(name)).pipe(Effect.ignore)),
+          ),
+        { settleOnPoll: false },
+      ),
+    remove: (name) =>
+      runAction(
+        name,
+        "deleting",
+        ssh
+          .disconnectEnvironment(sandboxTarget(name))
+          .pipe(Effect.ignore, Effect.andThen(cli.remove(name))),
+        { settleOnPoll: true },
+      ),
+    create: (input) =>
+      Effect.gen(function* () {
+        const nameError = sandboxNameError(input.name, yield* Ref.get(agentsRef));
+        if (nameError !== null) return { error: nameError } satisfies AgentctlActionResult;
+        const envFile =
+          input.envFile === null || input.envFile.trim() === ""
+            ? null
+            : path.resolve(expandHome(input.envFile.trim(), environment.homeDirectory));
+        return yield* runAction(
+          input.name,
+          "creating",
+          cli.apply({ manifestPath: input.manifestPath, name: input.name, envFile }),
+          { settleOnPoll: true },
+        );
+      }),
+    listManifests: getSettings.pipe(
+      Effect.flatMap((settings) =>
+        discoverManifests(settings.manifestRoots, environment.homeDirectory),
+      ),
+      Effect.provide(context),
+    ),
+    getSettings,
+    setSettings: (settings) =>
+      updateStore((document) => ({ ...document, settings })).pipe(Effect.andThen(getSettings)),
+    scanRepositories: ({ name, includeSeeded }) =>
+      Effect.gen(function* () {
+        const { workingDirectory } = yield* cli.sshInfo(name);
+        const stdout = yield* cli.exec(name, [
+          "sh",
+          "-c",
+          REPOSITORY_SCAN_SCRIPT,
+          "sh",
+          workingDirectory,
+        ]);
+        const seeded = new Set(
+          includeSeeded
+            ? []
+            : ((yield* Ref.get(store)).sandboxes?.[name]?.seededRepositories ?? []),
+        );
+        return {
+          workingDirectory,
+          repositories: parseRepositoryList(stdout).filter((repository) => !seeded.has(repository)),
+        } satisfies AgentctlSandboxRepoScan;
+      }),
+    markRepositoriesSeeded: ({ name, environmentId, repositories }) =>
+      updateStore((document) => {
+        const record = document.sandboxes?.[name];
+        if (record === undefined || record.environmentId !== environmentId) return document;
+        const seededRepositories = [...new Set([...record.seededRepositories, ...repositories])];
+        return {
+          ...document,
+          sandboxes: { ...document.sandboxes, [name]: { ...record, seededRepositories } },
+        };
+      }),
+  });
+});
+
+export const layer = Layer.effect(DesktopAgentctlSandboxes, make).pipe(
+  Layer.provide(AgentctlCli.layer),
+);
