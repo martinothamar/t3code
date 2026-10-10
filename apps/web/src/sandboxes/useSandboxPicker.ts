@@ -1,5 +1,5 @@
 import { EnvironmentId, type AgentctlSandbox } from "@t3tools/contracts";
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useEnvironmentPresentation } from "../state/presentation";
@@ -160,4 +160,31 @@ export function useSandboxPicker(input: {
     environmentHint,
     environmentChosen,
   };
+}
+
+/**
+ * Says why a Sandbox environment is unreachable, for the composer's offline
+ * banner: a stopped Sandbox is not reconnecting, it needs starting.
+ */
+export function useSandboxUnavailableNotice(environmentId: string | null): {
+  readonly title: string;
+  readonly sandbox: AgentctlSandbox;
+  readonly canStart: boolean;
+} | null {
+  const sandboxes = useSandboxes();
+  const sandbox =
+    environmentId === null
+      ? null
+      : (sandboxes.find((candidate) => candidate.environmentId === environmentId) ?? null);
+  // The snapshot keeps a Sandbox's object until it changes, so this is stable.
+  return useMemo(() => {
+    if (sandbox === null) return null;
+    if (sandbox.action === null && sandbox.phase === "stopped") {
+      return { title: `${sandbox.name} is stopped`, sandbox, canStart: true };
+    }
+    if (sandbox.action === "starting" || sandbox.phase === "starting") {
+      return { title: `${sandbox.name} is starting…`, sandbox, canStart: false };
+    }
+    return null;
+  }, [sandbox]);
 }

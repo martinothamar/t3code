@@ -402,7 +402,8 @@ import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnectDelay";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
-import { useOffersSandboxes } from "../sandboxes/useSandboxPicker";
+import { startSandbox } from "../sandboxes/sandboxActions";
+import { useOffersSandboxes, useSandboxUnavailableNotice } from "../sandboxes/useSandboxPicker";
 import { useEnvironmentQuery } from "../state/query";
 import { useEnvironmentScope } from "~/state/session";
 import {
@@ -3089,6 +3090,9 @@ export default function ChatView(props: ChatViewProps) {
   const serverUpdateFailureDismissed =
     serverUpdateState === dismissedServerUpdateState ||
     isServerUpdateFailureDismissed(serverUpdateState);
+  const sandboxNotice = useSandboxUnavailableNotice(
+    activeEnvironmentUnavailableState?.environmentId ?? null,
+  );
   const systemComposerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
     const items: ComposerBannerStackItem[] = [];
     const updateRunning = serverUpdateState.status === "running";
@@ -3121,10 +3125,21 @@ export default function ChatView(props: ChatViewProps) {
         id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
         variant: unavailableConnection.phase === "error" ? "error" : "warning",
         icon: <WifiOffIcon />,
-        title: `${activeEnvironmentUnavailableState.label} is ${environmentReconnecting ? "reconnecting" : "offline"}`,
+        title:
+          sandboxNotice?.title ??
+          `${activeEnvironmentUnavailableState.label} is ${environmentReconnecting ? "reconnecting" : "offline"}`,
         actions: (
           <>
-            {!environmentReconnecting ? (
+            {sandboxNotice?.canStart ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => void startSandbox(sandboxNotice.sandbox)}
+              >
+                Start
+              </Button>
+            ) : null}
+            {!environmentReconnecting && sandboxNotice === null ? (
               <Button
                 size="xs"
                 variant="ghost"
@@ -3228,6 +3243,7 @@ export default function ChatView(props: ChatViewProps) {
     automaticEnvironment,
     autoBalanceUpdateBanner,
     activeEnvironmentUnavailableState,
+    sandboxNotice,
     handleReconnectActiveEnvironment,
     canDisconnectActiveEnvironment,
     disconnectingEnvironment,
