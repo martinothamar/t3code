@@ -7,6 +7,7 @@ import { useEnvironmentPresentation } from "../state/presentation";
 import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
 import { useAtomCommand } from "../state/use-atom-command";
+import { isSandboxBeingDeleted } from "./sandboxConnections";
 import { useEnsureSandboxProject } from "./sandboxProjects";
 import { useSandboxes } from "./useSandboxes";
 
@@ -29,7 +30,9 @@ export function SandboxConnectionCoordinator() {
   useEffect(() => {
     const current = new Set<string>(
       sandboxes.flatMap((sandbox) =>
-        sandbox.environmentId === null ? [] : [sandbox.environmentId],
+        sandbox.environmentId === null || isSandboxBeingDeleted(sandbox)
+          ? []
+          : [sandbox.environmentId],
       ),
     );
     const removed = [...knownEnvironmentIds.current].filter((id) => !current.has(id));

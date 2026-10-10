@@ -51,6 +51,15 @@ describe("sandboxRegistrations", () => {
     ]);
     expect(sandboxNameForTarget(registrations[0]!.target)).toBe("worker");
   });
+
+  it("drops a Sandbox as soon as it is being deleted", () => {
+    const registrations = sandboxRegistrations([
+      sandbox({ name: "deleting", action: "deleting" }),
+      sandbox({ name: "terminating", phase: "terminating" }),
+      sandbox({ name: "stopping", action: "stopping" }),
+    ]);
+    expect(registrations.map((registration) => registration.target.label)).toEqual(["stopping"]);
+  });
 });
 
 describe("sandboxStatus", () => {
