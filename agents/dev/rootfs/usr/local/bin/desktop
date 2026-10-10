@@ -6,6 +6,8 @@
 #
 # Coordinates are always in the pixels of the screenshot this helper last sent, never in display
 # pixels; when the display is larger than the screenshot budget the helper scales them back itself.
+# If the display has changed size since that screenshot, commands that take or report coordinates
+# refuse rather than land somewhere else.
 # Captures settle before they are written, so a screenshot never shows a half-drawn frame.
 set -euo pipefail
 # Without this, a failure inside `$(...)` is ignored: a capture whose ffmpeg failed would still be
@@ -29,6 +31,8 @@ jpeg_quality=${DESKTOP_JPEG_QUALITY:-7}
 settle_attempts=${DESKTOP_SETTLE_ATTEMPTS:-8}
 settle_interval=${DESKTOP_SETTLE_INTERVAL:-0.1}
 keep_captures=${DESKTOP_KEEP_CAPTURES:-200}
+# The geometry of the last screenshot sent, which every coordinate refers to.
+screenshot_geometry=$captures/.screenshot-geometry
 
 export DISPLAY=$display
 # xdotool decodes the text it types with the locale's character set, and refuses a multi-byte
@@ -118,6 +122,21 @@ geometry() {
     }'
 }
 
+# Prints the geometry that coordinates refer to: the last screenshot's, or the display's when no
+# screenshot was taken yet. Fails when the display has changed size since that screenshot, because
+# its coordinates would then map to a different place. Call it as `addressed=$(addressed_geometry)`:
+# a failure inside `< <(...)` would not stop the caller.
+addressed_geometry() {
+    local current width height sent_width sent_height now_width now_height
+    current=$(geometry)
+    [ -r "$screenshot_geometry" ] || { echo "$current"; return 0; }
+    read -r width height sent_width sent_height <"$screenshot_geometry"
+    read -r now_width now_height _ <<<"$current"
+    [ "$width" = "$now_width" ] && [ "$height" = "$now_height" ] \
+        || fail "the display changed from ${width}x${height} to ${now_width}x${now_height} since the last screenshot; take a new one"
+    echo "$width $height $sent_width $sent_height"
+}
+
 # Maps a coordinate from sent-screenshot pixels to display pixels.
 to_display() {
     local value=$1 sent=$2 actual=$3
@@ -202,6 +221,10 @@ command_screenshot() {
     else
         frames=$(capture_settled "$out" "${actual_width}x${actual_height}" "0,0")
     fi
+    mkdir -p "$captures"
+    printf '%s %s %s %s\n' "$actual_width" "$actual_height" "$sent_width" "$sent_height" \
+        >"$screenshot_geometry.$$"
+    mv -f "$screenshot_geometry.$$" "$screenshot_geometry"
     report_capture "$out" "$sent_width" "$sent_height" "$frames" "$note"
 }
 
@@ -215,8 +238,9 @@ command_zoom() {
         esac
     done
     for pair in "x:$x" "y:$y" "w:$w" "h:$h"; do require_integer "${pair#*:}" "zoom ${pair%%:*}"; done
-    local actual_width actual_height sent_width sent_height
-    read -r actual_width actual_height sent_width sent_height < <(geometry)
+    local actual_width actual_height sent_width sent_height addressed
+    addressed=$(addressed_geometry)
+    read -r actual_width actual_height sent_width sent_height <<<"$addressed"
     x=$(to_display "$x" "$sent_width" "$actual_width")
     y=$(to_display "$y" "$sent_height" "$actual_height")
     w=$(to_display "$w" "$sent_width" "$actual_width")
@@ -247,8 +271,9 @@ window_class() {
 command_windows() {
     local active id class title
     active=$(xdotool getactivewindow 2>/dev/null || echo 0)
-    local actual_width actual_height sent_width sent_height
-    read -r actual_width actual_height sent_width sent_height < <(geometry)
+    local actual_width actual_height sent_width sent_height addressed
+    addressed=$(addressed_geometry)
+    read -r actual_width actual_height sent_width sent_height <<<"$addressed"
     $json && printf '[\n'
     local first=true
     for id in $(window_ids); do
@@ -279,9 +304,10 @@ command_windows() {
 }
 
 command_cursor() {
-    local x y actual_width actual_height sent_width sent_height
+    local x y actual_width actual_height sent_width sent_height addressed
     eval "$(xdotool getmouselocation --shell)"
-    read -r actual_width actual_height sent_width sent_height < <(geometry)
+    addressed=$(addressed_geometry)
+    read -r actual_width actual_height sent_width sent_height <<<"$addressed"
     x=$(to_display "$X" "$actual_width" "$sent_width")
     y=$(to_display "$Y" "$actual_height" "$sent_height")
     if $json; then printf '{"x":%d,"y":%d}\n' "$x" "$y"; else printf '%d %d\n' "$x" "$y"; fi
@@ -306,8 +332,9 @@ command_display() {
 sync_x() { xdotool getactivewindow >/dev/null 2>&1 || true; }
 
 move_pointer() {
-    local actual_width actual_height sent_width sent_height x y
-    read -r actual_width actual_height sent_width sent_height < <(geometry)
+    local actual_width actual_height sent_width sent_height x y addressed
+    addressed=$(addressed_geometry)
+    read -r actual_width actual_height sent_width sent_height <<<"$addressed"
     require_integer "$1" "x"; require_integer "$2" "y"
     x=$(to_display "$1" "$sent_width" "$actual_width")
     y=$(to_display "$2" "$sent_height" "$actual_height")
@@ -337,8 +364,9 @@ command_drag() {
     move_pointer "$1" "$2"
     xdotool mousedown 1
     # Intermediate motion: applications that track drags ignore a single jump.
-    local actual_width actual_height sent_width sent_height step
-    read -r actual_width actual_height sent_width sent_height < <(geometry)
+    local actual_width actual_height sent_width sent_height step addressed
+    addressed=$(addressed_geometry)
+    read -r actual_width actual_height sent_width sent_height <<<"$addressed"
     for step in 1 2 3; do
         xdotool mousemove -- \
             "$(awk -v a="$1" -v b="$3" -v s="$step" -v sw="$sent_width" -v aw="$actual_width" \
@@ -426,6 +454,8 @@ command_resize() {
     if ! xrandr --output "$output" --mode "$mode" 2>/dev/null; then
         fail "resize: $mode is not a mode of $output; available: $(xrandr | awk '/^ +[0-9]+x[0-9]+/ { printf "%s ", $1 }')"
     fi
+    # A deliberate resize is not a surprise: point with the new geometry until the next screenshot.
+    rm -f "$screenshot_geometry"
     command_display
 }
 
