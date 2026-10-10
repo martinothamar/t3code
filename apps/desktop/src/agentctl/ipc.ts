@@ -1,10 +1,8 @@
 import {
   AgentctlActionResult,
   AgentctlCreateSandboxInput,
-  AgentctlMarkProjectCreatedInput,
   AgentctlSandboxManifest,
   AgentctlSandboxSettings,
-  AgentctlSandboxWorkspace,
   AgentctlSandboxesSnapshot,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -59,22 +57,6 @@ const setSettings = DesktopIpc.makeIpcMethod({
     Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.setSettings(settings)),
 });
 
-const getWorkspace = DesktopIpc.makeIpcMethod({
-  channel: AGENTCTL_CHANNELS.getWorkspace,
-  payload: Schema.String,
-  result: AgentctlSandboxWorkspace,
-  handler: (name) =>
-    Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.getWorkspace(name)),
-});
-
-const markProjectCreated = DesktopIpc.makeIpcMethod({
-  channel: AGENTCTL_CHANNELS.markProjectCreated,
-  payload: AgentctlMarkProjectCreatedInput,
-  result: Schema.Void,
-  handler: (input) =>
-    Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.markProjectCreated(input)),
-});
-
 export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctlHandlers")(
   function* () {
     const ipc = yield* DesktopIpc.DesktopIpc;
@@ -86,7 +68,9 @@ export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctl
     yield* ipc.handle(listManifests);
     yield* ipc.handle(getSettings);
     yield* ipc.handle(setSettings);
-    yield* ipc.handle(getWorkspace);
-    yield* ipc.handle(markProjectCreated);
+    // Polling starts with the handlers that read it, after startup has loaded
+    // the shell environment.
+    const sandboxes = yield* DesktopAgentctlSandboxes;
+    yield* sandboxes.startPolling;
   },
 );

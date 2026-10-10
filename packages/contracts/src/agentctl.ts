@@ -42,8 +42,8 @@ export const AgentctlSandbox = Schema.Struct({
   sshTarget: Schema.NullOr(DesktopSshEnvironmentTargetSchema),
   /** Known once T3 has reached the Sandbox's server; null before that. */
   environmentId: Schema.NullOr(EnvironmentId),
-  /** T3 made the Sandbox's project once; a removed one is not made again on its own. */
-  projectCreated: Schema.Boolean,
+  /** Where its agents work, and so its project's root; known once T3 has reached it. */
+  workingDirectory: Schema.NullOr(Schema.String),
   /** Why T3 could not reach a Ready Sandbox, such as a missing SSH config include. */
   connectError: Schema.NullOr(Schema.String),
   action: Schema.NullOr(AgentctlSandboxAction),
@@ -86,18 +86,6 @@ export const AgentctlCreateSandboxInput = Schema.Struct({
 });
 export type AgentctlCreateSandboxInput = typeof AgentctlCreateSandboxInput.Type;
 
-/** Where a Sandbox's agents work, which is where its project is rooted. */
-export const AgentctlSandboxWorkspace = Schema.Struct({
-  workingDirectory: Schema.String,
-});
-export type AgentctlSandboxWorkspace = typeof AgentctlSandboxWorkspace.Type;
-
-export const AgentctlMarkProjectCreatedInput = Schema.Struct({
-  name: Schema.String,
-  environmentId: EnvironmentId,
-});
-export type AgentctlMarkProjectCreatedInput = typeof AgentctlMarkProjectCreatedInput.Type;
-
 /** Lifecycle requests resolve with agentctl's error message instead of rejecting. */
 export const AgentctlActionResult = Schema.Struct({
   error: Schema.NullOr(Schema.String),
@@ -114,6 +102,4 @@ export interface DesktopAgentctlBridge {
   listManifests: () => Promise<readonly AgentctlSandboxManifest[]>;
   getSettings: () => Promise<AgentctlSandboxSettings>;
   setSettings: (settings: AgentctlSandboxSettings) => Promise<AgentctlSandboxSettings>;
-  getWorkspace: (name: string) => Promise<AgentctlSandboxWorkspace>;
-  markProjectCreated: (input: AgentctlMarkProjectCreatedInput) => Promise<void>;
 }

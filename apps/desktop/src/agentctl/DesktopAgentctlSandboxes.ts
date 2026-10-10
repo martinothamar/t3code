@@ -3,10 +3,8 @@ import {
   AgentctlSandboxSettings,
   type AgentctlActionResult,
   type AgentctlCreateSandboxInput,
-  type AgentctlMarkProjectCreatedInput,
   type AgentctlSandboxAction,
   type AgentctlSandboxManifest,
-  type AgentctlSandboxWorkspace,
   type AgentctlSandboxesSnapshot,
   type DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
@@ -35,11 +33,7 @@ import {
   IDLE_RUNTIME,
   SandboxStoreDocument,
   buildSandbox,
-  discoveredRecord,
-  isActionSettled,
-  needsDiscovery,
   reconcileRecords,
-  sandboxNameError,
   type SandboxRuntime,
 } from "./sandboxModel.ts";
 
@@ -65,10 +59,11 @@ export class DesktopAgentctlSandboxes extends Context.Service<
     readonly setSettings: (
       settings: AgentctlSandboxSettings,
     ) => Effect.Effect<AgentctlSandboxSettings>;
-    readonly getWorkspace: (
-      name: string,
-    ) => Effect.Effect<AgentctlSandboxWorkspace, AgentctlCli.AgentctlError>;
-    readonly markProjectCreated: (input: AgentctlMarkProjectCreatedInput) => Effect.Effect<void>;
+    /**
+     * Starts watching agentctl. Call it once the app has loaded its shell
+     * environment, so a macOS app opened from Finder finds agentctl on PATH.
+     */
+    readonly startPolling: Effect.Effect<void>;
   }
 >()("@t3tools/desktop/agentctl/DesktopAgentctlSandboxes") {}
 
@@ -153,7 +148,6 @@ export const make = Effect.gen(function* () {
 
   const agentsRef = yield* Ref.make<ReadonlyArray<AgentResource>>([]);
   const runtimes = yield* Ref.make<ReadonlyMap<string, SandboxRuntime>>(new Map());
-  const discovering = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
   const snapshotRef = yield* SubscriptionRef.make<AgentctlSandboxesSnapshot>({
     status: "loading",
     error: null,
@@ -195,21 +189,24 @@ export const make = Effect.gen(function* () {
   });
 
   // Reaches the Sandbox's T3 server to learn its environment id: the first
-  // time, and again each time it becomes reachable, in case its T3 home was
-  // reset. After that the renderer's SSH connection owns the tunnel.
-  const discover = (agent: AgentResource) =>
+  // time in each run of the app, and again each time it becomes reachable, in
+  // case it was recreated or its T3 home reset. After that the renderer's SSH
+  // connection owns the tunnel.
+  const discover = (name: string) =>
     Effect.gen(function* () {
-      const name = agent.metadata.name;
-      const result = yield* ssh.ensureEnvironment(sandboxTarget(name)).pipe(
-        Effect.flatMap((bootstrap) =>
-          resolveLoopbackSshHttpBaseUrl(bootstrap.httpBaseUrl).pipe(
-            Effect.flatMap((httpBaseUrl) => fetchRemoteEnvironmentDescriptor({ httpBaseUrl })),
-            Effect.map((descriptor) => ({ descriptor, sshTarget: bootstrap.target })),
+      const result = yield* Effect.all([
+        ssh.ensureEnvironment(sandboxTarget(name)).pipe(
+          Effect.flatMap((bootstrap) =>
+            resolveLoopbackSshHttpBaseUrl(bootstrap.httpBaseUrl).pipe(
+              Effect.flatMap((httpBaseUrl) => fetchRemoteEnvironmentDescriptor({ httpBaseUrl })),
+              Effect.map((descriptor) => ({ descriptor, sshTarget: bootstrap.target })),
+            ),
           ),
+          Effect.provideService(HttpClient.HttpClient, httpClient),
         ),
-        Effect.provideService(HttpClient.HttpClient, httpClient),
-        Effect.result,
-      );
+        cli.sshInfo(name),
+      ]).pipe(Effect.result);
+      const now = yield* Clock.currentTimeMillis;
       if (result._tag === "Failure") {
         yield* Effect.logWarning("Could not reach an agentctl Sandbox.", {
           name,
@@ -217,45 +214,33 @@ export const make = Effect.gen(function* () {
         });
         // A known Sandbox keeps its environment; its live connection reports trouble.
         const known = (yield* Ref.get(store)).sandboxes?.[name] !== undefined;
-        if (!known) {
-          yield* updateRuntime(name, (runtime) => ({
-            ...runtime,
-            connectError: discoveryErrorMessage(result.failure),
-          }));
-        }
+        yield* updateRuntime(name, (runtime) => ({
+          ...runtime,
+          discovering: false,
+          retryAt: now + DISCOVERY_RETRY_MS,
+          connectError: known ? runtime.connectError : discoveryErrorMessage(result.failure),
+        }));
       } else {
-        const discovered = {
-          sandboxId: agent.status?.sandbox?.id ?? null,
-          environmentId: result.success.descriptor.environmentId,
-          // Registering the resolved target keeps the SSH connection from
-          // recording a changed profile on every connect.
-          sshTarget: result.success.sshTarget,
-        };
+        const [{ descriptor, sshTarget }, sshInfo] = result.success;
         yield* updateStore((document) => ({
           ...document,
           sandboxes: {
             ...document.sandboxes,
-            [name]: discoveredRecord(document.sandboxes?.[name], discovered),
+            // Registering the resolved target keeps the SSH connection from
+            // recording a changed profile on every connect.
+            [name]: { environmentId: descriptor.environmentId, sshTarget },
           },
         }));
         yield* updateRuntime(name, (runtime) => ({
           ...runtime,
+          discovering: false,
           connectError: null,
           verified: true,
+          workingDirectory: sshInfo.workingDirectory,
         }));
       }
       yield* publish;
-    }).pipe(
-      Effect.ensuring(
-        Clock.currentTimeMillis.pipe(
-          Effect.flatMap((now) =>
-            Ref.update(discovering, (current) =>
-              new Map(current).set(agent.metadata.name, now + DISCOVERY_RETRY_MS),
-            ),
-          ),
-        ),
-      ),
-    );
+    });
 
   const refreshBody = Effect.gen(function* () {
     const listed = yield* cli.listAgents.pipe(Effect.result);
@@ -287,7 +272,6 @@ export const make = Effect.gen(function* () {
         sandboxes: reconcileRecords(document.sandboxes ?? {}, agents),
       }));
     }
-    const records = (yield* Ref.get(store)).sandboxes ?? {};
 
     // Close tunnels to Sandboxes that are stopping or went away; a Sandbox
     // that is only re-provisioning keeps its SSH server.
@@ -298,48 +282,31 @@ export const make = Effect.gen(function* () {
       }
     }
 
-    // Settle requests T3 is waiting on, such as a create that became Ready.
-    const runtime = yield* Ref.get(runtimes);
-    for (const [name, state] of runtime) {
-      const agent = agents.find((candidate) => candidate.metadata.name === name);
-      if (state.action !== null && isActionSettled(state.action, agent)) {
-        yield* updateRuntime(name, (current) => ({ ...current, action: null }));
+    // Forget Sandboxes that are gone, unless a request on them is still running.
+    yield* Ref.update(runtimes, (current) => {
+      const next = new Map(current);
+      for (const [name, state] of current) {
+        const present = agents.some((agent) => agent.metadata.name === name);
+        if (!present && state.action === null) next.delete(name);
       }
-      if (agent === undefined && state.action === null) {
-        yield* Ref.update(runtimes, (current) => {
-          const next = new Map(current);
-          next.delete(name);
-          return next;
-        });
-      }
-    }
+      return next;
+    });
 
     const now = yield* Clock.currentTimeMillis;
-    const pending = yield* Ref.get(discovering);
     const states = yield* Ref.get(runtimes);
     for (const agent of agents) {
       const name = agent.metadata.name;
       const state = states.get(name) ?? IDLE_RUNTIME;
       if (!isConnectable(agent)) {
         // Check again, without waiting out the throttle, once it is back.
-        if (state.verified)
-          yield* updateRuntime(name, (current) => ({ ...current, verified: false }));
-        if (pending.get(name) !== Number.POSITIVE_INFINITY) {
-          yield* Ref.update(discovering, (current) => {
-            const next = new Map(current);
-            next.delete(name);
-            return next;
-          });
+        if (state.verified || state.retryAt !== 0) {
+          yield* updateRuntime(name, (current) => ({ ...current, verified: false, retryAt: 0 }));
         }
         continue;
       }
-      if (state.verified && !needsDiscovery(records[name], agent)) continue;
-      const retryAt = pending.get(name);
-      if (retryAt !== undefined && now < retryAt) continue;
-      yield* Ref.update(discovering, (current) =>
-        new Map(current).set(name, Number.POSITIVE_INFINITY),
-      );
-      yield* Effect.forkIn(discover(agent), scope);
+      if (state.verified || state.discovering || now < state.retryAt) continue;
+      yield* updateRuntime(name, (current) => ({ ...current, discovering: true }));
+      yield* Effect.forkIn(discover(name), scope);
     }
     yield* publish;
   });
@@ -348,34 +315,21 @@ export const make = Effect.gen(function* () {
     .withPermits(1)(refreshBody)
     .pipe(Effect.andThen(SubscriptionRef.get(snapshotRef)));
 
-  const nextActionId = yield* Ref.make(0);
-
   const runAction = (
     name: string,
     action: AgentctlSandboxAction,
     run: Effect.Effect<void, AgentctlCli.AgentctlError>,
-    options: { readonly settleOnPoll: boolean },
   ) =>
     Effect.gen(function* () {
-      const actionId = yield* Ref.updateAndGet(nextActionId, (id) => id + 1);
-      yield* updateRuntime(name, (runtime) => ({
-        ...runtime,
-        action,
-        actionId,
-        actionError: null,
-      }));
+      yield* updateRuntime(name, (runtime) => ({ ...runtime, action, actionError: null }));
       yield* publish;
       const result = yield* Effect.result(run);
       const error = result._tag === "Failure" ? result.failure.message : null;
       // A later request took over, such as a stop while a start was waiting;
       // this one's outcome, even a failure caused by it, no longer matters.
-      const superseded = ((yield* Ref.get(runtimes)).get(name)?.actionId ?? actionId) !== actionId;
+      const superseded = ((yield* Ref.get(runtimes)).get(name)?.action ?? null) !== action;
       if (!superseded) {
-        yield* updateRuntime(name, (runtime) => ({
-          ...runtime,
-          action: error === null && options.settleOnPoll ? runtime.action : null,
-          actionError: error,
-        }));
+        yield* updateRuntime(name, (runtime) => ({ ...runtime, action: null, actionError: error }));
       }
       yield* refresh;
       return { error: superseded ? null : error } satisfies AgentctlActionResult;
@@ -393,31 +347,27 @@ export const make = Effect.gen(function* () {
       Effect.sleep(snapshot.status === "unavailable" ? UNAVAILABLE_POLL_INTERVAL : POLL_INTERVAL),
     ),
   );
-  yield* Effect.forever(pollOnce).pipe(Effect.forkScoped);
 
   return DesktopAgentctlSandboxes.of({
     snapshot: SubscriptionRef.get(snapshotRef),
     changes: SubscriptionRef.changes(snapshotRef),
     refresh,
-    start: (name) => runAction(name, "starting", cli.start(name), { settleOnPoll: false }),
-    stop: (name) =>
-      runAction(name, "stopping", cli.stop(name).pipe(Effect.tap(() => closeTunnelSoon(name))), {
-        settleOnPoll: false,
-      }),
-    remove: (name) =>
-      runAction(name, "deleting", closeTunnelSoon(name).pipe(Effect.andThen(cli.remove(name))), {
-        settleOnPoll: true,
-      }),
+    start: (name) => runAction(name, "starting", cli.start(name)),
+    stop: (name) => runAction(name, "stopping", cli.stop(name)),
+    remove: (name) => runAction(name, "deleting", cli.remove(name)),
     create: (input) =>
       Effect.gen(function* () {
-        // Checked against agentctl now: a Sandbox made since the last poll would
-        // otherwise have its manifest replaced.
+        // Applying an existing name would replace that Sandbox's manifest, so
+        // check agentctl now rather than the last poll.
         const agents = yield* cli.listAgents.pipe(Effect.result);
         if (agents._tag === "Failure") {
           return { error: agents.failure.message } satisfies AgentctlActionResult;
         }
-        const nameError = sandboxNameError(input.name, agents.success);
-        if (nameError !== null) return { error: nameError } satisfies AgentctlActionResult;
+        if (agents.success.some((agent) => agent.metadata.name === input.name)) {
+          return {
+            error: `A Sandbox named ${input.name} already exists.`,
+          } satisfies AgentctlActionResult;
+        }
         // Its manifest is offered first for the next Sandbox.
         const remember = updateStore((document) => ({
           ...document,
@@ -432,33 +382,16 @@ export const make = Effect.gen(function* () {
           cli
             .apply({ manifestPath: input.manifestPath, name: input.name })
             .pipe(Effect.tap(() => remember)),
-          { settleOnPoll: true },
         );
       }),
     listManifests: getSettings.pipe(
-      Effect.flatMap((settings) =>
-        discoverManifests(settings.manifestRoots, environment.homeDirectory),
-      ),
+      Effect.flatMap((settings) => discoverManifests(settings.manifestRoots)),
       Effect.provide(context),
     ),
     getSettings,
     setSettings: (settings) =>
       updateStore((document) => ({ ...document, settings })).pipe(Effect.andThen(getSettings)),
-    getWorkspace: (name) =>
-      cli
-        .sshInfo(name)
-        .pipe(
-          Effect.map(({ workingDirectory }): AgentctlSandboxWorkspace => ({ workingDirectory })),
-        ),
-    markProjectCreated: ({ name, environmentId }) =>
-      updateStore((document) => {
-        const record = document.sandboxes?.[name];
-        if (record === undefined || record.environmentId !== environmentId) return document;
-        return {
-          ...document,
-          sandboxes: { ...document.sandboxes, [name]: { ...record, projectCreated: true } },
-        };
-      }),
+    startPolling: Effect.forever(pollOnce).pipe(Effect.forkIn(scope), Effect.asVoid),
   });
 });
 

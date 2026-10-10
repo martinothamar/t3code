@@ -8,7 +8,7 @@ import {
   suggestSandboxName,
 } from "./sandboxActions";
 import { sandboxNameForTarget, sandboxRegistrations } from "./sandboxConnections";
-import { ensureSandboxProject, queueSandboxProject } from "./sandboxProjects";
+import { ensureSandboxProject } from "./sandboxProjects";
 
 function sandbox(overrides: Partial<AgentctlSandbox> = {}): AgentctlSandbox {
   return {
@@ -18,7 +18,7 @@ function sandbox(overrides: Partial<AgentctlSandbox> = {}): AgentctlSandbox {
     sshAccess: true,
     sshTarget: { alias: "agentctl-worker", hostname: "worker", username: "agent", port: 22 },
     environmentId: EnvironmentId.make("env-worker"),
-    projectCreated: false,
+    workingDirectory: "/home/agent/code",
     connectError: null,
     action: null,
     actionError: null,
@@ -85,85 +85,50 @@ describe("suggestSandboxName", () => {
 
 describe("ensureSandboxProject", () => {
   const environmentId = EnvironmentId.make("env-worker");
+  const input = { name: "worker", environmentId, workingDirectory: "/home/agent/code" };
 
   function dependencies(options: { readonly existing?: boolean; readonly createError?: string }) {
-    const calls: string[] = [];
+    const created: string[] = [];
+    let finish: (error: string | null) => void = () => {};
     return {
-      calls,
+      created,
+      finish: (error: string | null) => finish(error),
       dependencies: {
-        workingDirectory: async () => {
-          calls.push("ssh-info");
-          return "/home/agent/code";
-        },
         hasProjectAt: () => options.existing === true,
-        createProject: async (input: {
-          readonly title: string;
-          readonly workspaceRoot: string;
-        }) => {
-          calls.push(`create ${input.title} at ${input.workspaceRoot}`);
-          return options.createError ?? null;
-        },
-        markCreated: async () => {
-          calls.push("mark");
+        createProject: (project: { readonly title: string; readonly workspaceRoot: string }) => {
+          created.push(`${project.title} at ${project.workspaceRoot}`);
+          return new Promise<string | null>((resolve) => {
+            finish = resolve;
+          });
         },
       },
     };
   }
 
   it("makes one project at the working directory, named after the Agent", async () => {
-    const { calls, dependencies: deps } = dependencies({});
-    const result = await ensureSandboxProject(deps, {
-      name: "worker",
-      environmentId,
-      projectCreated: false,
-      force: false,
-    });
-    expect(result).toEqual({ created: true, error: null });
-    expect(calls).toEqual(["ssh-info", "create worker at /home/agent/code", "mark"]);
+    const deps = dependencies({});
+    const first = ensureSandboxProject(new Map(), deps.dependencies, input);
+    deps.finish(null);
+    expect(await first).toBeNull();
+    expect(deps.created).toEqual(["worker at /home/agent/code"]);
   });
 
-  it("leaves a removed project removed without asking agentctl", async () => {
-    const { calls, dependencies: deps } = dependencies({});
-    await ensureSandboxProject(deps, {
-      name: "worker",
-      environmentId,
-      projectCreated: true,
-      force: false,
-    });
-    expect(calls).toEqual([]);
+  it("leaves an existing project alone", async () => {
+    const deps = dependencies({ existing: true });
+    expect(await ensureSandboxProject(new Map(), deps.dependencies, input)).toBeNull();
+    expect(deps.created).toEqual([]);
   });
 
-  it("makes it again on request, and adopts one that already exists", async () => {
-    const forced = dependencies({});
-    await ensureSandboxProject(forced.dependencies, {
-      name: "worker",
-      environmentId,
-      projectCreated: true,
-      force: true,
-    });
-    expect(forced.calls).toContain("create worker at /home/agent/code");
-
-    const existing = dependencies({ existing: true });
-    const result = await ensureSandboxProject(existing.dependencies, {
-      name: "worker",
-      environmentId,
-      projectCreated: false,
-      force: false,
-    });
-    expect(result.created).toBe(false);
-    expect(existing.calls).toEqual(["ssh-info", "mark"]);
-  });
-
-  it("does not record a project that failed to be made", async () => {
-    const { calls, dependencies: deps } = dependencies({ createError: "no such directory" });
-    const result = await ensureSandboxProject(deps, {
-      name: "worker",
-      environmentId,
-      projectCreated: false,
-      force: false,
-    });
-    expect(result).toEqual({ created: false, error: "no such directory" });
-    expect(calls).not.toContain("mark");
+  it("joins an attempt that is still running instead of making a second project", async () => {
+    const inFlight = new Map();
+    const deps = dependencies({});
+    const first = ensureSandboxProject(inFlight, deps.dependencies, input);
+    const second = ensureSandboxProject(inFlight, deps.dependencies, input);
+    deps.finish("no such directory");
+    expect(await second).toBe("no such directory");
+    expect(await first).toBe("no such directory");
+    expect(deps.created).toHaveLength(1);
+    expect(inFlight.size).toBe(0);
   });
 });
 
@@ -174,57 +139,5 @@ describe("Sandbox actions", () => {
     expect(canDeleteSandbox(creating)).toBe(true);
     expect(canDeleteSandbox(sandbox({ action: "deleting" }))).toBe(false);
     expect(canStopSandbox(sandbox({ phase: "stopped" }))).toBe(false);
-  });
-});
-
-describe("queueSandboxProject", () => {
-  const environmentId = EnvironmentId.make("env-worker");
-
-  function deferred() {
-    let resolve!: (result: { created: boolean; error: string | null }) => void;
-    const promise = new Promise<{ created: boolean; error: string | null }>((done) => {
-      resolve = done;
-    });
-    return { promise, resolve };
-  }
-
-  it("lets a reconnect join the attempt already running", async () => {
-    const inFlight = new Map();
-    const automatic = deferred();
-    const first = queueSandboxProject(inFlight, environmentId, false, () => automatic.promise);
-    let started = 0;
-    const second = queueSandboxProject(inFlight, environmentId, false, async () => {
-      started += 1;
-      return { created: true, error: null };
-    });
-    automatic.resolve({ created: false, error: null });
-    expect(await second).toEqual(await first);
-    expect(started).toBe(0);
-  });
-
-  it("runs a click after the automatic attempt, unless that one made the project", async () => {
-    const order: string[] = [];
-    const inFlight = new Map();
-    const automatic = deferred();
-    void queueSandboxProject(inFlight, environmentId, false, () => automatic.promise);
-    const click = queueSandboxProject(inFlight, environmentId, true, async () => {
-      order.push("click");
-      return { created: true, error: null };
-    });
-    order.push("automatic done");
-    automatic.resolve({ created: false, error: null });
-    expect(await click).toEqual({ created: true, error: null });
-    expect(order).toEqual(["automatic done", "click"]);
-
-    const madeIt = deferred();
-    void queueSandboxProject(inFlight, environmentId, false, () => madeIt.promise);
-    let clicked = false;
-    const second = queueSandboxProject(inFlight, environmentId, true, async () => {
-      clicked = true;
-      return { created: false, error: "duplicate" };
-    });
-    madeIt.resolve({ created: true, error: null });
-    expect(await second).toEqual({ created: true, error: null });
-    expect(clicked).toBe(false);
   });
 });

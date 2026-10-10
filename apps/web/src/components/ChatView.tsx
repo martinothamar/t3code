@@ -402,9 +402,8 @@ import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnectDelay";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
-import { startSandboxNamed } from "../sandboxes/sandboxActions";
+import { useSandboxBanner } from "../sandboxes/sandboxBanner";
 import { sandboxNameForTarget } from "../sandboxes/sandboxConnections";
-import { useSandboxUnavailableNotice } from "../sandboxes/sandboxNotices";
 import { useEnvironmentQuery } from "../state/query";
 import { useEnvironmentScope } from "~/state/session";
 import {
@@ -3089,9 +3088,7 @@ export default function ChatView(props: ChatViewProps) {
   const serverUpdateFailureDismissed =
     serverUpdateState === dismissedServerUpdateState ||
     isServerUpdateFailureDismissed(serverUpdateState);
-  const sandboxNotice = useSandboxUnavailableNotice(
-    activeEnvironmentUnavailableState?.environmentId ?? null,
-  );
+  const sandboxBanner = useSandboxBanner(activeEnvironmentUnavailableState?.environmentId ?? null);
   const systemComposerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
     const items: ComposerBannerStackItem[] = [];
     const updateRunning = serverUpdateState.status === "running";
@@ -3119,26 +3116,21 @@ export default function ChatView(props: ChatViewProps) {
     // phases still surface so the Reconnect action stays reachable.
     const suppressUnavailableBanner =
       environmentReconnecting && (updateRunning || !reconnectWarningGraceElapsed);
-    if (activeEnvironmentUnavailableState && unavailableConnection && !suppressUnavailableBanner) {
+    if (sandboxBanner !== null && unavailableConnection && !suppressUnavailableBanner) {
+      items.push(sandboxBanner);
+    } else if (
+      activeEnvironmentUnavailableState &&
+      unavailableConnection &&
+      !suppressUnavailableBanner
+    ) {
       items.push({
         id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
         variant: unavailableConnection.phase === "error" ? "error" : "warning",
         icon: <WifiOffIcon />,
-        title:
-          sandboxNotice?.title ??
-          `${activeEnvironmentUnavailableState.label} is ${environmentReconnecting ? "reconnecting" : "offline"}`,
+        title: `${activeEnvironmentUnavailableState.label} is ${environmentReconnecting ? "reconnecting" : "offline"}`,
         actions: (
           <>
-            {sandboxNotice?.canStart ? (
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => void startSandboxNamed(sandboxNotice.name)}
-              >
-                Start
-              </Button>
-            ) : null}
-            {!environmentReconnecting && sandboxNotice === null ? (
+            {!environmentReconnecting ? (
               <Button
                 size="xs"
                 variant="ghost"
@@ -3242,7 +3234,7 @@ export default function ChatView(props: ChatViewProps) {
     automaticEnvironment,
     autoBalanceUpdateBanner,
     activeEnvironmentUnavailableState,
-    sandboxNotice,
+    sandboxBanner,
     handleReconnectActiveEnvironment,
     canDisconnectActiveEnvironment,
     disconnectingEnvironment,

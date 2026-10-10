@@ -1,6 +1,5 @@
 import type { AgentctlSandbox } from "@t3tools/contracts";
 import { BoxIcon, PlayIcon, PlusIcon, SquareIcon, Trash2Icon } from "lucide-react";
-import { useMemo } from "react";
 
 import {
   ADDON_ICON_CLASS,
@@ -18,8 +17,7 @@ import {
   startSandbox,
   stopSandbox,
 } from "./sandboxActions";
-import { useOffersSandboxes } from "./sandboxNotices";
-import { readSandboxSnapshot, useSandboxSelector } from "./useSandboxes";
+import { useOffersSandboxes, useSandboxes } from "./useSandboxes";
 
 function sandboxActions(sandbox: AgentctlSandbox): CommandPaletteActionItem[] {
   const terms = [sandbox.name, "sandbox", "agentctl"];
@@ -67,24 +65,9 @@ function sandboxActions(sandbox: AgentctlSandbox): CommandPaletteActionItem[] {
   ];
 }
 
-/** What the items show, so provisioning progress alone does not re-render the palette. */
-function paletteKey(sandbox: AgentctlSandbox): string {
-  return [
-    sandbox.name,
-    sandboxStatus(sandbox).label,
-    canStartSandbox(sandbox),
-    canStopSandbox(sandbox),
-    canDeleteSandbox(sandbox),
-  ].join(":");
-}
-
+/** The palette is only mounted while open, so following every snapshot is cheap. */
 export function useSandboxPaletteItems() {
-  const offered = useOffersSandboxes();
-  const key = useSandboxSelector((snapshot) => snapshot.sandboxes.map(paletteKey).join("|"));
-  return useMemo(
-    () => sandboxPaletteItems(offered, key === "" ? [] : readSandboxSnapshot().sandboxes),
-    [offered, key],
-  );
+  return sandboxPaletteItems(useOffersSandboxes(), useSandboxes());
 }
 
 /** "New Sandbox…" and a submenu with each Sandbox's start, stop and delete. */

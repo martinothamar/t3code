@@ -13,7 +13,5 @@ export function makeAgentctlBridge(ipcRenderer: IpcRenderer): DesktopAgentctlBri
     listManifests: () => ipcRenderer.invoke(AGENTCTL_CHANNELS.listManifests),
     getSettings: () => ipcRenderer.invoke(AGENTCTL_CHANNELS.getSettings),
     setSettings: (settings) => ipcRenderer.invoke(AGENTCTL_CHANNELS.setSettings, settings),
-    getWorkspace: (name) => ipcRenderer.invoke(AGENTCTL_CHANNELS.getWorkspace, name),
-    markProjectCreated: (input) => ipcRenderer.invoke(AGENTCTL_CHANNELS.markProjectCreated, input),
   };
 }

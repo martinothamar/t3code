@@ -76,3 +76,8 @@ export function useSandbox(name: string | null): AgentctlSandbox | null {
   const sandboxes = useSandboxes();
   return name === null ? null : (sandboxes.find((sandbox) => sandbox.name === name) ?? null);
 }
+
+/** Whether this desktop build can reach agentctl, so Sandbox actions are worth offering. */
+export function useOffersSandboxes(): boolean {
+  return useSandboxSelector((snapshot) => snapshot.status === "available");
+}

@@ -1,6 +1,5 @@
 import type { AgentctlSandboxManifest, AgentctlSandboxSettings } from "@t3tools/contracts";
 import { FolderSearchIcon } from "lucide-react";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { useEffect, useEffectEvent, useState, useSyncExternalStore } from "react";
 
 import { Button } from "../components/ui/button";
@@ -22,18 +21,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
-import { Spinner } from "../components/ui/spinner";
-import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-import { useProjects } from "../state/entities";
-import {
-  deleteSandbox,
-  sandboxStatus,
-  sandboxStatusDetail,
-  suggestSandboxName,
-} from "./sandboxActions";
 import { rememberCreatedSandbox } from "./createdSandboxes";
+import { suggestSandboxName } from "./sandboxActions";
 import { readAgentctlBridge } from "./sandboxConnections";
-import { refreshSandboxSnapshot, useSandbox, useSandboxes } from "./useSandboxes";
+import { refreshSandboxSnapshot, useSandboxes } from "./useSandboxes";
 
 let open = false;
 const listeners = new Set<() => void>();
@@ -79,10 +70,6 @@ function NewSandboxDialogContent() {
   const [nameEdited, setNameEdited] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [createdName, setCreatedName] = useState<string | null>(null);
-  const created = useSandbox(createdName);
-  const projects = useProjects();
-  const openThread = useNewThreadHandler();
 
   const apply = (
     nextManifests: ReadonlyArray<AgentctlSandboxManifest>,
@@ -128,17 +115,6 @@ function NewSandboxDialogContent() {
   const suggestedName = manifest === null ? "" : suggestSandboxName(manifest.agentName, sandboxes);
   const effectiveName = nameEdited ? name : suggestedName;
 
-  const ready = created !== null && created.phase === "ready" && created.environmentId !== null;
-  // The Sandbox's project appears once T3 has connected to it.
-  const project =
-    created?.environmentId == null
-      ? null
-      : (projects.find((candidate) => candidate.environmentId === created.environmentId) ?? null);
-  const failed =
-    created !== null &&
-    created.action === null &&
-    (created.phase === "failed" || created.actionError !== null);
-
   const addManifestRoot = async () => {
     const bridge = readAgentctlBridge();
     const folder = await window.desktopBridge?.pickFolder();
@@ -167,71 +143,10 @@ function NewSandboxDialogContent() {
       setError(result.error);
       return;
     }
+    // The sidebar shows its progress from here, so there is nothing to wait for.
     rememberCreatedSandbox(effectiveName.trim());
-    setCreatedName(effectiveName.trim());
+    closeNewSandboxDialog();
   };
-
-  if (createdName !== null) {
-    const status = created === null ? null : sandboxStatus(created);
-    const detail = created === null ? null : sandboxStatusDetail(created);
-    return (
-      <DialogPopup className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{createdName}</DialogTitle>
-          <DialogDescription>
-            {ready
-              ? "The Sandbox is running. Its project is its working directory."
-              : failed
-                ? "The Sandbox could not be set up."
-                : "Setting up the Sandbox. You can close this; it keeps going."}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogPanel>
-          <div className="flex items-start gap-2 text-sm">
-            {!ready && !failed ? <Spinner className="mt-0.5 size-4 shrink-0" /> : null}
-            <div className="min-w-0">
-              <div className="font-medium">
-                {ready ? "Ready" : (status?.label ?? "Waiting for agentctl…")}
-              </div>
-              {detail ? (
-                <div className="break-words text-muted-foreground text-xs">{detail}</div>
-              ) : null}
-            </div>
-          </div>
-        </DialogPanel>
-        <DialogFooter variant="bare">
-          {failed && created !== null ? (
-            <Button
-              variant="destructive-outline"
-              onClick={() =>
-                void deleteSandbox(created).then((deleted) => {
-                  // Nothing is left to wait for once it is gone.
-                  if (deleted) closeNewSandboxDialog();
-                })
-              }
-            >
-              Delete Sandbox
-            </Button>
-          ) : null}
-          <Button variant="outline" onClick={closeNewSandboxDialog}>
-            Close
-          </Button>
-          {ready ? (
-            <Button
-              disabled={project === null}
-              onClick={() => {
-                if (project === null) return;
-                closeNewSandboxDialog();
-                void openThread(scopeProjectRef(project.environmentId, project.id));
-              }}
-            >
-              {project === null ? "Connecting…" : "New thread"}
-            </Button>
-          ) : null}
-        </DialogFooter>
-      </DialogPopup>
-    );
-  }
 
   // Without a manifest folder there is nothing to choose from yet, so that comes first.
   if (settings !== null && settings.manifestRoots.length === 0) {

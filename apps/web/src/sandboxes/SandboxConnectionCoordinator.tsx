@@ -7,7 +7,7 @@ import { useEnvironmentPresentation } from "../state/presentation";
 import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
 import { useAtomCommand } from "../state/use-atom-command";
-import { useSandboxProject } from "./sandboxProjects";
+import { useEnsureSandboxProject } from "./sandboxProjects";
 import { useSandboxes } from "./useSandboxes";
 
 /**
@@ -44,7 +44,7 @@ export function SandboxConnectionCoordinator() {
         name={sandbox.name}
         environmentId={EnvironmentId.make(sandbox.environmentId)}
         running={sandbox.phase === "ready" && sandbox.action === null}
-        projectCreated={sandbox.projectCreated}
+        workingDirectory={sandbox.workingDirectory}
       />
     ),
   );
@@ -54,11 +54,11 @@ function SandboxEnvironmentCoordinator(props: {
   readonly name: string;
   readonly environmentId: EnvironmentId;
   readonly running: boolean;
-  readonly projectCreated: boolean;
+  readonly workingDirectory: string | null;
 }) {
   const { presentation } = useEnvironmentPresentation(props.environmentId);
   const shell = useEnvironmentQuery(environmentShell.stateAtom(props.environmentId));
-  const ensureProject = useSandboxProject();
+  const ensureProject = useEnsureSandboxProject();
   const retryNow = useAtomCommand(environmentCatalog.retryNow, { reportFailure: false });
   const connected = presentation?.connection.phase === "connected";
   // Wait for the project list, or the project would look missing.
@@ -72,20 +72,17 @@ function SandboxEnvironmentCoordinator(props: {
     if (props.running) reconnect();
   }, [props.running]);
 
+  // Each connect makes sure the Sandbox has its project, so a removed one comes back.
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || props.workingDirectory === null) return;
     void ensureProject({
       name: props.name,
       environmentId: props.environmentId,
-      projectCreated: props.projectCreated,
-      force: false,
-    })
-      .then((result) => {
-        // Settings offers Add project for a Sandbox without one, so a retry is a click away.
-        if (result.error !== null) console.warn("Could not add the Sandbox project.", result.error);
-      })
-      .catch((error: unknown) => console.warn("Could not add the Sandbox project.", error));
-  }, [ready, ensureProject, props.name, props.environmentId, props.projectCreated]);
+      workingDirectory: props.workingDirectory,
+    }).then((error) => {
+      if (error !== null) console.warn("Could not add the Sandbox project.", error);
+    });
+  }, [ready, ensureProject, props.name, props.environmentId, props.workingDirectory]);
 
   return null;
 }

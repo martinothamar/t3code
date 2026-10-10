@@ -5,7 +5,15 @@ The desktop app installs the T3 server on SSH hosts, agentctl Sandboxes included
 only desktop and client code, so its Sandboxes run upstream's server unmodified, and that works as
 long as the version names an upstream release whose server matches the fork's.
 
-Syncs merge `upstream/main`, so a build is stamped with the newest nightly that merge contains:
+Syncs merge `upstream/main`, so a build is stamped with the newest nightly that merge contains.
+Find it with `git describe --tags --abbrev=0 --match 'v*-nightly.*'`, drop the leading `v`, and
+build for the host's platform with `T3CODE_DESKTOP_VERSION` set to it:
+
+- macOS: `vp run dist:desktop:dmg`
+- Linux: `vp run dist:desktop:linux`
+- Windows: `vp run dist:desktop:win`
+
+For example, on macOS or Linux:
 
 ```sh
 T3CODE_DESKTOP_VERSION="$(git describe --tags --abbrev=0 --match 'v*-nightly.*' | sed 's/^v//')" \

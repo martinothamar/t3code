@@ -3,7 +3,7 @@ import { BoxIcon, PlusIcon } from "lucide-react";
 import { SidebarMenuButton } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { openNewSandboxDialog } from "./NewSandboxDialog";
-import { useOffersSandboxes } from "./sandboxNotices";
+import { useOffersSandboxes } from "./useSandboxes";
 
 /** Beside "Add project" in the sidebar header: a Sandbox is a project with its own machine. */
 export function NewSandboxHeaderButton() {

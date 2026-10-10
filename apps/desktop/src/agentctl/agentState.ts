@@ -36,7 +36,6 @@ export const AgentResource = Schema.Struct({
   status: Schema.optionalKey(
     Schema.Struct({
       observedGeneration: Schema.optionalKey(Schema.Number),
-      sandbox: Schema.optionalKey(Schema.Struct({ id: Schema.optionalKey(Schema.String) })),
       conditions: Schema.optionalKey(Schema.Array(Condition)),
       failure: Schema.optionalKey(Schema.String),
       progress: Schema.optionalKey(Schema.Struct({ progress: Progress })),

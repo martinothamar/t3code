@@ -5,14 +5,12 @@ import {
   type AgentctlSandboxSettings,
 } from "@t3tools/contracts";
 import { FolderPlusIcon, PlusIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { SettingsRow, SettingsSection } from "../components/settings/settingsLayout";
 import { searchableSetting } from "../components/settings/settingsSearch";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { stackedThreadToast, toastManager } from "../components/ui/toast";
-import { useProjects } from "../state/entities";
 import { useEnvironmentPresentation } from "../state/presentation";
 import { openNewSandboxDialog } from "./NewSandboxDialog";
 import {
@@ -28,7 +26,6 @@ import {
 } from "./sandboxActions";
 import { runningLabel, useRunningThreadCounts } from "./sandboxActivity";
 import { readAgentctlBridge } from "./sandboxConnections";
-import { useSandboxProject } from "./sandboxProjects";
 import { useSandboxSnapshot } from "./useSandboxes";
 
 const TONE_VARIANT = {
@@ -87,11 +84,6 @@ export function SandboxesSettings() {
 
 function SandboxRows({ sandboxes }: { readonly sandboxes: ReadonlyArray<AgentctlSandbox> }) {
   const running = useRunningThreadCounts();
-  const projects = useProjects();
-  const environmentsWithProjects = useMemo(
-    () => new Set<string>(projects.map((project) => project.environmentId)),
-    [projects],
-  );
   return sandboxes.map((sandbox) => (
     <SandboxRow
       key={sandbox.name}
@@ -101,9 +93,6 @@ function SandboxRows({ sandboxes }: { readonly sandboxes: ReadonlyArray<Agentctl
           ? 0
           : (running.get(EnvironmentId.make(sandbox.environmentId)) ?? 0)
       }
-      hasProject={
-        sandbox.environmentId !== null && environmentsWithProjects.has(sandbox.environmentId)
-      }
     />
   ));
 }
@@ -111,49 +100,19 @@ function SandboxRows({ sandboxes }: { readonly sandboxes: ReadonlyArray<Agentctl
 function SandboxRow({
   sandbox,
   running,
-  hasProject,
 }: {
   readonly sandbox: AgentctlSandbox;
   readonly running: number;
-  readonly hasProject: boolean;
 }) {
   const environmentId =
     sandbox.environmentId === null ? null : EnvironmentId.make(sandbox.environmentId);
   const { presentation } = useEnvironmentPresentation(environmentId);
-  const ensureProject = useSandboxProject();
-  const [adding, setAdding] = useState(false);
   const status = sandboxStatus(sandbox);
   const detail = sandboxStatusDetail(sandbox);
   const connection =
     sandbox.phase === "ready" && presentation !== null
       ? connectionStatusText(presentation.connection)
       : null;
-  const connected = presentation?.connection.phase === "connected";
-
-  // The way back after removing the Sandbox's project.
-  const addProject = async () => {
-    if (environmentId === null) return;
-    setAdding(true);
-    const result = await ensureProject({
-      name: sandbox.name,
-      environmentId,
-      projectCreated: sandbox.projectCreated,
-      force: true,
-    }).catch((cause: unknown) => ({
-      created: false,
-      error: cause instanceof Error ? cause.message : String(cause),
-    }));
-    setAdding(false);
-    if (result.error !== null) {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: `Could not add the ${sandbox.name} project`,
-          description: result.error,
-        }),
-      );
-    }
-  };
 
   return (
     <SettingsRow
@@ -180,16 +139,6 @@ function SandboxRow({
           {canStartSandbox(sandbox) ? (
             <Button size="xs" variant="outline" onClick={() => void startSandbox(sandbox)}>
               Start
-            </Button>
-          ) : null}
-          {connected && !hasProject ? (
-            <Button
-              size="xs"
-              variant="ghost-muted"
-              disabled={adding}
-              onClick={() => void addProject()}
-            >
-              {adding ? "Adding…" : "Add project"}
             </Button>
           ) : null}
           {canStopSandbox(sandbox) ? (

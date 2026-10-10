@@ -1,7 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
-  EnvironmentId,
   type AgentctlSandboxesSnapshot,
   type DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
@@ -44,7 +43,6 @@ function agent(phase: "ready" | "stopped" | "retrying"): AgentResource {
     spec: { access: [{ type: "ssh" }], ...(phase === "stopped" ? { runState: "Stopped" } : {}) },
     status: {
       observedGeneration: 1,
-      sandbox: { id: "sandbox-1" },
       conditions,
       ...(phase === "retrying" ? { failure: "transient" } : {}),
     },
@@ -208,6 +206,7 @@ const withSandboxes = <A, E>(
     if (prepare) yield* prepare(stateDir);
     return yield* Effect.gen(function* () {
       const sandboxes = yield* DesktopAgentctlSandboxes.DesktopAgentctlSandboxes;
+      yield* sandboxes.startPolling;
       return yield* test(sandboxes, harness, stateDir);
     }).pipe(Effect.provide(layer(harness, baseDir)));
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped);
@@ -228,6 +227,7 @@ describe("DesktopAgentctlSandboxes", () => {
       Effect.gen(function* () {
         const snapshot = yield* until(sandboxes, discovered("env-1"));
         assert.deepStrictEqual(snapshot.sandboxes[0]?.sshTarget?.username, "agent");
+        assert.strictEqual(snapshot.sandboxes[0]?.workingDirectory, "/home/agent/code");
         yield* sandboxes.refresh;
         yield* sandboxes.refresh;
         assert.strictEqual(yield* Ref.get(harness.ensured), 1);
@@ -316,40 +316,16 @@ describe("DesktopAgentctlSandboxes", () => {
     ),
   );
 
-  it.effect("records a project only for the environment it was made in", () =>
-    withSandboxes((sandboxes) =>
-      Effect.gen(function* () {
-        yield* until(sandboxes, discovered("env-1"));
-        // A request for an environment the Sandbox no longer has, such as one reset meanwhile.
-        yield* sandboxes.markProjectCreated({
-          name: NAME,
-          environmentId: EnvironmentId.make("env-old"),
-        });
-        assert.isFalse((yield* sandboxes.refresh).sandboxes[0]?.projectCreated);
-        yield* sandboxes.markProjectCreated({
-          name: NAME,
-          environmentId: EnvironmentId.make("env-1"),
-        });
-        assert.isTrue((yield* sandboxes.refresh).sandboxes[0]?.projectCreated);
-      }),
-    ),
-  );
-
   it.effect("checks the environment again when a Sandbox becomes reachable", () =>
     withSandboxes((sandboxes, harness) =>
       Effect.gen(function* () {
         yield* until(sandboxes, discovered("env-1"));
-        yield* sandboxes.markProjectCreated({
-          name: NAME,
-          environmentId: EnvironmentId.make("env-1"),
-        });
         yield* sandboxes.stop(NAME);
         yield* sandboxes.refresh;
         // Its T3 home was reset while it was stopped.
         harness.environment.id = "env-2";
         yield* sandboxes.start(NAME);
-        const snapshot = yield* until(sandboxes, discovered("env-2"));
-        assert.strictEqual(snapshot.sandboxes[0]?.projectCreated, false);
+        yield* until(sandboxes, discovered("env-2"));
       }),
     ),
   );

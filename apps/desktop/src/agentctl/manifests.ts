@@ -27,14 +27,8 @@ export function manifestFileNames(entries: ReadonlyArray<string>): string[] {
   );
 }
 
-export function expandHome(input: string, homeDirectory: string): string {
-  if (input === "~") return homeDirectory;
-  return input.startsWith("~/") ? `${homeDirectory}${input.slice(1)}` : input;
-}
-
 export const discoverManifests = Effect.fn("desktop.agentctl.discoverManifests")(function* (
   roots: ReadonlyArray<string>,
-  homeDirectory: string,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -76,7 +70,7 @@ export const discoverManifests = Effect.fn("desktop.agentctl.discoverManifests")
     });
 
   for (const root of roots) {
-    yield* walk(path.resolve(expandHome(root, homeDirectory)), 0);
+    yield* walk(path.resolve(root), 0);
   }
   return manifests;
 });

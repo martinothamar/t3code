@@ -8,6 +8,4 @@ export const AGENTCTL_CHANNELS = {
   listManifests: "desktop:agentctl-list-manifests",
   getSettings: "desktop:agentctl-get-settings",
   setSettings: "desktop:agentctl-set-settings",
-  getWorkspace: "desktop:agentctl-get-workspace",
-  markProjectCreated: "desktop:agentctl-mark-project-created",
 } as const;

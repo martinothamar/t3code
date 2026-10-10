@@ -25,7 +25,7 @@ describe("discoverManifests", () => {
       yield* write("code/app/.git/agent.yaml");
       yield* write("code/a/b/c/d/e/agent.yaml");
 
-      const manifests = yield* discoverManifests(["~/code"], home);
+      const manifests = yield* discoverManifests([path.join(home, "code")]);
       assert.deepStrictEqual(
         manifests.map(({ path: manifestPath, variant, agentName }) => ({
           path: path.relative(home, manifestPath),
