@@ -15,6 +15,20 @@ the fork, never in `pingdotgg/t3code`.
 Keep the primary checkout clean and do each task in its own Git worktree under
 `/home/agent/code/.worktrees/`, starting from the current `origin/main`.
 
+## Syncing upstream
+
+The fork follows `upstream/main` by merging it into `origin/main` through pull requests. Never
+rebase or force-push `main`; Sessions and worktrees build on it. When asked to sync:
+
+1. `git fetch --multiple origin upstream`, then create a worktree on a new `sync/upstream-<date>` branch from
+   `origin/main`.
+2. `git merge upstream/main`. Resolve conflicts so the fork's behavior survives on top of upstream's
+   changes; prefer adapting fork code to upstream's new shape over reverting upstream.
+3. Run `vp i`, then the tests, lint and typecheck for the code the resolution touched.
+4. Push the branch and open a pull request into the fork's `main` that lists each conflict and how
+   it was resolved. It must be merged with a merge commit, not squashed, or the next sync repeats
+   the same conflicts.
+
 ## Toolchain
 
 Node 24 and `vp` (Vite+) are installed. Run `vp i` in a new checkout or worktree before anything
