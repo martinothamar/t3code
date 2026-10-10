@@ -3,7 +3,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { useMemo } from "react";
 
 import { useThreadShells } from "../state/entities";
-import { useSandboxes } from "./useSandboxes";
+import { useSandboxSelector } from "./useSandboxes";
 
 /** How many threads are working in each environment, so a Sandbox can show it is busy. */
 export function useRunningThreadCounts(): ReadonlyMap<EnvironmentId, number> {
@@ -30,8 +30,9 @@ export function SandboxThreadLabel(props: {
   readonly environmentId: EnvironmentId;
   readonly label: string | null;
 }) {
-  const sandboxes = useSandboxes();
-  const isSandbox = sandboxes.some((sandbox) => sandbox.environmentId === props.environmentId);
+  const isSandbox = useSandboxSelector((snapshot) =>
+    snapshot.sandboxes.some((sandbox) => sandbox.environmentId === props.environmentId),
+  );
   if (!isSandbox || props.label === null) return null;
   return <span className="max-w-24 truncate text-2xs leading-none">{props.label}</span>;
 }

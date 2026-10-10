@@ -4,7 +4,9 @@ import { describe, expect, it } from "vite-plus/test";
 import type { AgentResource } from "./agentState.ts";
 import { manifestFileNames } from "./manifests.ts";
 import {
+  discoveredRecord,
   isActionSettled,
+  needsDiscovery,
   parseRepositoryList,
   reconcileRecords,
   sandboxNameError,
@@ -50,18 +52,34 @@ describe("reconcileRecords", () => {
     ).toEqual(records);
   });
 
-  it("forgets a Sandbox that was deleted, is being deleted, or was recreated", () => {
-    const records = { gone: record("a"), deleting: record("b"), recreated: record("c") };
-    const agents = [
-      agent("deleting", { sandboxId: "b", deleting: true }),
-      agent("recreated", { sandboxId: "c2" }),
-    ];
-    expect(reconcileRecords(records, agents)).toEqual({});
+  it("forgets a Sandbox that was deleted or is being deleted", () => {
+    const records = { gone: record("a"), deleting: record("b") };
+    expect(
+      reconcileRecords(records, [agent("deleting", { sandboxId: "b", deleting: true })]),
+    ).toEqual({});
+  });
+});
+
+describe("discovery", () => {
+  it("rediscovers a Sandbox agentctl now reports under another sandbox id", () => {
+    expect(needsDiscovery(undefined, agent("worker"))).toBe(true);
+    expect(needsDiscovery(record("a"), agent("worker", { sandboxId: "a" }))).toBe(false);
+    expect(needsDiscovery(record("a"), agent("worker", { sandboxId: "b" }))).toBe(true);
+    expect(needsDiscovery(record("a"), agent("worker"))).toBe(false);
   });
 
-  it("keeps a record while the Sandbox has no id to compare yet", () => {
-    const records = { worker: record("sandbox-1") };
-    expect(reconcileRecords(records, [agent("worker")])).toEqual(records);
+  it("keeps seeded repositories only for the same environment", () => {
+    const previous = { ...record("a"), seededRepositories: ["/home/agent/code/app"] };
+    const sameEnvironment = {
+      sandboxId: "b",
+      environmentId: previous.environmentId,
+      sshTarget: null,
+    };
+    expect(discoveredRecord(previous, sameEnvironment).seededRepositories).toEqual([
+      "/home/agent/code/app",
+    ]);
+    const newEnvironment = { ...sameEnvironment, environmentId: EnvironmentId.make("env-2") };
+    expect(discoveredRecord(previous, newEnvironment).seededRepositories).toEqual([]);
   });
 });
 

@@ -48,10 +48,7 @@ export interface SandboxRuntime {
 
 export const IDLE_RUNTIME: SandboxRuntime = { action: null, actionError: null, connectError: null };
 
-/**
- * Drops records for Sandboxes that are gone or were recreated under the same
- * name. A recreated Sandbox has a fresh disk and therefore a new environment.
- */
+/** Drops records for Sandboxes that are gone or being deleted. */
 export function reconcileRecords(
   records: Readonly<Record<string, SandboxRecord>>,
   agents: ReadonlyArray<AgentResource>,
@@ -60,11 +57,32 @@ export function reconcileRecords(
   for (const [name, record] of Object.entries(records)) {
     const agent = agents.find((candidate) => candidate.metadata.name === name);
     if (agent === undefined || agent.metadata.deletionTimestamp !== undefined) continue;
-    const sandboxId = agent.status?.sandbox?.id ?? null;
-    if (sandboxId !== null && record.sandboxId !== null && sandboxId !== record.sandboxId) continue;
     next[name] = record;
   }
   return next;
+}
+
+/**
+ * Whether T3 must reach the Sandbox to learn its environment: it never has, or
+ * agentctl reports a different sandbox, which may be a recreated one with a
+ * fresh disk. The record stays until discovery says which.
+ */
+export function needsDiscovery(record: SandboxRecord | undefined, agent: AgentResource): boolean {
+  if (record === undefined) return true;
+  const sandboxId = agent.status?.sandbox?.id ?? null;
+  return sandboxId !== null && record.sandboxId !== null && sandboxId !== record.sandboxId;
+}
+
+/** The record after discovery: the same environment keeps its seeded repositories. */
+export function discoveredRecord(
+  previous: SandboxRecord | undefined,
+  discovered: Omit<SandboxRecord, "seededRepositories">,
+): SandboxRecord {
+  return {
+    ...discovered,
+    seededRepositories:
+      previous?.environmentId === discovered.environmentId ? previous.seededRepositories : [],
+  };
 }
 
 export function buildSandbox(

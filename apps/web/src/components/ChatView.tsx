@@ -402,7 +402,8 @@ import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnectDelay";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
-import { startSandbox } from "../sandboxes/sandboxActions";
+import { startSandboxNamed } from "../sandboxes/sandboxActions";
+import { sandboxNameForTarget } from "../sandboxes/sandboxConnections";
 import { useOffersSandboxes, useSandboxUnavailableNotice } from "../sandboxes/useSandboxPicker";
 import { useEnvironmentQuery } from "../state/query";
 import { useEnvironmentScope } from "~/state/session";
@@ -2722,7 +2723,9 @@ export default function ChatView(props: ChatViewProps) {
     disconnectDelayElapsed &&
     activeEnvironment !== null &&
     activeEnvironment.entry.target._tag !== "PrimaryConnectionTarget" &&
-    !isDesktopLocalConnectionTarget(activeEnvironment.entry.target);
+    !isDesktopLocalConnectionTarget(activeEnvironment.entry.target) &&
+    // A Sandbox is managed from its own lifecycle; stopping it is the way out.
+    sandboxNameForTarget(activeEnvironment.entry.target) === null;
   const [disconnectingEnvironment, setDisconnectingEnvironment] = useState(false);
   const handleDisconnectActiveEnvironment = useCallback(
     async (environmentId: EnvironmentId) => {
@@ -3134,7 +3137,7 @@ export default function ChatView(props: ChatViewProps) {
               <Button
                 size="xs"
                 variant="ghost"
-                onClick={() => void startSandbox(sandboxNotice.sandbox)}
+                onClick={() => void startSandboxNamed(sandboxNotice.name)}
               >
                 Start
               </Button>

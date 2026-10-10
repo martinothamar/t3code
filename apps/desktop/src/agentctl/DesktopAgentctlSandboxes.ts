@@ -20,7 +20,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
-import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as HttpClient from "effect/http/HttpClient";
@@ -36,11 +35,12 @@ import {
   REPOSITORY_SCAN_SCRIPT,
   SandboxStoreDocument,
   buildSandbox,
+  discoveredRecord,
   isActionSettled,
+  needsDiscovery,
   parseRepositoryList,
   reconcileRecords,
   sandboxNameError,
-  type SandboxRecord,
   type SandboxRuntime,
 } from "./sandboxModel.ts";
 
@@ -71,6 +71,7 @@ export class DesktopAgentctlSandboxes extends Context.Service<
 >()("@t3tools/desktop/agentctl/DesktopAgentctlSandboxes") {}
 
 const POLL_INTERVAL = Duration.seconds(3);
+const UNAVAILABLE_POLL_INTERVAL = Duration.seconds(30);
 // A Sandbox that could not be reached is retried, but not on every poll.
 const DISCOVERY_RETRY_MS = 30_000;
 
@@ -104,15 +105,23 @@ export const make = Effect.gen(function* () {
     Effect.orElseSucceed((): SandboxStoreDocument => ({})),
   );
   const store = yield* Ref.make<SandboxStoreDocument>(loaded);
+  // Writes go to a temporary file first, so a crash never leaves half a document.
   const persist = Ref.get(store).pipe(
     Effect.flatMap(encodeStore),
-    Effect.flatMap((json) => fileSystem.writeFileString(storePath, `${json}\n`)),
+    Effect.flatMap((json) =>
+      fileSystem
+        .writeFileString(`${storePath}.tmp`, `${json}\n`)
+        .pipe(Effect.andThen(fileSystem.rename(`${storePath}.tmp`, storePath))),
+    ),
     Effect.catch((error) =>
       Effect.logWarning("Could not save agentctl Sandbox state.", { storePath, error }),
     ),
   );
+  // One update at a time, each saved before the next, so none is lost or reordered.
+  const storeLock = yield* Semaphore.make(1);
   const updateStore = (update: (document: SandboxStoreDocument) => SandboxStoreDocument) =>
-    Ref.update(store, update).pipe(Effect.andThen(persist));
+    storeLock.withPermits(1)(Ref.update(store, update).pipe(Effect.andThen(persist)));
+  const scope = yield* Effect.scope;
 
   const agentsRef = yield* Ref.make<ReadonlyArray<AgentResource>>([]);
   const runtimes = yield* Ref.make<ReadonlyMap<string, SandboxRuntime>>(new Map());
@@ -172,17 +181,19 @@ export const make = Effect.gen(function* () {
           connectError: discoveryErrorMessage(result.failure),
         }));
       } else {
-        const record: SandboxRecord = {
+        const discovered = {
           sandboxId: agent.status?.sandbox?.id ?? null,
           environmentId: result.success.descriptor.environmentId,
           // Registering the resolved target keeps the SSH connection from
           // recording a changed profile on every connect.
           sshTarget: result.success.sshTarget,
-          seededRepositories: [],
         };
         yield* updateStore((document) => ({
           ...document,
-          sandboxes: { ...document.sandboxes, [name]: record },
+          sandboxes: {
+            ...document.sandboxes,
+            [name]: discoveredRecord(document.sandboxes?.[name], discovered),
+          },
         }));
         yield* updateRuntime(name, (runtime) => ({ ...runtime, connectError: null }));
       }
@@ -222,11 +233,14 @@ export const make = Effect.gen(function* () {
       error: null,
     }));
 
-    const records = (yield* Ref.get(store)).sandboxes ?? {};
-    const reconciled = reconcileRecords(records, agents);
-    if (Object.keys(reconciled).length !== Object.keys(records).length) {
-      yield* updateStore((document) => ({ ...document, sandboxes: reconciled }));
+    const known = (yield* Ref.get(store)).sandboxes ?? {};
+    if (Object.keys(reconcileRecords(known, agents)).length !== Object.keys(known).length) {
+      yield* updateStore((document) => ({
+        ...document,
+        sandboxes: reconcileRecords(document.sandboxes ?? {}, agents),
+      }));
     }
+    const records = (yield* Ref.get(store)).sandboxes ?? {};
 
     // Close tunnels to Sandboxes that are stopping or went away; a Sandbox
     // that is only re-provisioning keeps its SSH server.
@@ -257,13 +271,13 @@ export const make = Effect.gen(function* () {
     const pending = yield* Ref.get(discovering);
     for (const agent of agents) {
       const name = agent.metadata.name;
-      if (!isConnectable(agent) || reconciled[name] !== undefined) continue;
+      if (!isConnectable(agent) || !needsDiscovery(records[name], agent)) continue;
       const retryAt = pending.get(name);
       if (retryAt !== undefined && now < retryAt) continue;
       yield* Ref.update(discovering, (current) =>
         new Map(current).set(name, Number.POSITIVE_INFINITY),
       );
-      yield* Effect.forkDetach(discover(agent));
+      yield* Effect.forkIn(discover(agent), scope);
     }
     yield* publish;
   });
@@ -296,11 +310,15 @@ export const make = Effect.gen(function* () {
     Effect.map((document) => document.settings ?? DEFAULT_SANDBOX_SETTINGS),
   );
 
-  yield* refresh.pipe(
-    Effect.repeat(Schedule.spaced(POLL_INTERVAL)),
-    Effect.catchCause((cause) => Effect.logError("agentctl Sandbox polling stopped.", { cause })),
-    Effect.forkScoped,
+  // Without agentctl there is nothing to watch closely, so check rarely.
+  const pollOnce = refresh.pipe(
+    Effect.catchCause((cause) => Effect.logError("agentctl Sandbox polling failed.", { cause })),
+    Effect.andThen(Ref.get(snapshotRef)),
+    Effect.flatMap((snapshot) =>
+      Effect.sleep(snapshot.status === "unavailable" ? UNAVAILABLE_POLL_INTERVAL : POLL_INTERVAL),
+    ),
   );
+  yield* Effect.forever(pollOnce).pipe(Effect.forkScoped);
 
   return DesktopAgentctlSandboxes.of({
     snapshot: Ref.get(snapshotRef),

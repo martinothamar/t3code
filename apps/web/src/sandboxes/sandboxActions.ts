@@ -78,6 +78,19 @@ function reportResult(title: string, result: AgentctlActionResult) {
   return false;
 }
 
+// One request per Sandbox at a time, so a double click does not run it twice.
+const inFlight = new Set<string>();
+
+async function once(name: string, run: () => Promise<boolean>): Promise<boolean> {
+  if (inFlight.has(name)) return false;
+  inFlight.add(name);
+  try {
+    return await run();
+  } finally {
+    inFlight.delete(name);
+  }
+}
+
 async function confirm(message: string, destructive: boolean) {
   return (
     (await requestConfirmDialog(message, destructive ? { variant: "destructive" } : undefined)) ??
@@ -85,15 +98,28 @@ async function confirm(message: string, destructive: boolean) {
   );
 }
 
-export async function startSandbox(sandbox: AgentctlSandbox): Promise<boolean> {
-  const bridge = readAgentctlBridge();
-  if (bridge === null) return false;
-  const pending = bridge.start(sandbox.name);
-  refreshSandboxSnapshot();
-  return reportResult(`Could not start ${sandbox.name}`, await pending);
+export function startSandbox(sandbox: AgentctlSandbox): Promise<boolean> {
+  return once(sandbox.name, () => runStart(sandbox.name));
 }
 
-export async function stopSandbox(sandbox: AgentctlSandbox, running = 0): Promise<boolean> {
+/** Starts a Sandbox by name, for callers that only hold its name. */
+export function startSandboxNamed(name: string): Promise<boolean> {
+  return once(name, () => runStart(name));
+}
+
+async function runStart(name: string): Promise<boolean> {
+  const bridge = readAgentctlBridge();
+  if (bridge === null) return false;
+  const pending = bridge.start(name);
+  refreshSandboxSnapshot();
+  return reportResult(`Could not start ${name}`, await pending);
+}
+
+export function stopSandbox(sandbox: AgentctlSandbox, running = 0): Promise<boolean> {
+  return once(sandbox.name, () => runStop(sandbox, running));
+}
+
+async function runStop(sandbox: AgentctlSandbox, running: number): Promise<boolean> {
   const bridge = readAgentctlBridge();
   if (bridge === null) return false;
   const busy =
@@ -110,7 +136,11 @@ export async function stopSandbox(sandbox: AgentctlSandbox, running = 0): Promis
   return reportResult(`Could not stop ${sandbox.name}`, await pending);
 }
 
-export async function deleteSandbox(sandbox: AgentctlSandbox): Promise<boolean> {
+export function deleteSandbox(sandbox: AgentctlSandbox): Promise<boolean> {
+  return once(sandbox.name, () => runDelete(sandbox));
+}
+
+async function runDelete(sandbox: AgentctlSandbox): Promise<boolean> {
   const bridge = readAgentctlBridge();
   if (bridge === null) return false;
   const confirmed = await confirm(

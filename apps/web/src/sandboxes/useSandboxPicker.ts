@@ -6,7 +6,7 @@ import { useEnvironmentPresentation } from "../state/presentation";
 import { openNewSandboxDialog } from "./NewSandboxDialog";
 import { sandboxStatus, startSandbox } from "./sandboxActions";
 import { useSandboxProjectSeeding } from "./sandboxProjects";
-import { useSandboxSnapshot, useSandboxes } from "./useSandboxes";
+import { useSandboxSelector, useSandboxes } from "./useSandboxes";
 
 const SANDBOX_VALUE_PREFIX = "agentctl-sandbox:";
 // Long enough for a Sandbox that clones its repositories on first boot.
@@ -15,7 +15,7 @@ export const NEW_SANDBOX_VALUE = `${SANDBOX_VALUE_PREFIX}new`;
 
 /** Whether the location picker offers Sandboxes, even with a single environment. */
 export function useOffersSandboxes(): boolean {
-  return useSandboxSnapshot().status === "available";
+  return useSandboxSelector((snapshot) => snapshot.status === "available");
 }
 
 export interface SandboxPickerItem {
@@ -77,10 +77,12 @@ export function useSandboxPicker(input: {
   const seed = useSandboxProjectSeeding();
 
   const moveDraft = useEffectEvent((environmentId: EnvironmentId) => {
+    setPendingName(null);
     input.onEnvironmentChange?.(environmentId);
   });
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- The move happens once; a later draft must not inherit it.
     if (arrived && pendingEnvironmentId !== null) moveDraft(pendingEnvironmentId);
   }, [arrived, pendingEnvironmentId]);
 
@@ -168,23 +170,28 @@ export function useSandboxPicker(input: {
  */
 export function useSandboxUnavailableNotice(environmentId: string | null): {
   readonly title: string;
-  readonly sandbox: AgentctlSandbox;
+  readonly name: string;
   readonly canStart: boolean;
 } | null {
-  const sandboxes = useSandboxes();
-  const sandbox =
-    environmentId === null
-      ? null
-      : (sandboxes.find((candidate) => candidate.environmentId === environmentId) ?? null);
-  // The snapshot keeps a Sandbox's object until it changes, so this is stable.
-  return useMemo(() => {
-    if (sandbox === null) return null;
-    if (sandbox.action === null && sandbox.phase === "stopped") {
-      return { title: `${sandbox.name} is stopped`, sandbox, canStart: true };
-    }
+  // A primitive key, so ChatView only re-renders when the notice itself changes.
+  const key = useSandboxSelector((snapshot) => {
+    if (environmentId === null) return null;
+    const sandbox = snapshot.sandboxes.find(
+      (candidate) => candidate.environmentId === environmentId,
+    );
+    if (sandbox === undefined) return null;
+    if (sandbox.action === null && sandbox.phase === "stopped") return `stopped:${sandbox.name}`;
     if (sandbox.action === "starting" || sandbox.phase === "starting") {
-      return { title: `${sandbox.name} is starting…`, sandbox, canStart: false };
+      return `starting:${sandbox.name}`;
     }
     return null;
-  }, [sandbox]);
+  });
+  return useMemo(() => {
+    if (key === null) return null;
+    const separator = key.indexOf(":");
+    const name = key.slice(separator + 1);
+    return key.startsWith("stopped:")
+      ? { title: `${name} is stopped`, name, canStart: true }
+      : { title: `${name} is starting…`, name, canStart: false };
+  }, [key]);
 }
