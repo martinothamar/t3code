@@ -76,7 +76,6 @@ const createRun = Effect.fn(function* (
   threadId: ThreadId,
   status: OrchestrationV2Run["status"] = "completed",
   ordinal = 1,
-  times: Partial<Pick<OrchestrationV2Run, "startedAt" | "completedAt">> = {},
 ) {
   const store = yield* ProjectionStore.ProjectionStoreV2;
   const runId = RunId.make(`run:${threadId}:${ordinal}`);
@@ -99,7 +98,6 @@ const createRun = Effect.fn(function* (
       requestedAt: old,
       startedAt: status === "queued" ? null : old,
       completedAt: ["completed", "rolled_back", "failed"].includes(status) ? old : null,
-      ...times,
       checkpointId: null,
       contextHandoffId: null,
     },
@@ -404,34 +402,6 @@ it.effect.each([
         [open],
       );
     }).pipe(Effect.provide(testLayer)),
-);
-
-it.effect.each([
-  ["sql", layerSql],
-  ["memory", ProjectionStore.layerMemory],
-] as const)("%s: lists when a thread's runs worked, from a given time on", ([, testLayer]) =>
-  Effect.gen(function* () {
-    const store = yield* ProjectionStore.ProjectionStoreV2;
-    const threadId = yield* createThread("run-windows");
-    const at = (minutes: number) => DateTime.add(old, { minutes });
-    yield* createRun(threadId, "completed", 1, { startedAt: at(0), completedAt: at(5) });
-    yield* createRun(threadId, "completed", 2, { startedAt: at(10), completedAt: at(20) });
-    yield* createRun(threadId, "running", 3, { startedAt: at(30) });
-    yield* createRun(threadId, "queued", 4);
-    yield* createRun(yield* createThread("other-runs"), "running", 1, { startedAt: at(30) });
-
-    const windows = yield* store.getRunWindows(threadId, DateTime.formatIso(at(15)));
-    assert.deepEqual(
-      windows.map(({ startedAt, completedAt }) => [
-        Date.parse(startedAt),
-        completedAt === null ? null : Date.parse(completedAt),
-      ]),
-      [
-        [DateTime.toEpochMillis(at(10)), DateTime.toEpochMillis(at(20))],
-        [DateTime.toEpochMillis(at(30)), null],
-      ],
-    );
-  }).pipe(Effect.provide(testLayer)),
 );
 
 it.effect.each([

@@ -212,8 +212,8 @@ function watchesEqual(left: ThreadPullRequestWatch, right: ThreadPullRequestWatc
 
 /**
  * Wakes a thread's agent when a pull request it watches (`watch_pull_request`) needs a look:
- * checks finished on the head commit, someone else commented, or the branch started to
- * conflict. A pass every two minutes looks at each watched pull request once for all the threads
+ * checks finished on the head commit, someone other than the agent itself commented, or the
+ * branch started to conflict. A pass every two minutes looks at each watched pull request once for all the threads
  * of a project that watch it. Where the host has a fingerprint, one batched read of those tells
  * the pass which pull requests moved, and only those are read; elsewhere a pull request is read
  * unless its sync snapshot has not moved while nothing is in flight.
@@ -547,33 +547,26 @@ export const make = Effect.gen(function* () {
       status: fingerprint?.status ?? null,
       remarks: fingerprint?.remarks ?? null,
     });
-    yield* eachTarget(group, (target) =>
-      Effect.gen(function* () {
-        // Only remarks need the thread's run times, to tell its agent's replies from the user's.
-        const runs =
-          remarks === null
-            ? []
-            : yield* projections.getRunWindows(target.thread.id, target.watch.startedAt);
-        const report = evaluatePullRequestWatch(target.watch, detail, remarks, runs);
-        if (report.changes.length > 0) {
-          return yield* record(
-            target,
-            report.exhausted ? null : report.next,
-            pullRequestWatchMessage({
-              number: target.link.number,
-              url: target.link.url,
-              baseBranch: detail.baseBranch,
-              headSha: report.next.headSha,
-              report,
-            }),
-          ).pipe(
-            Effect.tap(() => woke(target)),
-            Effect.tap(() => (report.exhausted ? ended(target, "comment-limit") : Effect.void)),
-          );
-        }
-        if (!watchesEqual(report.next, target.watch)) yield* record(target, report.next);
-      }),
-    );
+    yield* eachTarget(group, (target) => {
+      const report = evaluatePullRequestWatch(target.watch, detail, remarks);
+      if (report.changes.length > 0) {
+        return record(
+          target,
+          report.exhausted ? null : report.next,
+          pullRequestWatchMessage({
+            number: target.link.number,
+            url: target.link.url,
+            baseBranch: detail.baseBranch,
+            headSha: report.next.headSha,
+            report,
+          }),
+        ).pipe(
+          Effect.tap(() => woke(target)),
+          Effect.tap(() => (report.exhausted ? ended(target, "comment-limit") : Effect.void)),
+        );
+      }
+      return watchesEqual(report.next, target.watch) ? Effect.void : record(target, report.next);
+    });
   });
 
   const sweep = Effect.gen(function* () {

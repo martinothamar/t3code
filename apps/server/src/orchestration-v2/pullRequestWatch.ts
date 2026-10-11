@@ -6,30 +6,30 @@ import type {
   ThreadPullRequestWatch,
 } from "@t3tools/contracts";
 
-import type { ProjectionRunWindow } from "./ProjectionStore.ts";
-
 /**
  * Wakes in a row that bring only comments. Check, conflict, or push news resets the count, so
- * this only stops a chatty bot looping an agent that is replying to it.
+ * this stops a chatty bot, or the agent's own unmarked replies, from looping it.
  */
 export const PULL_REQUEST_WATCH_WAKE_LIMIT = 10;
 const LISTED_ITEMS = 10;
 const SNIPPET_LENGTH = 200;
 /**
- * Slack around a run's working time for the agent's unmarked remarks: the host stamps a remark
- * with its own clock, and a run completes after its last tool call returns.
- */
-const RUN_WINDOW_SLACK_MS = 5_000;
-/**
  * Agents end what they post on a pull request with `<!-- t3code:agent -->`. One account can be
  * both the user's and the agent's, so the author alone cannot tell the agent's own remarks apart.
+ * Only a trailing marker counts, so a remark that quotes it still wakes the agent.
  */
-const AGENT_MARKER = /<!--\s*t3code:agent\b[\s\S]*?-->/u;
+const AGENT_MARKER_TEXT = "<!-- t3code:agent -->";
+const AGENT_MARKER = /<!--\s*t3code:agent\b[^>]*-->\s*$/u;
 
 export type PullRequestWatchChange =
   | { readonly kind: "checks-failed"; readonly failed: ReadonlyArray<PullRequestCheck> }
   | { readonly kind: "checks-passed"; readonly count: number; readonly required: boolean }
-  | { readonly kind: "remarks"; readonly remarks: ReadonlyArray<PullRequestComment> }
+  | {
+      readonly kind: "remarks";
+      readonly remarks: ReadonlyArray<PullRequestComment>;
+      /** The agent's own login, to point out its unmarked remarks, which are likely the user's. */
+      readonly own: string | undefined;
+    }
   | { readonly kind: "conflicting" };
 
 export interface PullRequestWatchReport {
@@ -49,17 +49,15 @@ const isFailedCheck = (check: PullRequestCheck) =>
  * Compares a watched pull request with what its agent was last told. Each check is reported as
  * soon as it fails, so a check that never finishes (an advisory review bot) cannot hold the
  * news back. "Passed" is reported once the checks the base branch requires all passed, or all
- * checks where the host marks none required. Remarks by another account always count. Remarks by
- * the agent's own account count unless they carry the agent marker or were made while one of the
- * thread's `runs` was working, so a user who shares the account still wakes the agent while its
- * own replies do not. `remarks` is null when the conversation could not be read; remarks then
- * wait for a later pass.
+ * checks where the host marks none required. Remarks count unless they are drafts in an
+ * unsubmitted review, or the agent's own account wrote them and they end with the agent marker,
+ * so a user who shares the account still wakes the agent while its own replies do not. `remarks`
+ * is null when the conversation could not be read; remarks then wait for a later pass.
  */
 export function evaluatePullRequestWatch(
   watch: ThreadPullRequestWatch,
   detail: Pick<PullRequestDetail, "headSha" | "checks" | "mergeability" | "viewer" | "author">,
   remarks: ReadonlyArray<PullRequestComment> | null,
-  runs: ReadonlyArray<ProjectionRunWindow> = [],
 ): PullRequestWatchReport {
   const changes: Array<PullRequestWatchChange> = [];
   const headSha = detail.headSha ?? null;
@@ -96,24 +94,19 @@ export function evaluatePullRequestWatch(
   const through = Date.parse(watch.remarksThrough);
   // An edit counts as new activity, so bots that rewrite one summary comment still wake the agent.
   const activeAt = (remark: PullRequestComment) => remark.editedAt ?? remark.createdAt;
-  // A forgotten marker falls back to timing: the user is not who posts while the agent works.
-  const duringRun = (at: number) =>
-    runs.some(
-      (run) =>
-        at >= Date.parse(run.startedAt) - RUN_WINDOW_SLACK_MS &&
-        (run.completedAt === null || at <= Date.parse(run.completedAt) + RUN_WINDOW_SLACK_MS),
-    );
-  const byAgent = (remark: PullRequestComment, at: number) =>
-    remark.author?.login.toLowerCase() === own && (AGENT_MARKER.test(remark.body) || duringRun(at));
-  // GitHub times are per second, so remarks at the boundary time are told apart by ID.
+  const byAgent = (remark: PullRequestComment) =>
+    remark.author?.login.toLowerCase() === own && AGENT_MARKER.test(remark.body);
+  // GitHub times are per second, so remarks at the boundary time are told apart by ID. A draft
+  // is held back until its review is submitted, which gives it a new time.
   const fresh = (remarks ?? []).filter((remark) => {
     const at = Date.parse(activeAt(remark));
     return (
       (at > through || (at === through && !watch.remarkIds.includes(remark.id))) &&
-      !byAgent(remark, at)
+      remark.pending !== true &&
+      !byAgent(remark)
     );
   });
-  if (fresh.length > 0) changes.push({ kind: "remarks", remarks: fresh });
+  if (fresh.length > 0) changes.push({ kind: "remarks", remarks: fresh, own });
   const latest = Math.max(through, ...fresh.map((remark) => Date.parse(activeAt(remark))));
   const atLatest = fresh.filter((remark) => Date.parse(activeAt(remark)) === latest);
   const remarksThrough = latest === through ? watch.remarksThrough : activeAt(atLatest[0]!);
@@ -181,16 +174,25 @@ function changeLines(
       return [
         `- All ${change.count} ${change.required ? "required " : ""}${change.count === 1 ? "check" : "checks"} passed${context.commit}.`,
       ];
-    case "remarks":
+    case "remarks": {
+      const isOwn = (remark: PullRequestComment) =>
+        change.own !== undefined && remark.author?.login.toLowerCase() === change.own;
       return [
         `- ${change.remarks.length} new ${change.remarks.length === 1 ? "comment" : "comments"}:`,
         ...listed(change.remarks, (remark) => {
           const where = remark.path === null ? "" : ` on ${remark.path}`;
           const body = snippet(remark.body);
           const said = body.length === 0 ? (remark.reviewState ?? "reviewed") : `"${body}"`;
-          return `  - ${remark.author?.login ?? "someone"}${where}: ${said}${remark.url ? ` ${remark.url}` : ""}`;
+          const who = `${remark.author?.login ?? "someone"}${isOwn(remark) ? " (your account)" : ""}`;
+          return `  - ${who}${where}: ${said}${remark.url ? ` ${remark.url}` : ""}`;
         }),
+        ...(change.remarks.some(isOwn)
+          ? [
+              `  Comments from your account without the ${AGENT_MARKER_TEXT} marker are most likely the user's: you may share the account. If you posted one, ignore it and end what you post with the marker.`,
+            ]
+          : []),
       ];
+    }
     case "conflicting":
       return [`- The branch now conflicts with ${context.baseBranch}.`];
   }

@@ -168,7 +168,7 @@ describe("evaluatePullRequestWatch", () => {
     const late = { ...remark("bot", "2026-10-02T12:06:00Z"), id: "late" };
     const reported = evaluatePullRequestWatch(watch(), detail(), [first]);
     const again = evaluatePullRequestWatch(reported.next, detail(), [first, late]);
-    assert.deepEqual(again.changes, [{ kind: "remarks", remarks: [late] }]);
+    assert.deepEqual(again.changes, [{ kind: "remarks", remarks: [late], own: "agent-user" }]);
     assert.deepEqual(again.next.remarkIds, [first.id, "late"]);
   });
 
@@ -182,14 +182,14 @@ describe("evaluatePullRequestWatch", () => {
     assert.deepEqual(evaluatePullRequestWatch(watching, detail(), [old]).changes, []);
     const edited = { ...old, editedAt: "2026-10-02T12:06:00Z" };
     const report = evaluatePullRequestWatch(watching, detail(), [edited]);
-    assert.deepEqual(report.changes, [{ kind: "remarks", remarks: [edited] }]);
+    assert.deepEqual(report.changes, [{ kind: "remarks", remarks: [edited], own: "agent-user" }]);
     assert.equal(report.next.remarksThrough, edited.editedAt);
     assert.deepEqual(report.next.remarkIds, [old.id]);
     assert.isTrue(report.exhausted);
     assert.deepEqual(evaluatePullRequestWatch(report.next, detail(), [edited]).changes, []);
     const late = { ...edited, id: "late" };
     assert.deepEqual(evaluatePullRequestWatch(report.next, detail(), [edited, late]).changes, [
-      { kind: "remarks", remarks: [late] },
+      { kind: "remarks", remarks: [late], own: "agent-user" },
     ]);
   });
 
@@ -205,7 +205,7 @@ describe("evaluatePullRequestWatch", () => {
     const contributor = detail({ author: { login: "contributor", name: null, avatarUrl: null } });
     const reply = remark("contributor", "2026-10-02T12:06:00Z");
     assert.deepEqual(evaluatePullRequestWatch(watch(), contributor, [reply]).changes, [
-      { kind: "remarks", remarks: [reply] },
+      { kind: "remarks", remarks: [reply], own: "agent-user" },
     ]);
     // Without a viewer, the author is taken to be the agent, whose marked replies stay quiet.
     const noViewer = detail({ viewer: undefined, author: contributor.author });
@@ -224,7 +224,9 @@ describe("evaluatePullRequestWatch", () => {
       remark("reviewer", "2026-10-02T11:00:00Z", "Older than the watch."),
     ];
     const report = evaluatePullRequestWatch(watch(), detail(), comments);
-    assert.deepEqual(report.changes, [{ kind: "remarks", remarks: [comments[1]!] }]);
+    assert.deepEqual(report.changes, [
+      { kind: "remarks", remarks: [comments[1]!], own: "agent-user" },
+    ]);
     assert.equal(report.next.remarksThrough, "2026-10-02T12:06:00Z");
     assert.deepEqual(evaluatePullRequestWatch(report.next, detail(), comments).changes, []);
   });
@@ -232,7 +234,7 @@ describe("evaluatePullRequestWatch", () => {
   it("wakes for the user's own account when they share it with the agent", () => {
     const comments = [remark("agent-user", "2026-10-02T12:05:00Z", "Please split this function.")];
     assert.deepEqual(evaluatePullRequestWatch(watch(), detail(), comments).changes, [
-      { kind: "remarks", remarks: comments },
+      { kind: "remarks", remarks: comments, own: "agent-user" },
     ]);
   });
 
@@ -243,24 +245,30 @@ describe("evaluatePullRequestWatch", () => {
       remark("reviewer", "2026-10-02T12:06:00Z", marked),
     ];
     assert.deepEqual(evaluatePullRequestWatch(watch(), detail(), comments).changes, [
-      { kind: "remarks", remarks: [comments[1]!] },
+      { kind: "remarks", remarks: [comments[1]!], own: "agent-user" },
     ]);
   });
 
-  it("treats the shared account's unmarked remarks while a run works as the agent's", () => {
-    const runs = [
-      { startedAt: "2026-10-02T12:04:00Z", completedAt: "2026-10-02T12:06:00Z" },
-      { startedAt: "2026-10-02T12:20:00Z", completedAt: null },
-    ];
-    const comments = [
-      remark("agent-user", "2026-10-02T12:05:00Z", "Forgot the marker."),
-      remark("agent-user", "2026-10-02T12:06:04Z", "Stamped just after the run ended."),
-      remark("agent-user", "2026-10-02T12:10:00Z", "The user, between runs."),
-      remark("agent-user", "2026-10-02T12:25:00Z", "Forgot it again, still working."),
-      remark("reviewer", "2026-10-02T12:21:00Z"),
-    ];
-    assert.deepEqual(evaluatePullRequestWatch(watch(), detail(), comments, runs).changes, [
-      { kind: "remarks", remarks: [comments[2]!, comments[4]!] },
+  it("only takes a trailing marker as the agent's", () => {
+    const quoted = remark(
+      "agent-user",
+      "2026-10-02T12:05:00Z",
+      "Agents should end with `<!-- t3code:agent -->`, not start with it.",
+    );
+    assert.deepEqual(evaluatePullRequestWatch(watch(), detail(), [quoted]).changes, [
+      { kind: "remarks", remarks: [quoted], own: "agent-user" },
+    ]);
+  });
+
+  it("holds a draft review comment back until its review is submitted", () => {
+    const draft = { ...remark("agent-user", "2026-10-02T12:05:00Z"), pending: true };
+    const other = remark("reviewer", "2026-10-02T12:10:00Z");
+    const first = evaluatePullRequestWatch(watch(), detail(), [draft, other]);
+    assert.deepEqual(first.changes, [{ kind: "remarks", remarks: [other], own: "agent-user" }]);
+    // Submitting gives the comment its review's time, after what was already read.
+    const submitted = { ...draft, pending: undefined, createdAt: "2026-10-02T12:20:00Z" };
+    assert.deepEqual(evaluatePullRequestWatch(first.next, detail(), [submitted, other]).changes, [
+      { kind: "remarks", remarks: [submitted], own: "agent-user" },
     ]);
   });
 
@@ -270,7 +278,7 @@ describe("evaluatePullRequestWatch", () => {
     assert.deepEqual(first.changes, []);
     const edited = { ...original, body: "Not done, see line 4.", editedAt: "2026-10-02T12:30:00Z" };
     assert.deepEqual(evaluatePullRequestWatch(first.next, detail(), [edited]).changes, [
-      { kind: "remarks", remarks: [edited] },
+      { kind: "remarks", remarks: [edited], own: "agent-user" },
     ]);
   });
 
@@ -331,11 +339,30 @@ describe("pullRequestWatchMessage", () => {
     });
     assert.include(message.text, "- Checks failed on aaaaaaa:\n  - lint https://ci.example/lint");
     assert.include(message.text, '  - reviewer on src/index.ts: "Needs a test."');
+    assert.notInclude(message.text, "your account");
     assert.include(message.text, "unwatch_pull_request");
     assert.deepEqual(message.notification, {
       source: { kind: "monitor" },
       outcome: "failed",
       summary: "#12: checks failed, new comments",
     });
+  });
+
+  it("points out unmarked comments from the agent's own account", () => {
+    const report = evaluatePullRequestWatch(watch(), detail(), [
+      remark("Agent-User", "2026-10-02T12:10:00Z", "Please split this function."),
+    ]);
+    const message = pullRequestWatchMessage({
+      number: 12,
+      url: "https://github.com/o/r/pull/12",
+      baseBranch: "main",
+      headSha: report.next.headSha,
+      report,
+    });
+    assert.include(message.text, '  - Agent-User (your account) on src/index.ts: "Please split');
+    assert.include(
+      message.text,
+      "without the <!-- t3code:agent --> marker are most likely the user's",
+    );
   });
 });

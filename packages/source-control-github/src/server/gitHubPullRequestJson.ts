@@ -391,6 +391,10 @@ const RawCommentSchema = Schema.Struct({
   body: Schema.optional(Schema.String),
   createdAt: Schema.String,
   url: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Review comments only: `PENDING` while the review holding it is a draft. */
+  state: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Review comments only: when its review was submitted, null while it is a draft. */
+  publishedAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** Only ever present on a GraphQL read; `gh pr view --json` reports no reaction at all. */
   reactionGroups: RawReactionGroupsSchema,
 });
@@ -1035,7 +1039,7 @@ export const REVIEW_THREADS_GRAPHQL_QUERY = `query($owner: String!, $name: Strin
           comments(first: 10) {
             totalCount
             pageInfo { hasNextPage endCursor }
-            nodes { id author { __typename login avatarUrl } body createdAt lastEditedAt url ${REACTION_GROUPS_FIELDS} }
+            nodes { id author { __typename login avatarUrl } body createdAt publishedAt state lastEditedAt url ${REACTION_GROUPS_FIELDS} }
           }
         }
       }
@@ -1092,7 +1096,7 @@ export const REVIEW_THREAD_COMMENTS_GRAPHQL_QUERY = `query($owner: String!, $nam
       pullRequest { id }
       comments(first: ${GRAPHQL_PAGE_SIZE}, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { id author { __typename login avatarUrl } body createdAt lastEditedAt url ${REACTION_GROUPS_FIELDS} }
+        nodes { id author { __typename login avatarUrl } body createdAt publishedAt state lastEditedAt url ${REACTION_GROUPS_FIELDS} }
       }
     }
   }
@@ -2646,6 +2650,7 @@ export function reviewThreadConversation(
       path: thread.path,
       reviewState: null,
       reactions: comment.reactions ?? [],
+      ...(comment.pending === true ? { pending: true } : {}),
     })),
   );
 }
@@ -2709,6 +2714,27 @@ export function decodeReviewDismissalsJson(raw: string): Result.Result<
   });
 }
 
+/**
+ * A review comment joins the conversation when its review is submitted, so that is its time: a
+ * line drafted long before must not land behind remarks already read. Until then only the
+ * reader sees it, as `pending`.
+ */
+function toThreadComment(
+  comment: Schema.Schema.Type<typeof RawCommentSchema>,
+  viewer: string | null,
+): PullRequestThreadComment {
+  return {
+    id: comment.id,
+    author: toActor(comment.author),
+    body: comment.body ?? "",
+    createdAt: comment.publishedAt ?? comment.createdAt,
+    editedAt: comment.lastEditedAt ?? null,
+    url: trimmed(comment.url),
+    reactions: toReactions(comment.reactionGroups, viewer),
+    ...(comment.state === "PENDING" ? { pending: true } : {}),
+  };
+}
+
 export function decodeReviewThreadsJson(
   raw: string,
 ): Result.Result<GitHubReviewThreadPage, DecodeFailure> {
@@ -2736,15 +2762,7 @@ export function decodeReviewThreadsJson(
           side: thread.diffSide?.toUpperCase() === "LEFT" ? "left" : "right",
           isResolved: thread.isResolved === true,
           isOutdated: thread.isOutdated === true,
-          comments: thread.comments.nodes.map((comment) => ({
-            id: comment.id,
-            author: toActor(comment.author),
-            body: comment.body ?? "",
-            createdAt: comment.createdAt,
-            editedAt: comment.lastEditedAt ?? null,
-            url: trimmed(comment.url),
-            reactions: toReactions(comment.reactionGroups, viewer),
-          })),
+          comments: thread.comments.nodes.map((comment) => toThreadComment(comment, viewer)),
         },
         commentCount: thread.comments.totalCount ?? thread.comments.nodes.length,
         nextCommentCursor: nextCursorOf(thread.comments.pageInfo),
@@ -2857,15 +2875,7 @@ export function decodeReviewThreadCommentsJson(raw: string): Result.Result<
       decoded.success.data.repository?.pullRequest?.id !== undefined &&
       decoded.success.data.repository?.pullRequest?.id ===
         decoded.success.data.node?.pullRequest?.id,
-    comments: (comments?.nodes ?? []).map((comment) => ({
-      id: comment.id,
-      author: toActor(comment.author),
-      body: comment.body ?? "",
-      createdAt: comment.createdAt,
-      editedAt: comment.lastEditedAt ?? null,
-      url: trimmed(comment.url),
-      reactions: toReactions(comment.reactionGroups, viewer),
-    })),
+    comments: (comments?.nodes ?? []).map((comment) => toThreadComment(comment, viewer)),
     nextCursor: nextCursorOf(comments?.pageInfo),
   });
 }

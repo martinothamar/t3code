@@ -855,6 +855,44 @@ describe("review thread decoding", () => {
     expect(decoded.comments.map((comment) => comment.id)).toEqual(["t9"]);
     expect(decoded.nextCursor).toBeNull();
   });
+
+  it("dates a review comment by its review's submission and marks drafts pending", () => {
+    const decoded = expectSuccess(
+      decodeReviewThreadCommentsJson(
+        JSON.stringify({
+          data: {
+            repository: { pullRequest: { id: "PR_1" } },
+            node: {
+              pullRequest: { id: "PR_1" },
+              comments: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [
+                  {
+                    id: "submitted",
+                    createdAt: "2026-07-01T00:00:00Z",
+                    publishedAt: "2026-07-01T00:30:00Z",
+                    state: "SUBMITTED",
+                  },
+                  {
+                    id: "draft",
+                    createdAt: "2026-07-01T00:10:00Z",
+                    publishedAt: null,
+                    state: "PENDING",
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      ),
+    );
+    expect(
+      decoded.comments.map(({ id, createdAt, pending }) => ({ id, createdAt, pending })),
+    ).toEqual([
+      { id: "submitted", createdAt: "2026-07-01T00:30:00Z", pending: undefined },
+      { id: "draft", createdAt: "2026-07-01T00:10:00Z", pending: true },
+    ]);
+  });
 });
 
 describe("reaction decoding", () => {

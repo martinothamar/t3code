@@ -173,11 +173,6 @@ export type ProjectionThreadPullRequests = Pick<
   "id" | "projectId" | "lineage" | "settledOverride" | "settledAt" | "pullRequests"
 >;
 
-export interface ProjectionRunWindow {
-  readonly startedAt: string;
-  readonly completedAt: string | null;
-}
-
 /**
  * Thread activity needed by settlement, without transcript or fork history.
  * Settlement always loads `latestUserAuthoredMessageAt`, so it is required here.
@@ -413,15 +408,6 @@ export interface ProjectionStoreV2Shape {
   readonly getThreadsWithPullRequests: (
     threadId?: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ProjectionThreadPullRequests>, ProjectionStoreV2Error>;
-  /**
-   * When a thread's runs were working, for runs that started and were still going at or after
-   * `since`. A run still working has a null `completedAt`. The pull request watch uses these to
-   * tell the agent's own unmarked comments from the user's when both share one account.
-   */
-  readonly getRunWindows: (
-    threadId: ThreadId,
-    since: string,
-  ) => Effect.Effect<ReadonlyArray<ProjectionRunWindow>, ProjectionStoreV2Error>;
   readonly getTurnStartContext: (
     threadId: ThreadId,
     runId: RunId,
@@ -5599,21 +5585,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         );
       }).pipe(Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })));
 
-    const getRunWindows: ProjectionStoreV2Shape["getRunWindows"] = (threadId, since) =>
-      sql<{ readonly started_at: string; readonly completed_at: string | null }>`
-        SELECT json_extract(payload_json, '$.startedAt') AS started_at, completed_at
-        FROM orchestration_v2_projection_runs
-        WHERE thread_id = ${threadId}
-          AND json_extract(payload_json, '$.startedAt') IS NOT NULL
-          AND (completed_at IS NULL OR julianday(completed_at) >= julianday(${since}))
-        ORDER BY ordinal ASC
-      `.pipe(
-        Effect.map((rows) =>
-          rows.map((row) => ({ startedAt: row.started_at, completedAt: row.completed_at })),
-        ),
-        Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
-      );
-
     const shellThreadStateFromRow = (input: {
       readonly row: ShellThreadRow;
       readonly runOrdinalsByThreadId: ReadonlyMap<ThreadId, Map<RunId, number>>;
@@ -5954,7 +5925,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getThread,
       getSettlementCandidates,
       getThreadsWithPullRequests,
-      getRunWindows,
       getThreadProjection,
       getTurnStartContext,
       getTurnStartHistory,
@@ -6122,24 +6092,6 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 settledAt: thread.settledAt,
                 pullRequests: thread.pullRequests ?? [],
               })),
-          ),
-        ),
-      getRunWindows: (threadId, since) =>
-        Ref.get(replayState).pipe(
-          Effect.map((state) =>
-            (state.projections.get(threadId)?.runs ?? []).flatMap((run) =>
-              run.startedAt === null ||
-              (run.completedAt !== null &&
-                DateTime.toEpochMillis(run.completedAt) < Date.parse(since))
-                ? []
-                : [
-                    {
-                      startedAt: DateTime.formatIso(run.startedAt),
-                      completedAt:
-                        run.completedAt === null ? null : DateTime.formatIso(run.completedAt),
-                    },
-                  ],
-            ),
           ),
         ),
       getLimitRecoveryCandidates: (options) =>
