@@ -162,3 +162,9 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 
 - Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.
+
+## Fork
+
+The fork publishes its desktop apps and server archives with the Fork release workflow, and
+`node scripts/fork/install-desktop.ts` installs one; see
+[Releasing and installing the fork's desktop app](docs/operations/fork-desktop-build.md).

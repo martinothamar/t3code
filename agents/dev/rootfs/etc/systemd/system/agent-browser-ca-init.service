@@ -1,0 +1,13 @@
+[Unit]
+Description=Trust the network mediator's CA in Chromium and Electron
+
+[Service]
+Type=oneshot
+User=agent
+Group=agent
+Environment=HOME=/home/agent
+PassEnvironment=NODE_EXTRA_CA_CERTS
+ExecStart=/usr/local/libexec/agent-browser-ca-init
+
+[Install]
+WantedBy=multi-user.target

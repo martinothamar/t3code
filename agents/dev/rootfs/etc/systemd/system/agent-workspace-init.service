@@ -1,0 +1,16 @@
+[Unit]
+Description=Clone the T3 Code fork into the Agent workspace
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# One best-effort clone at boot. `Type=exec` keeps it out of the boot transaction.
+Type=exec
+User=agent
+Group=agent
+Environment=HOME=/home/agent
+PassEnvironment=GITHUB_TOKEN
+ExecStart=/usr/local/libexec/agent-workspace-init
+
+[Install]
+WantedBy=multi-user.target
