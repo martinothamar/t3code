@@ -59,7 +59,7 @@ source alone does not explain. Most code changes do not need an internal documen
 ### Runbooks
 
 - [Development and local builds](./operations/development.md)
-- [Building the fork's desktop app](./operations/fork-desktop-build.md)
+- [Releasing and installing the fork's desktop app](./operations/fork-desktop-build.md)
 - [T3 Connect setup](./operations/connect-setup.md)
 - [Release](./operations/release.md)
 - [Observability](./operations/observability.md)

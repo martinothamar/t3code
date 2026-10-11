@@ -27,7 +27,8 @@ rebase or force-push `main`; Sessions and worktrees build on it. When asked to s
 3. If `git diff --quiet origin/main upstream/main -- .github/workflows/ci.yml` fails, upstream
    changed its CI: copy it over `.github/workflows/fork-ci.yml` and reapply the edits listed at
    the top of that file. Upstream's own workflows stay disabled on the fork; `fork-guard.yml`
-   disables any new ones.
+   disables any new ones. `fork-release.yml` calls upstream's `release-desktop.yml` and mirrors
+   `build_bundle` in `release.yml`: if either changed, check that it still fits them.
 4. Run `vp i`, then the tests, lint and typecheck for the code the resolution touched.
 5. Push the branch and open a pull request into the fork's `main` that lists each conflict and how
    it was resolved. Say in it that it must be merged with "Create a merge commit": a squashed
