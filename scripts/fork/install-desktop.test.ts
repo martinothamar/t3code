@@ -6,10 +6,58 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
   buildEnvironment,
+  parseArguments,
+  parseChecksums,
   parseDesktopEntryName,
+  releaseAssetName,
   renderLauncher,
   replace,
 } from "./install-desktop.ts";
+
+describe("releaseAssetName", () => {
+  it("names each platform's build the way electron-builder writes it", () => {
+    const version = "0.0.46-preview.20261011.3";
+    expect(releaseAssetName(version, "linux", "x64")).toBe(`T3-Code-${version}-x86_64.AppImage`);
+    expect(releaseAssetName(version, "linux", "arm64")).toBe(`T3-Code-${version}-arm64.AppImage`);
+    expect(releaseAssetName(version, "darwin", "arm64")).toBe(`T3-Code-${version}-arm64.dmg`);
+    expect(releaseAssetName(version, "win32", "x64")).toBe(`T3-Code-${version}-x64.exe`);
+  });
+
+  it("has nothing for a target the release does not build", () => {
+    expect(releaseAssetName("0.0.46", "darwin", "x64")).toBeUndefined();
+    expect(releaseAssetName("0.0.46", "win32", "arm64")).toBeUndefined();
+    expect(releaseAssetName("0.0.46", "freebsd", "x64")).toBeUndefined();
+  });
+});
+
+describe("parseChecksums", () => {
+  it("reads text and binary mode lines, keyed by file name", () => {
+    const a = "a".repeat(64);
+    const b = "B".repeat(64);
+    const sums = parseChecksums(`${a}  T3-Code-1-x64.exe\n${b} *t3-1-linux-x64.tar.gz\n\nnoise\n`);
+    expect([...sums]).toEqual([
+      ["T3-Code-1-x64.exe", a],
+      ["t3-1-linux-x64.tar.gz", "b".repeat(64)],
+    ]);
+  });
+});
+
+describe("parseArguments", () => {
+  it("defaults to the latest release and takes a version without its v", () => {
+    expect(parseArguments([])).toEqual({ fromSource: false });
+    expect(parseArguments(["--version", "v0.0.46-preview.20261011.3"])).toEqual({
+      fromSource: false,
+      version: "0.0.46-preview.20261011.3",
+    });
+    expect(parseArguments(["--from-source"])).toEqual({ fromSource: true });
+  });
+
+  it("refuses a version for a source build, which takes HEAD's release", () => {
+    expect(() => parseArguments(["--from-source", "--version", "1.0.0"])).toThrow();
+    expect(() => parseArguments(["--version"])).toThrow();
+    expect(() => parseArguments(["--latest"])).toThrow();
+  });
+});
 
 describe("buildEnvironment", () => {
   it("passes on only the version of the build options, and nothing that adds a publish feed", () => {
@@ -24,12 +72,12 @@ describe("buildEnvironment", () => {
         t3code_desktop_version: "0.0.45-fork.abc",
         T3CODE_DESKTOP_OUTPUT_DIR: "/tmp/out",
       },
-      "0.0.46-nightly.20261010.2922",
+      "0.0.46-preview.20261011.3",
     );
 
     expect(env).toEqual({
       PATH: "/usr/bin",
-      T3CODE_DESKTOP_VERSION: "0.0.46-nightly.20261010.2922",
+      T3CODE_DESKTOP_VERSION: "0.0.46-preview.20261011.3",
     });
   });
 });

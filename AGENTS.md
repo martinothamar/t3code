@@ -165,4 +165,6 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 
 ## Fork
 
-Build and install the fork's desktop app with `node scripts/fork/install-desktop.ts`; see [Building the fork's desktop app](docs/operations/fork-desktop-build.md).
+The fork publishes its desktop apps and server archives with the Fork release workflow, and
+`node scripts/fork/install-desktop.ts` installs one; see
+[Releasing and installing the fork's desktop app](docs/operations/fork-desktop-build.md).
