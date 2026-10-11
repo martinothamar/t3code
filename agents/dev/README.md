@@ -1,8 +1,8 @@
 # T3 Code development Agent
 
 An [agentctl](https://github.com/digdir/digdir-agents) Agent for developing this fork inside a
-Sandbox: Ubuntu with Node 24, `vp`, Claude Code, Codex, `agentctl`/`agentd` for nested Agents, and
-a desktop for the Electron client that agents drive with the `desktop` helper and the
+Sandbox: Ubuntu with Node 24, `vp`, Rust, Claude Code, Codex, `agentctl`/`agentd` for nested
+Agents, and a desktop for the Electron client that agents drive with the `desktop` helper and the
 `computer-use` skill. It clones the fork into `/home/agent/code/t3code` at boot.
 
 | Variant  | Checkout                                                |
