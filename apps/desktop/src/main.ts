@@ -60,6 +60,7 @@ import * as DesktopPreReadyFileSystem from "./app/DesktopPreReadyFileSystem.ts";
 import * as DesktopPreReadyPlatform from "./app/DesktopPreReadyPlatform.ts";
 import * as DesktopShellEnvironment from "./shell/DesktopShellEnvironment.ts";
 import * as DesktopSshEnvironment from "./ssh/DesktopSshEnvironment.ts";
+import * as DesktopAgentctlSandboxes from "./agentctl/DesktopAgentctlSandboxes.ts";
 import * as DesktopSshPasswordPrompts from "./ssh/DesktopSshPasswordPrompts.ts";
 import { remoteServerOverrides, withRemoteServerOverrides } from "./ssh/remoteServerOverrides.ts";
 import * as DesktopState from "./app/DesktopState.ts";
@@ -163,6 +164,11 @@ const layerDesktopSsh = layerDesktopSshEnvironment.pipe(
   Layer.provideMerge(DesktopSshPasswordPrompts.layer()),
 );
 
+// agentctl Sandboxes reach their T3 server through the same SSH environments.
+const layerDesktopAgentctl = DesktopAgentctlSandboxes.layer.pipe(
+  Layer.provideMerge(layerDesktopSsh),
+);
+
 const layerDesktopServerExposure = DesktopServerExposure.layer.pipe(
   Layer.provideMerge(DesktopNetworkInterfaces.layer),
   Layer.provideMerge(layerDesktopFoundation),
@@ -224,7 +230,7 @@ const layerDesktopApplication = Layer.mergeAll(
   DesktopLinuxUrlHandler.layer,
   DesktopCliCommand.layer,
   DesktopShellEnvironment.layer,
-  layerDesktopSsh,
+  layerDesktopAgentctl,
 ).pipe(
   Layer.provideMerge(layerDesktopSnapShot),
   Layer.provideMerge(DesktopUpdates.layer),
