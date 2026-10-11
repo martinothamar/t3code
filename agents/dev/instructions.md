@@ -23,7 +23,9 @@ rebase or force-push `main`; Sessions and worktrees build on it. When asked to s
 1. `git fetch --multiple origin upstream`, then create a worktree on a new `sync/upstream-<date>` branch from
    `origin/main`.
 2. `git merge upstream/main`. Resolve conflicts so the fork's behavior survives on top of upstream's
-   changes; prefer adapting fork code to upstream's new shape over reverting upstream.
+   changes; prefer adapting fork code to upstream's new shape over reverting upstream. `README.md`
+   is the fork's own and links to upstream's: keep it, and update it only if upstream's change
+   affects what it says.
 3. If `git diff --quiet origin/main upstream/main -- .github/workflows/ci.yml` fails, upstream
    changed its CI: copy it over `.github/workflows/fork-ci.yml` and reapply the edits listed at
    the top of that file. Upstream's own workflows stay disabled on the fork; `fork-guard.yml`
