@@ -45,12 +45,14 @@
       <maximized>yes</maximized>
     </application>
     <!--
-      `vp run dev:desktop` opens a detached DevTools window at every start. Left maximized and
-      focused it covers the client; this keeps it behind the client, in the taskbar.
+      `vp run dev:desktop` opens a detached DevTools window at every start, and Electron may
+      activate it after the client. The below layer keeps every normal window, the client
+      included, above it whichever has focus; it stays reachable from the taskbar.
     -->
     <application title="Developer Tools*">
       <maximized>no</maximized>
       <focus>no</focus>
+      <layer>below</layer>
     </application>
   </applications>
 </openbox_config>

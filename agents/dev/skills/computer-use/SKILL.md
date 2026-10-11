@@ -62,6 +62,9 @@ every capture already waits until the screen stops changing.
 - **Click what you measured.** Read the position off a screenshot, then act. If more than one
   action has happened since, observe again. When the helper refuses because the display changed
   size since the last screenshot, take a new screenshot and measure again.
+- **Focus before keys.** `desktop windows` marks the focused window with `*`. A dev desktop's
+  DevTools window stays behind the client but can hold the focus, so click into the client or
+  `desktop focus "T3 Code"` before typing or pressing keys.
 - **Zoom instead of squinting.** `desktop zoom 400 300 500 200` re-captures that region at native
   resolution and is the answer to small or dense controls. Do not resize the display to read
   something.
