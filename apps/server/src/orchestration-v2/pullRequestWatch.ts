@@ -16,10 +16,10 @@ const SNIPPET_LENGTH = 200;
 /**
  * Agents end what they post on a pull request with `<!-- t3code:agent -->`. One account can be
  * both the user's and the agent's, so the author alone cannot tell the agent's own remarks apart.
- * Only a trailing marker counts, so a remark that quotes it still wakes the agent.
+ * Only a marker on the last line, alone, counts, so a remark that quotes it still wakes the agent.
  */
 const AGENT_MARKER_TEXT = "<!-- t3code:agent -->";
-const AGENT_MARKER = /<!--\s*t3code:agent\b[^>]*-->\s*$/u;
+const AGENT_MARKER = /(?:^|\n)[ \t]*<!--\s*t3code:agent\b[^>]*-->\s*$/u;
 
 export type PullRequestWatchChange =
   | { readonly kind: "checks-failed"; readonly failed: ReadonlyArray<PullRequestCheck> }
@@ -188,7 +188,7 @@ function changeLines(
         }),
         ...(change.remarks.some(isOwn)
           ? [
-              `  Comments from your account without the ${AGENT_MARKER_TEXT} marker are most likely the user's: you may share the account. If you posted one, ignore it and end what you post with the marker.`,
+              `  Comments from your account without the ${AGENT_MARKER_TEXT} marker are most likely the user's: you may share the account. If you posted one, ignore it and end what you post with the marker on its own line.`,
             ]
           : []),
       ];

@@ -249,14 +249,15 @@ describe("evaluatePullRequestWatch", () => {
     ]);
   });
 
-  it("only takes a trailing marker as the agent's", () => {
-    const quoted = remark(
-      "agent-user",
-      "2026-10-02T12:05:00Z",
+  it("only takes a marker alone on the last line as the agent's", () => {
+    const quoted = [
       "Agents should end with `<!-- t3code:agent -->`, not start with it.",
-    );
-    assert.deepEqual(evaluatePullRequestWatch(watch(), detail(), [quoted]).changes, [
-      { kind: "remarks", remarks: [quoted], own: "agent-user" },
+      "Quoting the agent:\n> Done.\n> <!-- t3code:agent -->",
+      "Ends inline <!-- t3code:agent -->",
+    ].map((body, index) => remark("agent-user", `2026-10-02T12:0${index}:00Z`, body));
+    const marked = remark("agent-user", "2026-10-02T12:05:00Z", "Done.\n\n<!-- t3code:agent -->\n");
+    assert.deepEqual(evaluatePullRequestWatch(watch(), detail(), [...quoted, marked]).changes, [
+      { kind: "remarks", remarks: quoted, own: "agent-user" },
     ]);
   });
 

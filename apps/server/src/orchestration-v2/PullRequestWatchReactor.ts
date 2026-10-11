@@ -356,7 +356,8 @@ export const make = Effect.gen(function* () {
         if (cursor === null) continue;
         const count = thread.commentCount ?? 0;
         let tail = tails.get(thread.id);
-        if (tail?.count !== count) {
+        // Submitting a draft reply leaves the count as it was, so a cached draft is read again.
+        if (tail?.count !== count || tail.comments.some((comment) => comment.pending === true)) {
           const comments = new Map<string, PullRequestComment>();
           const cursors = new Set<string>();
           while (cursor !== null) {
