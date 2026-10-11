@@ -15,7 +15,8 @@ that changed, because the build rewrites some. It installs:
   `~/.local/share/applications/t3code.desktop` and the icon `~/.local/share/icons/t3code.png`.
 - **macOS:** the app into `~/Applications`.
 - **Windows:** the app through its installer, run silently. The installer shares upstream's app ID
-  and would replace an upstream install, so the script refuses to run while one is installed.
+  and would replace a per-user upstream install, so the script refuses to run while one is
+  installed.
 
 Running it again replaces the previous build in place. It reports an upstream install it finds,
 such as the AUR package or the Homebrew cask, but never removes one. Remove an upstream install if

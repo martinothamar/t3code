@@ -1,6 +1,15 @@
-import { describe, expect, it } from "vite-plus/test";
+// @effect-diagnostics nodeBuiltinImport:off - tests the script, which only uses Node built-ins.
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { buildEnvironment, parseDesktopEntryName, renderLauncher } from "./install-desktop.ts";
+import {
+  buildEnvironment,
+  parseDesktopEntryName,
+  renderLauncher,
+  replace,
+} from "./install-desktop.ts";
 
 describe("buildEnvironment", () => {
   it("passes on only the version of the build options, and nothing that adds a publish feed", () => {
@@ -56,5 +65,43 @@ describe("renderLauncher", () => {
     expect(exec('/home/a b/100%$"x\\/t3code')).toBe(
       'Exec="/home/a b/100%%\\\\$\\\\"x\\\\\\\\/t3code" %U',
     );
+  });
+});
+
+describe("replace", () => {
+  let dir: string;
+  afterEach(() => NodeFS.rmSync(dir, { recursive: true, force: true }));
+  const setup = () => {
+    dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "install-desktop-test-"));
+    const app = NodePath.join(dir, "T3 Code.app");
+    NodeFS.mkdirSync(app);
+    NodeFS.writeFileSync(NodePath.join(app, "version"), "old");
+    return app;
+  };
+
+  it("swaps a directory in and leaves nothing beside it", () => {
+    const app = setup();
+
+    replace(app, (staged) => {
+      NodeFS.mkdirSync(staged);
+      NodeFS.writeFileSync(NodePath.join(staged, "version"), "new");
+    });
+
+    expect(NodeFS.readFileSync(NodePath.join(app, "version"), "utf8")).toBe("new");
+    expect(NodeFS.readdirSync(dir)).toEqual(["T3 Code.app"]);
+  });
+
+  it("keeps the installed copy when writing the new one fails", () => {
+    const app = setup();
+
+    expect(() =>
+      replace(app, (staged) => {
+        NodeFS.mkdirSync(staged);
+        throw new Error("copy failed");
+      }),
+    ).toThrow("copy failed");
+
+    expect(NodeFS.readFileSync(NodePath.join(app, "version"), "utf8")).toBe("old");
+    expect(NodeFS.readdirSync(dir)).toEqual(["T3 Code.app"]);
   });
 });

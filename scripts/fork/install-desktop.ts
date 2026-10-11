@@ -132,7 +132,7 @@ function git(args: ReadonlyArray<string>): string {
   if (result.status !== 0) {
     fail(`git ${args.join(" ")} failed: ${(result.stderr || result.error?.message || "").trim()}`);
   }
-  return result.stdout.trim();
+  return result.stdout.trimEnd();
 }
 
 // `shell` resolves `vp` through PATH, including Windows command shims.
@@ -202,7 +202,7 @@ async function assertServerArchivesPublished(version: string): Promise<void> {
 function restoreTrackedFiles(): void {
   const changed = git(["diff", "--name-only", "-z", "HEAD"]).split("\0").filter(Boolean);
   if (changed.length === 0) return;
-  git(["checkout", "HEAD", "--", ...changed]);
+  git(["--literal-pathspecs", "checkout", "HEAD", "--", ...changed]);
   log(
     `Restored tracked files the build changed:\n${changed.map((file) => `  ${file}`).join("\n")}`,
   );
@@ -221,20 +221,36 @@ function findArtifact(version: string, extension: string): string {
   return newest.path;
 }
 
-/** Writes next to the destination and renames over it, so a running copy keeps its file. */
-function replace(destination: string, write: (staged: string) => void): void {
+/**
+ * Writes next to the destination and renames over it, so a running copy keeps
+ * its file. A directory, which cannot be renamed over, is moved aside first and
+ * put back if the new one cannot take its place.
+ */
+export function replace(destination: string, write: (staged: string) => void): void {
   NodeFS.mkdirSync(NodePath.dirname(destination), { recursive: true });
-  const staged = NodePath.join(
-    NodePath.dirname(destination),
-    `.${NodePath.basename(destination)}.installing-${process.pid}`,
-  );
+  const sibling = (suffix: string) =>
+    NodePath.join(
+      NodePath.dirname(destination),
+      `.${NodePath.basename(destination)}.${suffix}-${process.pid}`,
+    );
+  const staged = sibling("installing");
+  const previous = NodeFS.statSync(destination, { throwIfNoEntry: false })?.isDirectory()
+    ? sibling("previous")
+    : undefined;
   try {
     write(staged);
-    NodeFS.renameSync(staged, destination);
+    if (previous) NodeFS.renameSync(destination, previous);
+    try {
+      NodeFS.renameSync(staged, destination);
+    } catch (error) {
+      if (previous) NodeFS.renameSync(previous, destination);
+      throw error;
+    }
   } catch (error) {
     NodeFS.rmSync(staged, { recursive: true, force: true });
     throw error;
   }
+  if (previous) NodeFS.rmSync(previous, { recursive: true, force: true });
 }
 
 function installFile(source: string, destination: string, mode: number): void {
@@ -296,17 +312,14 @@ function installMac(dmg: string): void {
     );
     if (!app) fail(`${dmg} contains no .app.`);
     const target = NodePath.join(applicationsDir, app.name);
-    replace(target, (staged) => {
-      // ditto keeps the bundle's symlinks, extended attributes and signature intact.
-      run("ditto", [NodePath.join(mountPoint, app.name), staged]);
-      NodeFS.rmSync(target, { recursive: true, force: true });
-    });
+    // ditto keeps the bundle's symlinks, extended attributes and signature intact.
+    replace(target, (staged) => run("ditto", [NodePath.join(mountPoint, app.name), staged]));
     log(`Installed ${target}`);
   } finally {
     const detach = (...flags: Array<string>) =>
       NodeChildProcess.spawnSync("hdiutil", ["detach", ...flags, mountPoint], { stdio: "ignore" })
         .status === 0;
-    if (detach() || detach("-force")) NodeFS.rmdirSync(mountPoint);
+    if (detach() || detach("-force")) NodeFS.rmSync(mountPoint, { recursive: true, force: true });
     else log(`Could not detach ${mountPoint}; eject it in Finder.`);
   }
 }
@@ -317,19 +330,25 @@ function installWindows(installer: string): void {
   log(`Installed ${NodePath.basename(installer)}.`);
 }
 
-/** Removal instructions for upstream installs, which update themselves to upstream builds. */
-function findUpstreamInstalls(): Array<string> {
+interface UpstreamInstall {
+  readonly hint: string;
+  /** The fork's installer would uninstall it, so the script must not run. */
+  readonly replacedByInstaller?: boolean;
+}
+
+/** Upstream installs, which update themselves to upstream builds, and how to remove them. */
+function findUpstreamInstalls(): Array<UpstreamInstall> {
   if (platform === "linux") {
-    const hints: Array<string> = [];
+    const hints: Array<UpstreamInstall> = [];
     for (const pkg of ["t3code-bin", "t3code-nightly-bin"]) {
       if (succeeds("pacman", ["-Q", pkg]) !== undefined) {
-        hints.push(`${pkg} (AUR): sudo pacman -R ${pkg}`);
+        hints.push({ hint: `${pkg} (AUR): sudo pacman -R ${pkg}` });
       }
     }
     if (
       succeeds("dpkg-query", ["-W", "-f", "${db:Status-Status}", "t3code"])?.trim() === "installed"
     ) {
-      hints.push("t3code (.deb): sudo apt remove t3code");
+      hints.push({ hint: "t3code (.deb): sudo apt remove t3code" });
     }
     return hints;
   }
@@ -347,8 +366,8 @@ function findUpstreamInstalls(): Array<string> {
     );
     return [
       // A cask's zap stanza deletes ~/.t3/userdata, so never suggest --zap.
-      ...casks.map((cask) => `${cask} (Homebrew): brew uninstall --cask ${cask}`),
-      ...apps.map((app) => `/Applications/${app}: move it to the Trash`),
+      ...casks.map((cask) => ({ hint: `${cask} (Homebrew): brew uninstall --cask ${cask}` })),
+      ...apps.map((app) => ({ hint: `/Applications/${app}: move it to the Trash` })),
     ];
   }
 
@@ -361,15 +380,16 @@ function findUpstreamInstalls(): Array<string> {
       "-NonInteractive",
       "-Command",
       `ConvertTo-Json -Compress -InputObject @(Get-ItemProperty ${keys} -ErrorAction SilentlyContinue | ` +
-        `Where-Object { $_.DisplayName -like 'T3 Code*' } | Select-Object DisplayName, UninstallString)`,
+        `Where-Object { $_.DisplayName -like 'T3 Code*' } | Select-Object DisplayName, UninstallString, PSPath)`,
     ]);
-    let entries: Array<{ DisplayName?: string; UninstallString?: string }> = [];
+    let entries: Array<{ DisplayName?: string; UninstallString?: string; PSPath?: string }>;
     try {
-      entries = output ? JSON.parse(output) : [];
+      entries = JSON.parse(output ?? "");
     } catch {
-      log("Could not read the installed apps from the registry; skipped looking for upstream.");
+      // Without the list the installer could silently replace an upstream install.
+      fail("Could not read the installed apps from the registry with powershell.exe.");
     }
-    return entries.flatMap(({ DisplayName, UninstallString }) => {
+    return entries.flatMap(({ DisplayName, UninstallString, PSPath }) => {
       const uninstaller = /^"([^"]+)"/.exec(UninstallString ?? "")?.[1];
       if (!uninstaller) return [];
       const updateFeed = NodePath.join(
@@ -378,8 +398,13 @@ function findUpstreamInstalls(): Array<string> {
         "app-update.yml",
       );
       if (!NodeFS.existsSync(updateFeed)) return [];
+      // The per-user installer only uninstalls a per-user install with its app ID.
+      const perUser = PSPath?.includes("HKEY_CURRENT_USER") ?? false;
       return [
-        `${DisplayName}: uninstall it in Settings > Apps > Installed apps, or run ${UninstallString}`,
+        {
+          hint: `${DisplayName}${perUser ? "" : " (all users)"}: uninstall it in Settings > Apps > Installed apps, or run ${UninstallString}`,
+          replacedByInstaller: perUser,
+        },
       ];
     });
   }
@@ -403,14 +428,16 @@ async function main(): Promise<void> {
   const commit = git(["rev-parse", "--short", "HEAD"]);
   log(`Building ${branch === "HEAD" ? commit : `${branch} at ${commit}`} as ${version}.`);
 
-  const upstream = findUpstreamInstalls()
-    .map((hint) => `  ${hint}`)
-    .join("\n");
+  const upstream = findUpstreamInstalls();
+  const listed = (installs: Array<UpstreamInstall>) =>
+    installs.map(({ hint }) => `  ${hint}`).join("\n");
   // The fork's NSIS installer shares upstream's app ID, so it would uninstall
   // a per-user upstream install before installing.
-  if (platform === "win32" && upstream) {
+  const replaced = upstream.filter((install) => install.replacedByInstaller);
+  if (replaced.length > 0) {
     fail(
-      `Upstream T3 Code is installed, and the fork's installer could replace it. Remove it first:\n${upstream}`,
+      "Upstream T3 Code is installed, and the fork's installer would replace it. " +
+        `Remove it first:\n${listed(replaced)}`,
     );
   }
 
@@ -433,10 +460,10 @@ async function main(): Promise<void> {
   else if (platform === "darwin") installMac(artifact);
   else installWindows(artifact);
 
-  if (upstream) {
+  if (upstream.length > 0) {
     log(
       "Upstream T3 Code is also installed and updates itself to upstream builds. " +
-        `This script leaves it alone; remove it yourself if you want only the fork:\n${upstream}`,
+        `This script leaves it alone; remove it yourself if you want only the fork:\n${listed(upstream)}`,
     );
   }
 }
