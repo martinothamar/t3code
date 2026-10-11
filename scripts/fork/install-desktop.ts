@@ -275,6 +275,8 @@ async function downloadAsset(version: string, name: string, dir: string): Promis
   );
   const actual = hash.digest("hex");
   if (actual !== expected) fail(`${name} does not match SHA256SUMS (got ${actual}).`);
+  // An AppImage is run to install it, and so is the Windows installer.
+  NodeFS.chmodSync(destination, 0o755);
   return destination;
 }
 
@@ -394,6 +396,11 @@ function installMac(dmg: string): void {
     // ditto keeps the bundle's symlinks, extended attributes and signature intact.
     replace(target, (staged) => run("ditto", [NodePath.join(mountPoint, app.name), staged]));
     log(`Installed ${target}`);
+    // Fork builds stamped with an upstream nightly version, from before releases, had this name.
+    const previous = NodePath.join(applicationsDir, "T3 Code (Nightly).app");
+    if (previous !== target && NodeFS.existsSync(previous)) {
+      log(`An earlier fork build is still installed as ${previous}; move it to the Trash.`);
+    }
   } finally {
     const detach = (...flags: Array<string>) =>
       NodeChildProcess.spawnSync("hdiutil", ["detach", ...flags, mountPoint], { stdio: "ignore" })

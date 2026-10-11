@@ -26,8 +26,12 @@ newer release is running the install script again.
 Releases use upstream's preview form, `<core>-preview.<YYYYMMDD>.<run>`, such as
 `0.0.46-preview.20261011.3`, where `<core>` is `apps/desktop/package.json`'s version and `<run>`
 the workflow's run number. The desktop build gives a preview version no update feed, which keeps
-the CI build from pointing the app at this repository's releases, and the app shows the same
-Nightly name as upstream's nightly builds. Each release notes the upstream nightly it is based on.
+the CI build from pointing the app at this repository's releases. Each release notes the upstream
+nightly it is based on.
+
+The app is named T3 Code (Alpha), like upstream's preview builds. Fork builds from before these
+releases were named T3 Code (Nightly); on macOS that `~/Applications/T3 Code (Nightly).app` stays
+beside the new app until you remove it, which the install script reminds you of.
 
 The client warns about a server older than itself by comparing core versions only for previews, so
 it does not notice a Sandbox on an older fork release with the same core. Reinstalling the app and
