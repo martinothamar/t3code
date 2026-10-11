@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - tests the script, which only uses Node built-ins.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off - tests the script, which only uses Node built-ins.
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
   buildEnvironment,
+  cacheDirectory,
+  localBuildVersion,
   parseArguments,
   parseChecksums,
   parseDesktopEntryName,
@@ -53,10 +55,20 @@ describe("parseArguments", () => {
     expect(parseArguments(["--from-source"])).toEqual({ fromSource: true });
   });
 
-  it("refuses a version for a source build, which takes HEAD's release", () => {
+  it("refuses a version for a source build, a flag as a version, and unknown arguments", () => {
     expect(() => parseArguments(["--from-source", "--version", "1.0.0"])).toThrow();
+    expect(() => parseArguments(["--version", "--from-source"])).toThrow();
     expect(() => parseArguments(["--version"])).toThrow();
     expect(() => parseArguments(["--latest"])).toThrow();
+  });
+});
+
+describe("localBuildVersion", () => {
+  it("takes the release form with run 0, which no workflow run has", () => {
+    const date = new Date("2026-10-11T23:30:00Z");
+    expect(localBuildVersion("0.0.45", date)).toBe("0.0.46-preview.20261011.0");
+    expect(localBuildVersion("0.0.45-preview.20261010.4", date)).toBe("0.0.46-preview.20261011.0");
+    expect(() => localBuildVersion("next", date)).toThrow();
   });
 });
 
@@ -80,6 +92,19 @@ describe("buildEnvironment", () => {
       PATH: "/usr/bin",
       T3CODE_DESKTOP_VERSION: "0.0.46-preview.20261011.3",
     });
+  });
+});
+
+describe("cacheDirectory", () => {
+  it("uses each platform's user cache directory, not the temp directory", () => {
+    expect(cacheDirectory("linux", {}, "/home/a")).toBe("/home/a/.cache/t3code-fork-install");
+    expect(cacheDirectory("linux", { XDG_CACHE_HOME: "/c" }, "/home/a")).toBe(
+      "/c/t3code-fork-install",
+    );
+    expect(cacheDirectory("darwin", {}, "/Users/a")).toBe(
+      "/Users/a/Library/Caches/t3code-fork-install",
+    );
+    expect(cacheDirectory("win32", { LOCALAPPDATA: "/l" }, "/h")).toBe("/l/t3code-fork-install");
   });
 });
 

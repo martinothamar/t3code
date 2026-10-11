@@ -44,8 +44,9 @@ node scripts/fork/install-desktop.ts
 ```
 
 It needs only Node, in a checkout of this repository, on Linux, macOS or Windows, x64 or arm64. It
-downloads the latest release, or the one `--version <version>` names, checks it against the
-release's `SHA256SUMS`, and installs:
+downloads the latest release, or the one `--version <version>` names, into the user's cache
+directory (`~/.cache` on Linux) rather than the temp directory, which may be mounted noexec. It
+checks the download against the release's `SHA256SUMS` and installs:
 
 - **Linux:** the AppImage as `~/.local/bin/t3code`, with the launcher
   `~/.local/share/applications/t3code.desktop` and the icon `~/.local/share/icons/t3code.png`.
@@ -68,11 +69,18 @@ Gatekeeper blocks the unsigned macOS app and SmartScreen warns about the Windows
 node scripts/fork/install-desktop.ts --from-source
 ```
 
-Builds the checked-out commit instead of downloading, from a clean checkout. The build names any
-tools it is missing, such as Rust or ImageMagick. It is stamped with the version of the release
-published from that commit, so its SSH hosts get a matching server; without such a release the
-script refuses, and you run the workflow on the commit first. Leave the checkout alone while it
-runs: afterwards it restores every tracked file that changed, because the build rewrites some.
+Builds the checked-out commit and installs it the same way, to try a change, or the install itself,
+before releasing it. It runs from a clean checkout. The build names any tools it is missing, such as
+Rust or ImageMagick. Leave the checkout alone while it runs: afterwards it restores every tracked
+file that changed, because the build rewrites some.
+
+SSH hosts install the server release of the app's version. If a release was published from the
+commit, the build takes its version, so SSH environments work. Otherwise it is stamped
+`<core>-preview.<YYYYMMDD>.0`, a version no release has, and the script says so. To use SSH
+environments with such a build, start it with `T3CODE_REMOTE_SERVER_VERSION` set to a published
+release, or run the workflow on the commit and install again.
+
+## Development builds
 
 For `vp run dev:desktop`, or to try another server, set these before starting the app:
 

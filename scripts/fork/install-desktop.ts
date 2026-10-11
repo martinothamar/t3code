@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalFetch:off - runs before `vp i`, so only Node built-ins exist.
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalFetch:off globalDate:off - runs before `vp i`, so only Node built-ins exist.
 /**
  * Installs the fork's desktop app for the current user, on Linux, macOS and
  * Windows, from a release of the fork (.github/workflows/fork-release.yml):
@@ -6,10 +6,11 @@
  *   node scripts/fork/install-desktop.ts [--version <version>]
  *   node scripts/fork/install-desktop.ts --from-source
  *
- * By default it downloads the latest release, or the given one. With
- * --from-source it builds the checked-out commit instead, stamped with the
- * version of the release published from that commit, because SSH hosts install
- * the server release matching the app's version.
+ * By default it downloads the latest release, or the given one, and checks it
+ * against the release's SHA256SUMS. With --from-source it builds the
+ * checked-out commit instead, to try an install before releasing it. SSH hosts
+ * install the server release matching the app's version, so the build takes
+ * the version of the release published from that commit, if there is one.
  * See docs/operations/fork-desktop-build.md.
  */
 import * as NodeChildProcess from "node:child_process";
@@ -91,6 +92,19 @@ export function buildEnvironment(env: NodeJS.ProcessEnv, version: string): NodeJ
   }
   result.T3CODE_DESKTOP_VERSION = version;
   return result;
+}
+
+/**
+ * The version of a source build no release was published from: the form the
+ * Fork release workflow gives its releases (scripts/resolve-nightly-release.ts
+ * --channel preview), with run 0, which no workflow run has. As a preview
+ * version it gets no update feed.
+ */
+export function localBuildVersion(packageVersion: string, date: Date): string {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(packageVersion);
+  if (!match) fail(`apps/desktop/package.json has the version ${packageVersion}, not x.y.z.`);
+  const day = date.toISOString().slice(0, 10).replaceAll("-", "");
+  return `${match[1]}.${match[2]}.${Number(match[3]) + 1}-preview.${day}.0`;
 }
 
 /** The untranslated `Name` of a .desktop file's `[Desktop Entry]` group. */
@@ -202,11 +216,14 @@ export function parseArguments(args: ReadonlyArray<string>): InstallOptions {
   let version: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    const value = args[index + 1];
     if (arg === "--from-source") fromSource = true;
-    else if (arg === "--version" && args[index + 1]) version = args[++index]!.replace(/^v/, "");
-    else fail(`Unknown argument ${arg}. Use --version <version> or --from-source.`);
+    else if (arg === "--version" && value && !value.startsWith("-")) {
+      version = value.replace(/^v/, "");
+      index += 1;
+    } else fail(`Unknown argument ${arg}. Use --version <version> or --from-source.`);
   }
-  if (fromSource && version) fail("--from-source builds the version of HEAD's release.");
+  if (fromSource && version) fail("--from-source builds the checked-out commit, not a version.");
   return { fromSource, ...(version ? { version } : {}) };
 }
 
@@ -235,22 +252,15 @@ async function latestVersion(): Promise<string> {
   return versionOf((await response.json()) as Release);
 }
 
-/** The version of the release published from `sha`, which the build must carry. */
-async function versionForCommit(sha: string): Promise<string> {
+/** The version of the release published from `sha`, if there is one. */
+async function releasedVersion(sha: string): Promise<string | undefined> {
   const response = await fetchOk(
     `https://api.github.com/repos/${RELEASE_REPOSITORY}/releases?per_page=100`,
   );
   const release = ((await response.json()) as Array<Release>).find(
     (candidate) => candidate.target_commitish === sha,
   );
-  if (!release) {
-    fail(
-      `No release of the fork was published from ${sha.slice(0, 12)}, so SSH hosts would have no ` +
-        "server for this build. Run the Fork release workflow on it first, or install a " +
-        "published release without --from-source.",
-    );
-  }
-  return versionOf(release);
+  return release && versionOf(release);
 }
 
 /** Downloads a release asset into `dir` and checks it against the release's SHA256SUMS. */
@@ -334,6 +344,36 @@ export function replace(destination: string, write: (staged: string) => void): v
   if (previous) NodeFS.rmSync(previous, { recursive: true, force: true });
 }
 
+/**
+ * Where downloads go: the user's cache directory rather than the temp
+ * directory, which may be mounted noexec.
+ */
+export function cacheDirectory(
+  targetPlatform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+  home: string,
+): string {
+  const base =
+    targetPlatform === "win32"
+      ? env.LOCALAPPDATA || NodePath.join(home, "AppData", "Local")
+      : targetPlatform === "darwin"
+        ? NodePath.join(home, "Library", "Caches")
+        : env.XDG_CACHE_HOME || NodePath.join(home, ".cache");
+  return NodePath.join(base, "t3code-fork-install");
+}
+
+/**
+ * Removes a temporary directory, retrying while Windows Defender still holds a
+ * file it scans, and only logs a failure: the install has already happened.
+ */
+function removeLeftover(dir: string): void {
+  try {
+    NodeFS.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
+  } catch (error) {
+    log(`Could not remove ${dir}; delete it yourself. ${(error as Error).message}`);
+  }
+}
+
 function installFile(source: string, destination: string, mode: number): void {
   replace(destination, (staged) => {
     NodeFS.copyFileSync(source, staged);
@@ -368,7 +408,7 @@ function installLinux(appImage: string): void {
     );
     log(`Installed ${name}:\n  ${execPath}\n  ${launcherPath}\n  ${iconPath}`);
   } finally {
-    NodeFS.rmSync(extractDir, { recursive: true, force: true });
+    removeLeftover(extractDir);
   }
   if (succeeds("update-desktop-database", [applicationsDir]) === undefined) {
     log("update-desktop-database is unavailable or failed; skipped refreshing the desktop cache.");
@@ -498,6 +538,31 @@ function findUpstreamInstalls(): Array<UpstreamInstall> {
   return [];
 }
 
+/**
+ * The version a source build of HEAD carries: that of the release published
+ * from it, whose server SSH hosts can install, or else a local one, for which
+ * no server exists.
+ */
+async function sourceBuildVersion(sha: string): Promise<string> {
+  const released = await releasedVersion(sha).catch((error: unknown) => {
+    if (!(error instanceof InstallError)) throw error;
+    log(`Could not look up a release of HEAD: ${error.message}`);
+    return undefined;
+  });
+  if (released) return released;
+  const packageJson = NodePath.join(repoRoot, "apps", "desktop", "package.json");
+  const version = localBuildVersion(
+    (JSON.parse(NodeFS.readFileSync(packageJson, "utf8")) as { version: string }).version,
+    new Date(),
+  );
+  log(
+    `No release was published from ${sha.slice(0, 12)}, so SSH hosts have no server of ${version}. ` +
+      "To use SSH environments with this build, start it with T3CODE_REMOTE_SERVER_VERSION set " +
+      "to a published release, or run the Fork release workflow on this commit and install that.",
+  );
+  return version;
+}
+
 /** Builds HEAD as `version` and returns the artifact the build wrote. */
 function buildFromSource(version: string, script: string, extension: string): string {
   runVp("i");
@@ -513,6 +578,12 @@ function buildFromSource(version: string, script: string, extension: string): st
   const artifact = findArtifact(version, extension);
   log(`Built ${NodePath.relative(repoRoot, artifact)}.`);
   return artifact;
+}
+
+function install(artifact: string): void {
+  if (platform === "linux") installLinux(artifact);
+  else if (platform === "darwin") installMac(artifact);
+  else installWindows(artifact);
 }
 
 async function main(): Promise<void> {
@@ -535,35 +606,32 @@ async function main(): Promise<void> {
     );
   }
 
-  const downloadDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-release-"));
-  try {
-    let artifact: string;
-    if (options.fromSource) {
-      if (git(["status", "--porcelain"]) !== "") {
-        fail(
-          "The working tree has uncommitted changes. Commit or stash them, so the build matches a ref.",
-        );
-      }
-      const version = await versionForCommit(git(["rev-parse", "HEAD"]));
-      const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
-      const commit = git(["rev-parse", "--short", "HEAD"]);
-      log(`Building ${branch === "HEAD" ? commit : `${branch} at ${commit}`} as ${version}.`);
-      artifact = buildFromSource(version, target.script, target.extension);
-    } else {
-      const version = options.version ?? (await latestVersion());
-      log(`Installing release v${version}.`);
-      artifact = await downloadAsset(
-        version,
-        releaseAssetName(version, platform, arch)!,
-        downloadDir,
+  if (options.fromSource) {
+    if (git(["status", "--porcelain"]) !== "") {
+      fail(
+        "The working tree has uncommitted changes. Commit or stash them, so the build matches a ref.",
       );
     }
-
-    if (platform === "linux") installLinux(artifact);
-    else if (platform === "darwin") installMac(artifact);
-    else installWindows(artifact);
-  } finally {
-    NodeFS.rmSync(downloadDir, { recursive: true, force: true });
+    const sha = git(["rev-parse", "HEAD"]);
+    const version = await sourceBuildVersion(sha);
+    const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
+    const commit = sha.slice(0, 10);
+    log(`Building ${branch === "HEAD" ? commit : `${branch} at ${commit}`} as ${version}.`);
+    install(buildFromSource(version, target.script, target.extension));
+  } else {
+    const version = options.version ?? (await latestVersion());
+    log(`Installing release v${version}.`);
+    // The download is run to install it, so it goes where the user may run files.
+    const cacheDir = cacheDirectory(platform, process.env, NodeOS.homedir());
+    NodeFS.mkdirSync(cacheDir, { recursive: true });
+    const downloadDir = NodeFS.mkdtempSync(NodePath.join(cacheDir, "release-"));
+    try {
+      install(
+        await downloadAsset(version, releaseAssetName(version, platform, arch)!, downloadDir),
+      );
+    } finally {
+      removeLeftover(downloadDir);
+    }
   }
 
   if (upstream.length > 0) {
