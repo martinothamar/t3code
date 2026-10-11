@@ -130,11 +130,14 @@ export type ConnectionRegistration = typeof ConnectionRegistration.Type;
  * alongside it (e.g. a parallel WSL backend). The primary stays on same-origin
  * cookie auth (`PrimaryConnectionRegistration`); secondary local backends live
  * on a separate loopback origin and authenticate with a bearer token minted
- * from their bootstrap credential (`BearerConnectionRegistration`).
+ * from their bootstrap credential (`BearerConnectionRegistration`). Hosts the
+ * desktop discovers over SSH, such as agentctl Sandboxes, connect like saved
+ * SSH environments (`SshConnectionRegistration`).
  */
 export const PlatformConnectionRegistration = Schema.Union([
   PrimaryConnectionRegistration,
   BearerConnectionRegistration,
+  SshConnectionRegistration,
 ]);
 export type PlatformConnectionRegistration = typeof PlatformConnectionRegistration.Type;
 
