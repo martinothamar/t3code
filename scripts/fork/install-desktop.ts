@@ -171,6 +171,20 @@ function runVp(command: string, env: NodeJS.ProcessEnv = process.env): void {
   if (result.status !== 0) fail(`vp ${command} exited with code ${result.status ?? "unknown"}.`);
 }
 
+const BUILD_TOOLS = [
+  { command: "vp", install: "https://viteplus.dev/guide/" },
+  { command: "cargo", install: "https://rustup.rs" },
+];
+
+// `shell` resolves Windows command shims, as in `runVp`.
+function onPath(command: string): boolean {
+  const result = NodeChildProcess.spawnSync(`${command} --version`, {
+    shell: true,
+    stdio: "ignore",
+  });
+  return result.status === 0;
+}
+
 function run(command: string, args: ReadonlyArray<string>, cwd = repoRoot): void {
   const result = NodeChildProcess.spawnSync(command, args, {
     cwd,
@@ -607,6 +621,14 @@ async function main(): Promise<void> {
   }
 
   if (options.fromSource) {
+    const missing = BUILD_TOOLS.filter(({ command }) => !onPath(command));
+    if (missing.length > 0) {
+      fail(
+        "Building from source needs tools that are not on PATH. Install them, or drop " +
+          `--from-source to install the latest release:\n` +
+          missing.map(({ command, install }) => `  ${command}: ${install}`).join("\n"),
+      );
+    }
     if (git(["status", "--porcelain"]) !== "") {
       fail(
         "The working tree has uncommitted changes. Commit or stash them, so the build matches a ref.",
