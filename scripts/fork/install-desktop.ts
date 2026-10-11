@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalFetch:off globalDate:off - runs before `vp i`, so only Node built-ins exist.
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalFetch:off - runs before `vp i`, so only Node built-ins exist.
 /**
  * Builds the fork's desktop app from the checked-out ref and installs it for
  * the current user, on Linux, macOS and Windows:
@@ -18,6 +18,8 @@ import * as NodePath from "node:path";
 const repoRoot = NodePath.resolve(import.meta.dirname, "..", "..");
 // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone script has no Effect runtime.
 const platform = process.platform;
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone script has no Effect runtime.
+const arch = process.arch;
 
 const DIST_TARGETS: Partial<Record<NodeJS.Platform, { script: string; extension: string }>> = {
   linux: { script: "dist:desktop:linux", extension: ".AppImage" },
@@ -34,15 +36,16 @@ const SERVER_ARCHIVE_PLATFORM_KEYS = [
   "darwin-arm64",
 ] as const satisfies ReadonlyArray<CliArchivePlatformKey>;
 
-// CARGO_TARGET_DIR moves cargo output away from the path the build script
-// copies native helpers from. Either repository variable gives the build an
-// update feed, and the app would then replace itself with an upstream build.
-// Without a feed, a publish token makes electron-builder fall back to a
-// publish provider it cannot resolve, and the build fails writing update info.
+// Of the build's own T3CODE_DESKTOP_* options only the version is passed on;
+// others move its output, skip it or add an update feed. CARGO_TARGET_DIR moves
+// cargo output away from the path the build copies native helpers from.
+// GITHUB_REPOSITORY gives the build an update feed, and the app would then
+// replace itself with an upstream build. Without a feed, a publish token makes
+// electron-builder fall back to a publish provider it cannot resolve, and the
+// build fails writing update info.
 const REMOVED_BUILD_ENV = new Set([
   "CARGO_TARGET_DIR",
   "GITHUB_REPOSITORY",
-  "T3CODE_DESKTOP_UPDATE_REPOSITORY",
   "GH_TOKEN",
   "GITHUB_TOKEN",
   "GITLAB_TOKEN",
@@ -72,7 +75,7 @@ export function buildEnvironment(env: NodeJS.ProcessEnv, version: string): NodeJ
   for (const [key, value] of Object.entries(env)) {
     // Windows environment names are case-insensitive.
     const name = key.toUpperCase();
-    if (name === "T3CODE_DESKTOP_VERSION" || REMOVED_BUILD_ENV.has(name)) continue;
+    if (name.startsWith("T3CODE_DESKTOP_") || REMOVED_BUILD_ENV.has(name)) continue;
     result[key] = value;
   }
   result.T3CODE_DESKTOP_VERSION = version;
@@ -197,7 +200,7 @@ async function assertServerArchivesPublished(version: string): Promise<void> {
 }
 
 function restoreTrackedFiles(): void {
-  const changed = git(["diff", "--name-only", "HEAD"]).split("\n").filter(Boolean);
+  const changed = git(["diff", "--name-only", "-z", "HEAD"]).split("\0").filter(Boolean);
   if (changed.length === 0) return;
   git(["checkout", "HEAD", "--", ...changed]);
   log(
@@ -205,34 +208,40 @@ function restoreTrackedFiles(): void {
   );
 }
 
-function findArtifact(version: string, extension: string, builtAfterMs: number): string {
+function findArtifact(version: string, extension: string): string {
   const releaseDir = NodePath.join(repoRoot, "release");
   const [newest] = NodeFS.readdirSync(releaseDir)
     .filter((name) => name.startsWith(`T3-Code-${version}-`) && name.endsWith(extension))
     .map((name) => NodePath.join(releaseDir, name))
     .map((path) => ({ path, mtimeMs: NodeFS.statSync(path).mtimeMs }))
     .toSorted((a, b) => b.mtimeMs - a.mtimeMs);
-  // Some filesystems round modification times down to whole seconds.
-  if (!newest || newest.mtimeMs < builtAfterMs - 2_000) {
+  if (!newest) {
     fail(`The build wrote no T3-Code-${version}-*${extension} to ${releaseDir}.`);
   }
   return newest.path;
 }
 
-/** Copies next to the destination and renames over it, so a running copy keeps its file. */
-function installFile(source: string, destination: string, mode: number): void {
+/** Writes next to the destination and renames over it, so a running copy keeps its file. */
+function replace(destination: string, write: (staged: string) => void): void {
   NodeFS.mkdirSync(NodePath.dirname(destination), { recursive: true });
-  const staged = `${destination}.installing-${process.pid}`;
-  NodeFS.copyFileSync(source, staged);
-  NodeFS.chmodSync(staged, mode);
-  NodeFS.renameSync(staged, destination);
+  const staged = NodePath.join(
+    NodePath.dirname(destination),
+    `.${NodePath.basename(destination)}.installing-${process.pid}`,
+  );
+  try {
+    write(staged);
+    NodeFS.renameSync(staged, destination);
+  } catch (error) {
+    NodeFS.rmSync(staged, { recursive: true, force: true });
+    throw error;
+  }
 }
 
-function writeFile(destination: string, content: string): void {
-  NodeFS.mkdirSync(NodePath.dirname(destination), { recursive: true });
-  const staged = `${destination}.installing-${process.pid}`;
-  NodeFS.writeFileSync(staged, content, { mode: 0o644 });
-  NodeFS.renameSync(staged, destination);
+function installFile(source: string, destination: string, mode: number): void {
+  replace(destination, (staged) => {
+    NodeFS.copyFileSync(source, staged);
+    NodeFS.chmodSync(staged, mode);
+  });
 }
 
 function installLinux(appImage: string): void {
@@ -244,16 +253,22 @@ function installLinux(appImage: string): void {
 
   const extractDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-install-"));
   try {
-    run(appImage, ["--appimage-extract"], extractDir);
+    const extract = (path: string) => run(appImage, ["--appimage-extract", path], extractDir);
     const root = NodePath.join(extractDir, "squashfs-root");
+    const dirIcon = NodePath.join(root, ".DirIcon");
+    extract("*.desktop");
+    extract(".DirIcon");
+    if (NodeFS.lstatSync(dirIcon).isSymbolicLink()) extract(NodeFS.readlinkSync(dirIcon));
     const entry = NodeFS.readdirSync(root).find((file) => file.endsWith(".desktop"));
     const name = entry
       ? parseDesktopEntryName(NodeFS.readFileSync(NodePath.join(root, entry), "utf8"))
       : undefined;
     if (!name) fail(`${appImage} has no desktop entry with a Name.`);
-    installFile(NodeFS.realpathSync(NodePath.join(root, ".DirIcon")), iconPath, 0o644);
+    installFile(NodeFS.realpathSync(dirIcon), iconPath, 0o644);
     installFile(appImage, execPath, 0o755);
-    writeFile(launcherPath, renderLauncher({ name, execPath, iconPath }));
+    replace(launcherPath, (staged) =>
+      NodeFS.writeFileSync(staged, renderLauncher({ name, execPath, iconPath }), { mode: 0o644 }),
+    );
     log(`Installed ${name}:\n  ${execPath}\n  ${launcherPath}\n  ${iconPath}`);
   } finally {
     NodeFS.rmSync(extractDir, { recursive: true, force: true });
@@ -281,16 +296,18 @@ function installMac(dmg: string): void {
     );
     if (!app) fail(`${dmg} contains no .app.`);
     const target = NodePath.join(applicationsDir, app.name);
-    const staged = NodePath.join(applicationsDir, `.${app.name}.installing-${process.pid}`);
-    NodeFS.mkdirSync(applicationsDir, { recursive: true });
-    // ditto keeps the bundle's symlinks, extended attributes and signature intact.
-    run("ditto", [NodePath.join(mountPoint, app.name), staged]);
-    NodeFS.rmSync(target, { recursive: true, force: true });
-    NodeFS.renameSync(staged, target);
+    replace(target, (staged) => {
+      // ditto keeps the bundle's symlinks, extended attributes and signature intact.
+      run("ditto", [NodePath.join(mountPoint, app.name), staged]);
+      NodeFS.rmSync(target, { recursive: true, force: true });
+    });
     log(`Installed ${target}`);
   } finally {
-    NodeChildProcess.spawnSync("hdiutil", ["detach", mountPoint], { stdio: "ignore" });
-    NodeFS.rmSync(mountPoint, { recursive: true, force: true });
+    const detach = (...flags: Array<string>) =>
+      NodeChildProcess.spawnSync("hdiutil", ["detach", ...flags, mountPoint], { stdio: "ignore" })
+        .status === 0;
+    if (detach() || detach("-force")) NodeFS.rmdirSync(mountPoint);
+    else log(`Could not detach ${mountPoint}; eject it in Finder.`);
   }
 }
 
@@ -346,9 +363,12 @@ function findUpstreamInstalls(): Array<string> {
       `ConvertTo-Json -Compress -InputObject @(Get-ItemProperty ${keys} -ErrorAction SilentlyContinue | ` +
         `Where-Object { $_.DisplayName -like 'T3 Code*' } | Select-Object DisplayName, UninstallString)`,
     ]);
-    const entries: Array<{ DisplayName?: string; UninstallString?: string }> = output
-      ? JSON.parse(output)
-      : [];
+    let entries: Array<{ DisplayName?: string; UninstallString?: string }> = [];
+    try {
+      entries = output ? JSON.parse(output) : [];
+    } catch {
+      log("Could not read the installed apps from the registry; skipped looking for upstream.");
+    }
     return entries.flatMap(({ DisplayName, UninstallString }) => {
       const uninstaller = /^"([^"]+)"/.exec(UninstallString ?? "")?.[1];
       if (!uninstaller) return [];
@@ -370,6 +390,9 @@ function findUpstreamInstalls(): Array<string> {
 async function main(): Promise<void> {
   const target = DIST_TARGETS[platform];
   if (!target) fail(`There is no desktop build for ${platform}.`);
+  if (platform === "linux" && arch !== "x64") {
+    fail(`The Linux desktop build (${target.script}) is x64 only; this host is ${arch}.`);
+  }
   if (git(["status", "--porcelain"]) !== "") {
     fail(
       "The working tree has uncommitted changes. Commit or stash them, so the build matches a ref.",
@@ -380,28 +403,40 @@ async function main(): Promise<void> {
   const commit = git(["rev-parse", "--short", "HEAD"]);
   log(`Building ${branch === "HEAD" ? commit : `${branch} at ${commit}`} as ${version}.`);
 
+  const upstream = findUpstreamInstalls()
+    .map((hint) => `  ${hint}`)
+    .join("\n");
+  // The fork's NSIS installer shares upstream's app ID, so it would uninstall
+  // a per-user upstream install before installing.
+  if (platform === "win32" && upstream) {
+    fail(
+      `Upstream T3 Code is installed, and the fork's installer could replace it. Remove it first:\n${upstream}`,
+    );
+  }
+
   runVp("i");
   await assertServerArchivesPublished(version);
 
-  const startedAt = Date.now();
+  // Ctrl+C also reaches the build; ignoring it here lets the restore run.
+  const ignoreInterrupt = () => {};
+  process.on("SIGINT", ignoreInterrupt);
   try {
     runVp(`run ${target.script}`, buildEnvironment(process.env, version));
   } finally {
+    process.off("SIGINT", ignoreInterrupt);
     restoreTrackedFiles();
   }
-  const artifact = findArtifact(version, target.extension, startedAt);
+  const artifact = findArtifact(version, target.extension);
   log(`Built ${NodePath.relative(repoRoot, artifact)}.`);
 
   if (platform === "linux") installLinux(artifact);
   else if (platform === "darwin") installMac(artifact);
   else installWindows(artifact);
 
-  const upstream = findUpstreamInstalls();
-  if (upstream.length > 0) {
+  if (upstream) {
     log(
       "Upstream T3 Code is also installed and updates itself to upstream builds. " +
-        `This script leaves it alone; remove it yourself if you want only the fork:\n` +
-        upstream.map((hint) => `  ${hint}`).join("\n"),
+        `This script leaves it alone; remove it yourself if you want only the fork:\n${upstream}`,
     );
   }
 }

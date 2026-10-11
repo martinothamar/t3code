@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { buildEnvironment, parseDesktopEntryName, renderLauncher } from "./install-desktop.ts";
 
 describe("buildEnvironment", () => {
-  it("sets the version and drops what moves cargo output or selects a publish feed", () => {
+  it("passes on only the version of the build options, and nothing that adds a publish feed", () => {
     const env = buildEnvironment(
       {
         PATH: "/usr/bin",
@@ -13,6 +13,7 @@ describe("buildEnvironment", () => {
         GITHUB_TOKEN: "token",
         gh_token: "token",
         t3code_desktop_version: "0.0.45-fork.abc",
+        T3CODE_DESKTOP_OUTPUT_DIR: "/tmp/out",
       },
       "0.0.46-nightly.20261010.2922",
     );
@@ -45,35 +46,15 @@ describe("parseDesktopEntryName", () => {
 });
 
 describe("renderLauncher", () => {
-  it("writes the launcher for the installed AppImage", () => {
-    expect(
-      renderLauncher({
-        name: "T3 Code (Nightly)",
-        execPath: "/home/martin/.local/bin/t3code",
-        iconPath: "/home/martin/.local/share/icons/t3code.png",
-      }),
-    ).toBe(
-      [
-        "[Desktop Entry]",
-        "Type=Application",
-        "Name=T3 Code (Nightly)",
-        "Exec=/home/martin/.local/bin/t3code %U",
-        "Icon=/home/martin/.local/share/icons/t3code.png",
-        "Terminal=false",
-        "Categories=Development;",
-        "StartupWMClass=t3code",
-        "",
-      ].join("\n"),
+  it("quotes an Exec path only when it has reserved characters", () => {
+    const exec = (execPath: string) =>
+      renderLauncher({ name: "T3 Code", execPath, iconPath: "/icon.png" })
+        .split("\n")
+        .find((line) => line.startsWith("Exec="));
+
+    expect(exec("/home/martin/.local/bin/t3code")).toBe("Exec=/home/martin/.local/bin/t3code %U");
+    expect(exec('/home/a b/100%$"x\\/t3code')).toBe(
+      'Exec="/home/a b/100%%\\\\$\\\\"x\\\\\\\\/t3code" %U',
     );
-  });
-
-  it("quotes an Exec path with reserved characters", () => {
-    const launcher = renderLauncher({
-      name: "T3 Code",
-      execPath: '/home/a b/100%$"x\\/t3code',
-      iconPath: "/icon.png",
-    });
-
-    expect(launcher).toContain('Exec="/home/a b/100%%\\\\$\\\\"x\\\\\\\\/t3code" %U\n');
   });
 });

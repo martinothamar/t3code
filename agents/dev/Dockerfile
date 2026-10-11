@@ -168,7 +168,8 @@ RUN curl -fsSL https://vite.plus -o /tmp/vite-plus-install.sh \
     && /home/agent/.vite-plus/bin/vp --version
 
 # Rust builds the desktop app's native helpers under native/, whose edition 2024 needs a newer
-# toolchain than Ubuntu ships.
+# toolchain than Ubuntu ships. Sessions take PATH from ~/.profile rather than the image, so rustup
+# adds itself there and to ~/.bashrc, as the Vite+ installer does.
 ARG RUSTUP_VERSION=1.29.1
 ARG RUST_VERSION=1.99.0
 RUN case "${TARGETARCH}" in \
@@ -182,8 +183,9 @@ RUN case "${TARGETARCH}" in \
         -o /tmp/rustup-init \
     && echo "${RUSTUP_SHA256}  /tmp/rustup-init" | sha256sum -c - \
     && chmod +x /tmp/rustup-init \
-    && /tmp/rustup-init -y --no-modify-path --profile minimal --default-toolchain "${RUST_VERSION}" \
+    && /tmp/rustup-init -y --profile minimal --default-toolchain "${RUST_VERSION}" \
     && rm -f /tmp/rustup-init \
+    && grep -q cargo/env /home/agent/.profile \
     && /home/agent/.cargo/bin/cargo --version
 ENV PATH=/home/agent/.local/bin:/home/agent/.cargo/bin:/home/agent/.vite-plus/bin:${PATH}
 
