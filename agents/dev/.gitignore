@@ -1,0 +1,6 @@
+.env
+!.env.sample
+
+# Checkout-local Agent variants are private by default.
+agent.*.yaml
+!agent.nested.yaml
