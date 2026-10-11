@@ -2,7 +2,7 @@
 
 ## First checkout
 
-Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 24;
+Install `vp` with its [getting started guide](https://viteplus.dev/guide/). The checkout requires Node 24;
 Bun is optional. From the repository root:
 
 ```sh
