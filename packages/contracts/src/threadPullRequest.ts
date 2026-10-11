@@ -95,8 +95,8 @@ export type ThreadPullRequestKey = typeof ThreadPullRequestKey.Type;
 
 /**
  * Present while the server watches the pull request for its thread. The server wakes the
- * thread's agent when checks finish on the head commit, someone else comments, or the branch
- * starts to conflict. The other fields record what the agent was last told, so each change is
+ * thread's agent when checks finish on the head commit, someone comments other than the agent
+ * itself, or the branch starts to conflict. The other fields record what the agent was last told, so each change is
  * reported once.
  */
 export const ThreadPullRequestWatch = Schema.Struct({
@@ -114,7 +114,7 @@ export const ThreadPullRequestWatch = Schema.Struct({
   passedChecks: Schema.Array(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
-  /** Remarks from others created up to this host time were reported. */
+  /** Remarks the agent did not write, created up to this host time, were reported. */
   remarksThrough: IsoDateTime,
   /** Remarks created exactly at `remarksThrough` that were reported, so a late one still counts. */
   remarkIds: Schema.Array(TrimmedNonEmptyString),
