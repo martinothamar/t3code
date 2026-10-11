@@ -1,3 +1,4 @@
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -93,9 +94,11 @@ const make = Effect.gen(function* () {
     const command = args[0] ?? "";
     return Effect.scoped(
       Effect.gen(function* () {
+        const resolved = yield* resolveSpawnCommand("agentctl", args);
         const handle = yield* spawner
           .spawn(
-            ChildProcess.make("agentctl", args, {
+            ChildProcess.make(resolved.command, resolved.args, {
+              shell: resolved.shell,
               stdout: "pipe",
               stderr: "pipe",
               killSignal: "SIGTERM",
