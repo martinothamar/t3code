@@ -35,8 +35,8 @@ rebase or force-push `main`; Sessions and worktrees build on it. When asked to s
 
 ## Toolchain
 
-Node 24 and `vp` (Vite+) are installed. Run `vp i` in a new checkout or worktree before anything
-else.
+Node 24 and `vp` (Vite+) are installed, and Rust and ImageMagick for desktop builds. Run `vp i` in
+a new checkout or worktree before anything else.
 
 ## Live T3 Code state
 

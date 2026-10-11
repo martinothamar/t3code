@@ -3,10 +3,11 @@ FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884
 ENV DEBIAN_FRONTEND=noninteractive
 
 # What agentd needs from the image (systemd as init, OpenSSH for `access: ssh`, tmux for Sessions,
-# sudo), T3 Code's build tooling, Podman so a nested agentd can build Agent images, and a minimal
-# desktop: Xtigervnc as X and VNC server in one process, openbox, tint2, and noVNC served by
-# websockify for `agentctl vnc --web`. The `desktop` helper captures with ffmpeg and acts with
-# xdotool; gnome-keyring is the Secret Service Electron's safeStorage needs.
+# sudo), T3 Code's build tooling (ImageMagick resizes the desktop app's icons), Podman so a nested
+# agentd can build Agent images, and a minimal desktop: Xtigervnc as X and VNC server in one
+# process, openbox, tint2, and noVNC served by websockify for `agentctl vnc --web`. The `desktop`
+# helper captures with ffmpeg and acts with xdotool; gnome-keyring is the Secret Service Electron's
+# safeStorage needs.
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         build-essential \
@@ -19,6 +20,7 @@ RUN apt-get update \
         fonts-noto-core \
         git \
         gnome-keyring \
+        imagemagick \
         iproute2 \
         jq \
         less \
@@ -164,7 +166,28 @@ RUN curl -fsSL https://vite.plus -o /tmp/vite-plus-install.sh \
     && NODE_OPTIONS=--use-openssl-ca CI=1 VP_NODE_MANAGER=no VP_VERSION="${VITE_PLUS_VERSION}" bash /tmp/vite-plus-install.sh </dev/null \
     && rm -f /tmp/vite-plus-install.sh \
     && /home/agent/.vite-plus/bin/vp --version
-ENV PATH=/home/agent/.local/bin:/home/agent/.vite-plus/bin:${PATH}
+
+# Rust builds the desktop app's native helpers under native/, whose edition 2024 needs a newer
+# toolchain than Ubuntu ships. Sessions take PATH from ~/.profile rather than the image, so rustup
+# adds itself there and to ~/.bashrc, as the Vite+ installer does.
+ARG RUSTUP_VERSION=1.29.1
+ARG RUST_VERSION=1.99.0
+RUN case "${TARGETARCH}" in \
+        amd64) RUST_ARCH=x86_64; \
+            RUSTUP_SHA256=dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71 ;; \
+        arm64) RUST_ARCH=aarch64; \
+            RUSTUP_SHA256=15f6e4ce9f583b929c996c91562bad6d4454f3281de858b02cdfdef615fac433 ;; \
+        *) echo "unsupported target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${RUST_ARCH}-unknown-linux-gnu/rustup-init" \
+        -o /tmp/rustup-init \
+    && echo "${RUSTUP_SHA256}  /tmp/rustup-init" | sha256sum -c - \
+    && chmod +x /tmp/rustup-init \
+    && /tmp/rustup-init -y --profile minimal --default-toolchain "${RUST_VERSION}" \
+    && rm -f /tmp/rustup-init \
+    && grep -q cargo/env /home/agent/.profile \
+    && /home/agent/.cargo/bin/cargo --version
+ENV PATH=/home/agent/.local/bin:/home/agent/.cargo/bin:/home/agent/.vite-plus/bin:${PATH}
 
 WORKDIR /home/agent/code
 ENTRYPOINT ["/usr/lib/systemd/systemd"]
