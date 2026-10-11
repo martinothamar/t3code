@@ -391,6 +391,10 @@ const RawCommentSchema = Schema.Struct({
   body: Schema.optional(Schema.String),
   createdAt: Schema.String,
   url: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Review comments only: `PENDING` while the review holding it is a draft. */
+  state: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Review comments only: when its review was submitted, null while it is a draft. */
+  publishedAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** Only ever present on a GraphQL read; `gh pr view --json` reports no reaction at all. */
   reactionGroups: RawReactionGroupsSchema,
 });
@@ -1035,7 +1039,7 @@ export const REVIEW_THREADS_GRAPHQL_QUERY = `query($owner: String!, $name: Strin
           comments(first: 10) {
             totalCount
             pageInfo { hasNextPage endCursor }
-            nodes { id author { __typename login avatarUrl } body createdAt lastEditedAt url ${REACTION_GROUPS_FIELDS} }
+            nodes { id author { __typename login avatarUrl } body createdAt publishedAt state lastEditedAt url ${REACTION_GROUPS_FIELDS} }
           }
         }
       }
@@ -1092,7 +1096,7 @@ export const REVIEW_THREAD_COMMENTS_GRAPHQL_QUERY = `query($owner: String!, $nam
       pullRequest { id }
       comments(first: ${GRAPHQL_PAGE_SIZE}, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { id author { __typename login avatarUrl } body createdAt lastEditedAt url ${REACTION_GROUPS_FIELDS} }
+        nodes { id author { __typename login avatarUrl } body createdAt publishedAt state lastEditedAt url ${REACTION_GROUPS_FIELDS} }
       }
     }
   }
@@ -2175,6 +2179,7 @@ export function decodePullRequestSummariesJson(
 }
 
 const WATCH_FINGERPRINT_EDITS = "totalCount nodes { lastEditedAt }";
+const WATCH_FINGERPRINT_REVIEWS = "totalCount nodes { lastEditedAt submittedAt }";
 const WATCH_FINGERPRINT_CHECK_COUNTS =
   "checkRunCountsByState { state count } statusContextCountsByState { state count }";
 
@@ -2183,6 +2188,8 @@ const WATCH_FINGERPRINT_CHECK_COUNTS =
  * requests, where the detail and activity reads it gates cost sixteen for one. Counts and the
  * newest edit cover new comments, reviews (a reply in a review thread is a review), threads, and
  * a bot rewriting its summary; check counts by state move whenever a check starts or finishes.
+ * Submitting a pending review changes none of those, since the viewer already counts its own
+ * pending review and its comments, so the newest submission time is part of it too.
  * Comments come most recently updated first, since an edit moves `updatedAt`, so an edit to an
  * old comment on a long pull request is still in the page. Reviews have no such order: an edit
  * to a review older than the last hundred waits for the watch's periodic full read, as do edits
@@ -2191,7 +2198,7 @@ const WATCH_FINGERPRINT_CHECK_COUNTS =
 const PULL_REQUEST_WATCH_FINGERPRINT_SELECTION =
   "state mergeable headRefOid " +
   `comments(first: 100, orderBy: { field: UPDATED_AT, direction: DESC }) { ${WATCH_FINGERPRINT_EDITS} } ` +
-  `reviews(last: 100) { ${WATCH_FINGERPRINT_EDITS} } ` +
+  `reviews(last: 100) { ${WATCH_FINGERPRINT_REVIEWS} } ` +
   "reviewThreads { totalCount } " +
   `commits(last: 1) { nodes { commit { statusCheckRollup { contexts { ${WATCH_FINGERPRINT_CHECK_COUNTS} } } } } }`;
 
@@ -2220,6 +2227,17 @@ const RawEditedSchema = Schema.Struct({
   totalCount: Schema.Int,
   nodes: Schema.Array(Schema.NullOr(Schema.Struct({ lastEditedAt: Schema.NullOr(Schema.String) }))),
 });
+const RawReviewsSchema = Schema.Struct({
+  totalCount: Schema.Int,
+  nodes: Schema.Array(
+    Schema.NullOr(
+      Schema.Struct({
+        lastEditedAt: Schema.NullOr(Schema.String),
+        submittedAt: Schema.NullOr(Schema.String),
+      }),
+    ),
+  ),
+});
 const RawStateCountsSchema = Schema.NullOr(
   Schema.Array(Schema.Struct({ state: Schema.String, count: Schema.Int })),
 );
@@ -2229,7 +2247,7 @@ const decodeWatchFingerprintEntry = Schema.decodeUnknownExit(
     mergeable: Schema.NullOr(Schema.String),
     headRefOid: Schema.String,
     comments: RawEditedSchema,
-    reviews: RawEditedSchema,
+    reviews: RawReviewsSchema,
     reviewThreads: Schema.Struct({ totalCount: Schema.Int }),
     commits: Schema.Struct({
       nodes: Schema.Array(
@@ -2252,13 +2270,16 @@ const decodeWatchFingerprintEntry = Schema.decodeUnknownExit(
   }),
 );
 
-// An edit only ever moves `lastEditedAt` forward, so the newest one stands for them all.
-const newestEdit = (connection: typeof RawEditedSchema.Type) =>
-  connection.nodes.reduce(
-    (newest, node) =>
-      node?.lastEditedAt != null && node.lastEditedAt > newest ? node.lastEditedAt : newest,
-    "",
-  );
+// An edit only ever moves `lastEditedAt` forward, so the newest one stands for them all, and the
+// same holds for a review's `submittedAt`.
+const newest = <Field extends "lastEditedAt" | "submittedAt">(
+  nodes: ReadonlyArray<Partial<Record<Field, string | null>> | null>,
+  field: Field,
+) =>
+  nodes.reduce((latest, node) => {
+    const at = node?.[field];
+    return at != null && at > latest ? at : latest;
+  }, "");
 
 const stateCounts = (counts: typeof RawStateCountsSchema.Type) =>
   (counts ?? [])
@@ -2291,9 +2312,10 @@ export function decodePullRequestWatchFingerprintsJson(
       ].join(" "),
       remarks: [
         pr.comments.totalCount,
-        newestEdit(pr.comments),
+        newest(pr.comments.nodes, "lastEditedAt"),
         pr.reviews.totalCount,
-        newestEdit(pr.reviews),
+        newest(pr.reviews.nodes, "lastEditedAt"),
+        newest(pr.reviews.nodes, "submittedAt"),
         pr.reviewThreads.totalCount,
       ].join(" "),
     });
@@ -2646,6 +2668,7 @@ export function reviewThreadConversation(
       path: thread.path,
       reviewState: null,
       reactions: comment.reactions ?? [],
+      ...(comment.pending === true ? { pending: true } : {}),
     })),
   );
 }
@@ -2709,6 +2732,27 @@ export function decodeReviewDismissalsJson(raw: string): Result.Result<
   });
 }
 
+/**
+ * A review comment joins the conversation when its review is submitted, so that is its time: a
+ * line drafted long before must not land behind remarks already read. Until then only the
+ * reader sees it, as `pending`.
+ */
+function toThreadComment(
+  comment: Schema.Schema.Type<typeof RawCommentSchema>,
+  viewer: string | null,
+): PullRequestThreadComment {
+  return {
+    id: comment.id,
+    author: toActor(comment.author),
+    body: comment.body ?? "",
+    createdAt: comment.publishedAt ?? comment.createdAt,
+    editedAt: comment.lastEditedAt ?? null,
+    url: trimmed(comment.url),
+    reactions: toReactions(comment.reactionGroups, viewer),
+    ...(comment.state === "PENDING" ? { pending: true } : {}),
+  };
+}
+
 export function decodeReviewThreadsJson(
   raw: string,
 ): Result.Result<GitHubReviewThreadPage, DecodeFailure> {
@@ -2736,15 +2780,7 @@ export function decodeReviewThreadsJson(
           side: thread.diffSide?.toUpperCase() === "LEFT" ? "left" : "right",
           isResolved: thread.isResolved === true,
           isOutdated: thread.isOutdated === true,
-          comments: thread.comments.nodes.map((comment) => ({
-            id: comment.id,
-            author: toActor(comment.author),
-            body: comment.body ?? "",
-            createdAt: comment.createdAt,
-            editedAt: comment.lastEditedAt ?? null,
-            url: trimmed(comment.url),
-            reactions: toReactions(comment.reactionGroups, viewer),
-          })),
+          comments: thread.comments.nodes.map((comment) => toThreadComment(comment, viewer)),
         },
         commentCount: thread.comments.totalCount ?? thread.comments.nodes.length,
         nextCommentCursor: nextCursorOf(thread.comments.pageInfo),
@@ -2857,15 +2893,7 @@ export function decodeReviewThreadCommentsJson(raw: string): Result.Result<
       decoded.success.data.repository?.pullRequest?.id !== undefined &&
       decoded.success.data.repository?.pullRequest?.id ===
         decoded.success.data.node?.pullRequest?.id,
-    comments: (comments?.nodes ?? []).map((comment) => ({
-      id: comment.id,
-      author: toActor(comment.author),
-      body: comment.body ?? "",
-      createdAt: comment.createdAt,
-      editedAt: comment.lastEditedAt ?? null,
-      url: trimmed(comment.url),
-      reactions: toReactions(comment.reactionGroups, viewer),
-    })),
+    comments: (comments?.nodes ?? []).map((comment) => toThreadComment(comment, viewer)),
     nextCursor: nextCursorOf(comments?.pageInfo),
   });
 }
