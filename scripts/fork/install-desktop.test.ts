@@ -20,12 +20,13 @@ describe("releaseAssetName", () => {
     expect(releaseAssetName(version, "linux", "x64")).toBe(`T3-Code-${version}-x86_64.AppImage`);
     expect(releaseAssetName(version, "linux", "arm64")).toBe(`T3-Code-${version}-arm64.AppImage`);
     expect(releaseAssetName(version, "darwin", "arm64")).toBe(`T3-Code-${version}-arm64.dmg`);
+    expect(releaseAssetName(version, "darwin", "x64")).toBe(`T3-Code-${version}-x64.dmg`);
     expect(releaseAssetName(version, "win32", "x64")).toBe(`T3-Code-${version}-x64.exe`);
+    expect(releaseAssetName(version, "win32", "arm64")).toBe(`T3-Code-${version}-arm64.exe`);
   });
 
   it("has nothing for a target the release does not build", () => {
-    expect(releaseAssetName("0.0.46", "darwin", "x64")).toBeUndefined();
-    expect(releaseAssetName("0.0.46", "win32", "arm64")).toBeUndefined();
+    expect(releaseAssetName("0.0.46", "linux", "ia32")).toBeUndefined();
     expect(releaseAssetName("0.0.46", "freebsd", "x64")).toBeUndefined();
   });
 });

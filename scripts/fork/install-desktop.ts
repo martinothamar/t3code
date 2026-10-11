@@ -43,8 +43,8 @@ const DESKTOP_TARGETS: Partial<
     extension: ".AppImage",
     arches: { x64: "x86_64", arm64: "arm64" },
   },
-  darwin: { script: "dist:desktop:dmg", extension: ".dmg", arches: { arm64: "arm64" } },
-  win32: { script: "dist:desktop:win", extension: ".exe", arches: { x64: "x64" } },
+  darwin: { script: "dist:desktop:dmg", extension: ".dmg", arches: { x64: "x64", arm64: "arm64" } },
+  win32: { script: "dist:desktop:win", extension: ".exe", arches: { x64: "x64", arm64: "arm64" } },
 };
 
 // Of the build's own T3CODE_DESKTOP_* options only the version is passed on;

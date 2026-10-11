@@ -5,8 +5,8 @@
 Run the **Fork release** workflow (`.github/workflows/fork-release.yml`) from the Actions tab. It
 publishes one GitHub release of this repository with:
 
-- the desktop apps: the Linux x64 and arm64 AppImages, the macOS arm64 dmg, and the Windows x64
-  installer, which embeds the linux-x64 server for its WSL backend;
+- the desktop apps: AppImages for Linux, dmgs for macOS and installers for Windows, each for x64
+  and arm64. The Windows installers embed the Linux server of their arch for the WSL backend;
 - the T3 server archives SSH hosts install, agentctl Sandboxes included: linux-x64, linux-arm64 and
   darwin-arm64, the hosts the SSH installer supports;
 - `SHA256SUMS` over all of them.
@@ -39,9 +39,9 @@ reconnecting installs the matching server.
 node scripts/fork/install-desktop.ts
 ```
 
-It needs only Node, in a checkout of this repository, on Linux (x64 or arm64), macOS (Apple
-silicon) or Windows (x64). It downloads the latest release, or the one `--version <version>` names,
-checks it against the release's `SHA256SUMS`, and installs:
+It needs only Node, in a checkout of this repository, on Linux, macOS or Windows, x64 or arm64. It
+downloads the latest release, or the one `--version <version>` names, checks it against the
+release's `SHA256SUMS`, and installs:
 
 - **Linux:** the AppImage as `~/.local/bin/t3code`, with the launcher
   `~/.local/share/applications/t3code.desktop` and the icon `~/.local/share/icons/t3code.png`.

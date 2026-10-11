@@ -113,9 +113,10 @@ jobs:
           retention-days: 1
 
   # Server archives come for the hosts the SSH installer supports (packages/ssh/src/tunnel.ts):
-  # Linux x64 and arm64, and macOS arm64, each from the job of its own platform. Windows is no SSH
-  # host; its WSL backend embeds the linux-x64 archive, which release-desktop.yml waits for by the
-  # name of the job that builds it, `Build Linux x64`.
+  # Linux x64 and arm64, and macOS arm64, each from the job of its own platform. Node cannot build
+  # a single executable for an Intel Mac, so that job builds only the app. Windows is no SSH host;
+  # its WSL backend embeds the Linux archive of its own arch, which release-desktop.yml waits for
+  # by the name of the job that builds it, `Build Linux <arch>`.
   desktop:
     name: Desktop
     needs: [preflight, build_bundle]
@@ -147,6 +148,14 @@ jobs:
             rust_target: aarch64-apple-darwin
             resource_key: darwin-arm64
             cli_archive: true
+          - label: macOS x64
+            runner: macos-15
+            platform: mac
+            target: dmg
+            arch: x64
+            rust_target: x86_64-apple-darwin
+            resource_key: darwin-x64
+            cli_archive: false
           - label: Windows x64
             runner: windows-2025
             platform: win
@@ -154,6 +163,14 @@ jobs:
             arch: x64
             rust_target: x86_64-pc-windows-msvc
             resource_key: win32-x64
+            cli_archive: false
+          - label: Windows arm64
+            runner: windows-11-arm
+            platform: win
+            target: nsis
+            arch: arm64
+            rust_target: aarch64-pc-windows-msvc
+            resource_key: win32-arm64
             cli_archive: false
     uses: ./.github/workflows/release-desktop.yml
     with:
