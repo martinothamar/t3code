@@ -13,10 +13,6 @@ name: Fork release
 
 on:
   workflow_dispatch:
-  # TEMPORARY: a dispatch needs the file on main; drop before merging.
-  push:
-    branches:
-      - feat/fork-releases
 
 concurrency:
   group: fork-release
