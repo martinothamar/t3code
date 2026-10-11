@@ -547,26 +547,33 @@ export const make = Effect.gen(function* () {
       status: fingerprint?.status ?? null,
       remarks: fingerprint?.remarks ?? null,
     });
-    yield* eachTarget(group, (target) => {
-      const report = evaluatePullRequestWatch(target.watch, detail, remarks);
-      if (report.changes.length > 0) {
-        return record(
-          target,
-          report.exhausted ? null : report.next,
-          pullRequestWatchMessage({
-            number: target.link.number,
-            url: target.link.url,
-            baseBranch: detail.baseBranch,
-            headSha: report.next.headSha,
-            report,
-          }),
-        ).pipe(
-          Effect.tap(() => woke(target)),
-          Effect.tap(() => (report.exhausted ? ended(target, "comment-limit") : Effect.void)),
-        );
-      }
-      return watchesEqual(report.next, target.watch) ? Effect.void : record(target, report.next);
-    });
+    yield* eachTarget(group, (target) =>
+      Effect.gen(function* () {
+        // Only remarks need the thread's run times, to tell its agent's replies from the user's.
+        const runs =
+          remarks === null
+            ? []
+            : yield* projections.getRunWindows(target.thread.id, target.watch.startedAt);
+        const report = evaluatePullRequestWatch(target.watch, detail, remarks, runs);
+        if (report.changes.length > 0) {
+          return yield* record(
+            target,
+            report.exhausted ? null : report.next,
+            pullRequestWatchMessage({
+              number: target.link.number,
+              url: target.link.url,
+              baseBranch: detail.baseBranch,
+              headSha: report.next.headSha,
+              report,
+            }),
+          ).pipe(
+            Effect.tap(() => woke(target)),
+            Effect.tap(() => (report.exhausted ? ended(target, "comment-limit") : Effect.void)),
+          );
+        }
+        if (!watchesEqual(report.next, target.watch)) yield* record(target, report.next);
+      }),
+    );
   });
 
   const sweep = Effect.gen(function* () {

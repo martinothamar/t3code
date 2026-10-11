@@ -6,6 +6,8 @@ import type {
   ThreadPullRequestWatch,
 } from "@t3tools/contracts";
 
+import type { ProjectionRunWindow } from "./ProjectionStore.ts";
+
 /**
  * Wakes in a row that bring only comments. Check, conflict, or push news resets the count, so
  * this only stops a chatty bot looping an agent that is replying to it.
@@ -13,6 +15,16 @@ import type {
 export const PULL_REQUEST_WATCH_WAKE_LIMIT = 10;
 const LISTED_ITEMS = 10;
 const SNIPPET_LENGTH = 200;
+/**
+ * Slack around a run's working time for the agent's unmarked remarks: the host stamps a remark
+ * with its own clock, and a run completes after its last tool call returns.
+ */
+const RUN_WINDOW_SLACK_MS = 5_000;
+/**
+ * Agents end what they post on a pull request with `<!-- t3code:agent -->`. One account can be
+ * both the user's and the agent's, so the author alone cannot tell the agent's own remarks apart.
+ */
+const AGENT_MARKER = /<!--\s*t3code:agent\b[\s\S]*?-->/u;
 
 export type PullRequestWatchChange =
   | { readonly kind: "checks-failed"; readonly failed: ReadonlyArray<PullRequestCheck> }
@@ -37,14 +49,17 @@ const isFailedCheck = (check: PullRequestCheck) =>
  * Compares a watched pull request with what its agent was last told. Each check is reported as
  * soon as it fails, so a check that never finishes (an advisory review bot) cannot hold the
  * news back. "Passed" is reported once the checks the base branch requires all passed, or all
- * checks where the host marks none required. Remarks count when someone other than the agent's
- * own account wrote them, so its own replies never wake it. `remarks` is null when the
- * conversation could not be read; remarks then wait for a later pass.
+ * checks where the host marks none required. Remarks by another account always count. Remarks by
+ * the agent's own account count unless they carry the agent marker or were made while one of the
+ * thread's `runs` was working, so a user who shares the account still wakes the agent while its
+ * own replies do not. `remarks` is null when the conversation could not be read; remarks then
+ * wait for a later pass.
  */
 export function evaluatePullRequestWatch(
   watch: ThreadPullRequestWatch,
   detail: Pick<PullRequestDetail, "headSha" | "checks" | "mergeability" | "viewer" | "author">,
   remarks: ReadonlyArray<PullRequestComment> | null,
+  runs: ReadonlyArray<ProjectionRunWindow> = [],
 ): PullRequestWatchReport {
   const changes: Array<PullRequestWatchChange> = [];
   const headSha = detail.headSha ?? null;
@@ -81,12 +96,21 @@ export function evaluatePullRequestWatch(
   const through = Date.parse(watch.remarksThrough);
   // An edit counts as new activity, so bots that rewrite one summary comment still wake the agent.
   const activeAt = (remark: PullRequestComment) => remark.editedAt ?? remark.createdAt;
+  // A forgotten marker falls back to timing: the user is not who posts while the agent works.
+  const duringRun = (at: number) =>
+    runs.some(
+      (run) =>
+        at >= Date.parse(run.startedAt) - RUN_WINDOW_SLACK_MS &&
+        (run.completedAt === null || at <= Date.parse(run.completedAt) + RUN_WINDOW_SLACK_MS),
+    );
+  const byAgent = (remark: PullRequestComment, at: number) =>
+    remark.author?.login.toLowerCase() === own && (AGENT_MARKER.test(remark.body) || duringRun(at));
   // GitHub times are per second, so remarks at the boundary time are told apart by ID.
   const fresh = (remarks ?? []).filter((remark) => {
     const at = Date.parse(activeAt(remark));
     return (
       (at > through || (at === through && !watch.remarkIds.includes(remark.id))) &&
-      remark.author?.login.toLowerCase() !== own
+      !byAgent(remark, at)
     );
   });
   if (fresh.length > 0) changes.push({ kind: "remarks", remarks: fresh });
