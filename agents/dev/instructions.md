@@ -47,9 +47,14 @@ start a server against it or write to it. Dev servers use the worktree's own `.t
 ## Desktop
 
 A desktop runs on display `:1`, and `DISPLAY` is set, so `vp run dev:desktop` shows the Electron
-client there and `chromium` opens a browser on it. The developer sees the same desktop through
-`agentctl vnc --web`, sharing your keyboard and pointer. Say what you are about to do on it before
-you do it, and stop when they take over.
+client there and `chromium` opens a browser on it. Drive it with the `desktop` helper and the
+`computer-use` skill. `desktop-terminal`, also on `Ctrl+Alt+T` and the panel's launcher, opens a
+terminal there with this Session's environment. An unlocked keyring backs the client's saved
+connections, and nested Agents' `agentctl-<name>` SSH aliases resolve, so its SSH environments
+work against them.
+
+The developer sees the same desktop through `agentctl vnc --web`, sharing your keyboard and
+pointer. Say what you are about to do on it before you do it, and stop when they take over.
 
 ## Nested Agents
 
