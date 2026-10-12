@@ -314,6 +314,25 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
   );
 
+  it.effect("reads the remotes of a partial clone", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-partial-",
+      });
+      yield* git(cwd, ["init"]);
+      yield* git(cwd, ["remote", "add", "origin", "https://github.com/me/app.git"]);
+      yield* git(cwd, ["remote", "add", "upstream", "https://github.com/acme/app.git"]);
+      yield* git(cwd, ["config", "remote.origin.gh-resolved", "base"]);
+      // As `git clone --filter=blob:none` records it; `git remote -v` then prints the filter.
+      yield* git(cwd, ["config", "remote.origin.promisor", "true"]);
+      yield* git(cwd, ["config", "remote.origin.partialclonefilter", "blob:none"]);
+
+      const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+      expect((yield* resolver.resolve(cwd))?.canonicalKey).toBe("github.com/me/app");
+    }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
+  );
+
   it.effect("follows the repository gh made the default", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
