@@ -154,8 +154,8 @@ or merge. You can edit review titles and descriptions and your own comments wher
 GitLab calls these merge requests.
 
 A project folder that is not a Git repository itself lists the pull requests of the repositories
-checked out in its immediate subfolders, and threads in it show the status of the pull requests
-linked to them. Symlinks and folders whose names start with `.` are skipped, and a new checkout
+checked out in its immediate subfolders. Threads in it show the status of the pull requests
+linked to them, and open links to those repositories' pull requests beside the thread. Symlinks and folders whose names start with `.` are skipped, and a new checkout
 shows up within two minutes. Writing a guide needs a project rooted in that repository.
 
 A checkout's pull requests come from the repository `gh repo set-default` chose for it. Without
