@@ -175,4 +175,6 @@ published on the fork: issues, pull requests, comments, reviews and commit messa
 a permanent backlink on upstream's timeline, which editing or deleting the text does not remove.
 Write `upstream#N` instead: GitHub does not link it, so it is safe in commit messages too, and a
 code span around it in Markdown adds a margin. A bare `#N`, or `upstream #N` with a space, links
-the fork's own issue or pull request N.
+the fork's own issue or pull request N. The rule covers only what reaches GitHub. In conversation
+with the developer, and in local files that are never pushed, link upstream issues and pull
+requests normally, with full URLs, so the developer can click through.
