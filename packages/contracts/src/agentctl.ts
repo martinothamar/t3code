@@ -73,6 +73,8 @@ export type AgentctlSandboxesSnapshot = typeof AgentctlSandboxesSnapshot.Type;
 export const AgentctlSandboxManifest = Schema.Struct({
   path: Schema.String,
   directory: Schema.String,
+  /** The nearest folder at or above `directory` with a `.git`, or else the manifest root. */
+  repository: Schema.String,
   variant: Schema.NullOr(Schema.String),
   /** `metadata.name`, the default name for a Sandbox applied from it. */
   agentName: Schema.NullOr(Schema.String),

@@ -7,7 +7,7 @@ import * as Path from "effect/Path";
 import { discoverManifests } from "./manifests.ts";
 
 describe("discoverManifests", () => {
-  it.effect("finds manifests in a root's repositories and skips what never holds one", () =>
+  it.effect("finds manifests in a root's repositories, with the repository each belongs to", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -23,18 +23,36 @@ describe("discoverManifests", () => {
       yield* write("code/app/agents/agent.yaml.bak");
       yield* write("code/app/node_modules/pkg/agent.yaml");
       yield* write("code/app/.git/agent.yaml");
+      yield* write("code/loose/agents/agent.yaml", "metadata:\n  name: loose\n");
       yield* write("code/a/b/c/d/e/agent.yaml");
 
       const manifests = yield* discoverManifests([path.join(home, "code")]);
       assert.deepStrictEqual(
-        manifests.map(({ path: manifestPath, variant, agentName }) => ({
+        manifests.map(({ path: manifestPath, repository, variant, agentName }) => ({
           path: path.relative(home, manifestPath),
+          repository: path.relative(home, repository),
           variant,
           agentName,
         })),
         [
-          { path: "code/app/agents/agent.yaml", variant: null, agentName: "app" },
-          { path: "code/app/agents/agent.nested.yaml", variant: "nested", agentName: "app-nested" },
+          {
+            path: "code/app/agents/agent.yaml",
+            repository: "code/app",
+            variant: null,
+            agentName: "app",
+          },
+          {
+            path: "code/app/agents/agent.nested.yaml",
+            repository: "code/app",
+            variant: "nested",
+            agentName: "app-nested",
+          },
+          {
+            path: "code/loose/agents/agent.yaml",
+            repository: "code",
+            variant: null,
+            agentName: "loose",
+          },
         ],
       );
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
