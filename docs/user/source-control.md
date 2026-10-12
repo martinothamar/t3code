@@ -153,6 +153,11 @@ Open **Pull requests** to review changes and comments, request reviewers, check 
 or merge. You can edit review titles and descriptions and your own comments where the host allows it.
 GitLab calls these merge requests.
 
+A project folder that is not a Git repository itself lists the pull requests of the repositories
+checked out in its immediate subfolders, and threads in it show the status of the pull requests
+linked to them. Folders whose names start with `.` are skipped, and a new checkout shows up
+within a minute. Writing a guide needs a project rooted in that repository.
+
 Enable **Remove agent credits when merging** in Settings → Source Control to remove recognized
 agent co-author and generated-by lines from GitHub merge and squash commit messages. Human
 co-authors stay credited. The setting is off by default and projects can override it. It also

@@ -796,6 +796,25 @@ export const make = Effect.gen(function* () {
     ).pipe(Effect.map((resolved) => new Map(resolved)));
   };
 
+  /**
+   * A project with its repository identity resolved. A workspace folder, which is no repository
+   * itself, reads as one project per repository it holds, each run from its own checkout, so
+   * everything downstream serves them as it serves a project rooted in that repository.
+   */
+  const withRepositoryIdentities = Effect.fnUntraced(function* (
+    project: OrchestrationProjectShell,
+  ): Effect.fn.Return<ReadonlyArray<OrchestrationProjectShell>> {
+    if (project.repositoryIdentity != null) return [project];
+    const repositoryIdentity = yield* repositoryIdentities.resolve(project.workspaceRoot);
+    if (repositoryIdentity !== null) return [{ ...project, repositoryIdentity }];
+    const identities = yield* repositoryIdentities.resolveWorkspace(project.workspaceRoot);
+    return identities.flatMap((identity) =>
+      identity.rootPath === undefined
+        ? []
+        : [{ ...project, workspaceRoot: identity.rootPath, repositoryIdentity: identity }],
+    );
+  });
+
   const listWorkspaceProjects = (
     filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host">,
   ): Effect.Effect<WorkspaceProjects, PullRequestError> =>
@@ -814,16 +833,9 @@ export const make = Effect.gen(function* () {
           }),
       ),
       Effect.flatMap((projects) =>
-        Effect.forEach(
-          projects,
-          (project) =>
-            project.repositoryIdentity != null
-              ? Effect.succeed(project)
-              : repositoryIdentities
-                  .resolve(project.workspaceRoot)
-                  .pipe(Effect.map((repositoryIdentity) => ({ ...project, repositoryIdentity }))),
-          { concurrency: REPOSITORY_CONCURRENCY },
-        ),
+        Effect.forEach(projects, withRepositoryIdentities, {
+          concurrency: REPOSITORY_CONCURRENCY,
+        }).pipe(Effect.map((expanded) => expanded.flat())),
       ),
       Effect.flatMap((projects) =>
         refineUnknownProjectKinds(projects, filter).pipe(
@@ -908,9 +920,15 @@ export const make = Effect.gen(function* () {
   const requireProject = (ref: PullRequestRef): Effect.Effect<SupportedProject, PullRequestError> =>
     listWorkspaceProjects({ projectId: ref.projectId }).pipe(
       Effect.flatMap(({ supported }): Effect.Effect<SupportedProject, PullRequestError> => {
-        const own = supported[0];
         const repository = ref.repository.trim();
         const host = ref.host?.trim().toLowerCase();
+        // A workspace project has one entry per repository it holds; any other has at most one.
+        const own =
+          supported.find(
+            (candidate) =>
+              candidate.repository.toLowerCase() === repository.toLowerCase() &&
+              (host === undefined || host === candidate.host),
+          ) ?? supported[0];
         if (own !== undefined && own.repository.toLowerCase() === repository.toLowerCase()) {
           // Hostless references only ever meant the project's own repository, and a hosted one
           // naming it still is; either way the project serves itself.
@@ -2570,23 +2588,26 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (input.refs.length === 0) return { stats: [] };
       const { supported } = yield* listWorkspaceProjects({});
-      const byProject = new Map(supported.map((project) => [project.project.id, project]));
+      // By repository as well as project: a workspace project holds several.
+      const byRepository = new Map(
+        supported.map((project) => [
+          `${project.project.id} ${project.repository.toLowerCase()}`,
+          project,
+        ]),
+      );
       const wanted = new Map<
         string,
         { readonly project: SupportedProject; readonly number: number }
       >();
       for (const ref of input.refs) {
-        const project = byProject.get(ref.projectId);
         // The repository travels through the client, so it is checked against the project's own
-        // remote rather than being handed to a provider verbatim.
-        if (
-          project === undefined ||
-          project.api.listChangeRequestStats === undefined ||
-          project.repository.toLowerCase() !== ref.repository.trim().toLowerCase()
-        ) {
-          continue;
-        }
-        wanted.set(`${project.project.id} ${ref.number}`, { project, number: ref.number });
+        // remotes rather than being handed to a provider verbatim.
+        const project = byRepository.get(`${ref.projectId} ${ref.repository.trim().toLowerCase()}`);
+        if (project === undefined || project.api.listChangeRequestStats === undefined) continue;
+        wanted.set(`${project.project.id} ${project.repository.toLowerCase()} ${ref.number}`, {
+          project,
+          number: ref.number,
+        });
       }
       const byHost = new Map<string, Array<{ project: SupportedProject; number: number }>>();
       for (const entry of wanted.values()) {

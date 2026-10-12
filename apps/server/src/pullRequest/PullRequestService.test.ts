@@ -478,6 +478,7 @@ function makeService(input: {
   readonly providers: ReadonlyArray<PullRequestProviderApi>;
   readonly resolveHandle?: SourceControlProviderRegistry.SourceControlProviderRegistry["Service"]["resolveHandle"];
   readonly resolveRepositoryIdentity?: RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]["resolve"];
+  readonly resolveWorkspaceRepositories?: RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]["resolveWorkspace"];
 }) {
   // Built into the test's own scope rather than provided call by call: the marks store owns a
   // database, and `Effect.provide` would close it the moment the service was handed back.
@@ -506,6 +507,7 @@ function makeService(input: {
         }),
         Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
           resolve: input.resolveRepositoryIdentity ?? (() => Effect.succeed(null)),
+          resolveWorkspace: input.resolveWorkspaceRepositories ?? (() => Effect.succeed([])),
         }),
         SourceControlRateLimit.layer,
         // The real store over a database of its own, so the environment-kept marks are exercised
@@ -520,6 +522,106 @@ function makeService(input: {
     (context) => Effect.provideContext(PullRequestService.make, context),
   );
 }
+
+it.effect("serves a workspace folder's repositories from their own checkouts", () =>
+  Effect.gen(function* () {
+    const listed: Array<readonly [string, string]> = [];
+    const summarized: Array<readonly [string, string]> = [];
+    const repositories = ["acme/app", "acme/infra"].map(
+      (repository) =>
+        project({ id: "member", title: "", workspaceRoot: "", repository }).repositoryIdentity!,
+    );
+    const service = yield* makeService({
+      projects: [project({ id: "sandbox", title: "sandbox", workspaceRoot: "/workspace" })],
+      resolveWorkspaceRepositories: (cwd) =>
+        Effect.succeed(
+          cwd === "/workspace"
+            ? repositories.map((identity) => ({
+                ...identity,
+                rootPath: `/workspace/${identity.displayName!.split("/")[1]}`,
+              }))
+            : [],
+        ),
+      providers: [
+        fakeProvider(SourceControlProviderKind.make("github"), {
+          listChangeRequests: ({ cwd, repository }) =>
+            Effect.sync(() => {
+              listed.push([repository, cwd]);
+              // The same number in both, as two repositories' first pull requests would be.
+              return {
+                items: [changeRequest(1, "2026-07-02T00:00:00Z")],
+                truncated: false,
+                continues: false,
+              };
+            }),
+          getChangeRequestSummary: ({ cwd, repository }) =>
+            Effect.sync(() => {
+              summarized.push([repository, cwd]);
+              return changeRequest(1, "2026-07-02T00:00:00Z");
+            }),
+          listChangeRequestStats: ({ changeRequests }) =>
+            Effect.succeed(
+              changeRequests.map(({ repository, number }) => ({
+                repository,
+                number,
+                additions: repository === "acme/app" ? 3 : 5,
+                deletions: 0,
+              })),
+            ),
+        }),
+      ],
+    });
+
+    const result = yield* service.list({ state: "open" });
+    assert.deepStrictEqual(
+      result.entries
+        .map(({ projectId, repository, number }) => [projectId, repository, number])
+        .toSorted(),
+      [
+        ["sandbox", "acme/app", 1],
+        ["sandbox", "acme/infra", 1],
+      ],
+    );
+    assert.deepStrictEqual(listed.toSorted(), [
+      ["acme/app", "/workspace/app"],
+      ["acme/infra", "/workspace/infra"],
+    ]);
+
+    // A linked pull request is read from the checkout of its own repository, named by host or not.
+    yield* service.summary(
+      {
+        projectId: "sandbox" as ProjectId,
+        host: "github.com",
+        repository: "acme/infra",
+        number: 1,
+      },
+      { recoverTransientFailure: false },
+    );
+    yield* service.summary(
+      { projectId: "sandbox" as ProjectId, repository: "acme/app", number: 1 },
+      { recoverTransientFailure: false },
+    );
+    assert.deepStrictEqual(summarized, [
+      ["acme/infra", "/workspace/infra"],
+      ["acme/app", "/workspace/app"],
+    ]);
+
+    const { stats } = yield* service.listStats({
+      refs: result.entries.map(({ projectId, repository, number }) => ({
+        projectId,
+        repository,
+        number,
+      })),
+    });
+    assert.deepStrictEqual(
+      stats.map(({ repository, additions }) => [repository, additions]).toSorted(),
+      [
+        ["acme/app", 3],
+        ["acme/infra", 5],
+      ],
+    );
+  }),
+);
 
 it.effect("lists GitHub Enterprise PRs for a stored unknown repository after host discovery", () =>
   Effect.gen(function* () {
