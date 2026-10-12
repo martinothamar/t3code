@@ -82,11 +82,11 @@ RUN case "${TARGETARCH}" in \
 # Route GitHub credentials through gh, so plain git authenticates with the mediated token.
 RUN git config --system credential.https://github.com.helper '!/usr/local/bin/gh auth git-credential'
 
-ARG CLAUDE_CODE_VERSION=2.1.292
-ARG CODEX_VERSION=0.160.1
+ARG CLAUDE_CODE_VERSION=2.1.296
+ARG CODEX_VERSION=0.162.1
 # Matches the repository's playwright-core, so tests and the desktop share one browser build.
 ARG PLAYWRIGHT_VERSION=1.60.0
-ARG AGENTCTL_VERSION=v0.1.0-preview.10
+ARG AGENTCTL_VERSION=v0.1.0-preview.11
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 
 # Harnesses, a Chromium for the desktop (its system dependencies also cover Electron), and
