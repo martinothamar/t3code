@@ -4,6 +4,9 @@
 //!
 //! Layout is drawn on a 1920x1080 grid; `--scale`/`--draft` scale it automatically. Every scene
 //! but the first starts XFADE seconds before the previous one ends, and the two cross-fade.
+
+// A video uses only some of the kit.
+#![allow(dead_code)]
 use fframes::{
     AnimateRuntimeInput, AudioMap, Color, Duration, FFramesContext, FontQuery, Frame, Overlap,
     Scene, Scenes, Svgr, SyncVideoFrameInput, Video,

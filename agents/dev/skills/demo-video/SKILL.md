@@ -8,25 +8,30 @@ description: Make a captioned demo video of T3 Code from real screen recordings,
 This is how the first T3 Code × agentctl walkthrough was made: 3½ minutes at 1080p, silent with
 captions, every app shot a real recording. [storyboard.md](storyboard.md) is its storyboard and
 shot list, and [template/](template) is its complete fframes project, the starting point for the
-next one. fframes is only the tool: the video carries no fframes branding or outro.
+next one. fframes is only the tool: the video carries no fframes branding or outro. For fframes
+itself, its command line and API, read fframes' own `fframes-video` skill, which
+[scripts/fframes-skill](scripts/fframes-skill) downloads for the version the template pins.
 
 The pipeline:
 
 1. Agree on a storyboard with the developer.
-2. Have a subagent install fframes, once per Sandbox.
+2. Have a subagent install fframes and fetch its skill, once per Sandbox.
 3. Prepare what you film: the released app, its own data, and nested Sandboxes. Do a dry run.
 4. Record takes of the desktop with [scripts/rec](scripts/rec) and [scripts/glide](scripts/glide).
 5. Find cut points with [scripts/sheet](scripts/sheet), and cut sped-up segments with
    [scripts/cut.sh](scripts/cut.sh).
 6. Compose the scenes and shots in the project, review stills, render.
 
-Work in `~/video` (`VIDEO_DIR` for the scripts), outside every checkout:
+Work in a folder of the video's own, outside every checkout: `~/video` by default, or another
+one exported as `VIDEO_DIR` for the scripts if `~/video` already holds earlier work.
 
 ```
 ~/video/
   project/        the fframes project, copied from template/
+  fframes-video/  fframes' own skill, from scripts/fframes-skill
   footage/        raw takes from scripts/rec
   footage/seg/    segments from scripts/cut.sh, which the shots play
+  sheets/         contact sheets from scripts/sheet
   app/  t3home/   the T3 Code release you film and its own T3 home
 ```
 
@@ -34,10 +39,10 @@ Work in `~/video` (`VIDEO_DIR` for the scripts), outside every checkout:
 
 Write the storyboard before installing or filming anything and get the developer's answers: who
 watches, how long, what the "in practice" part shows, audio (silent with captions is the default:
-you cannot record a voice and must not pick unlicensed music), and where the result goes. Follow
-the shape of [storyboard.md](storyboard.md): a table of scenes with their length and what each is
-made from, then the risks you will check first. Say before filming which parts are drawn (titles,
-diagrams, a typed terminal, a manifest) and which are recordings.
+you cannot record a voice and must not pick unlicensed music), and where the result goes. Fill in
+the blank storyboard at the top of [storyboard.md](storyboard.md); the walkthrough's below it is
+the example. Say before filming which parts are drawn (titles, diagrams, a typed terminal, a
+manifest) and which are recordings.
 
 ## 2. Install fframes
 
@@ -62,8 +67,8 @@ cargo build --release
 
 The first build compiles FFmpeg from source, a few minutes: `template/.cargo/config.toml` sets
 `FFMPEG_FORCE_BUILD`, because the prebuilt FFmpeg links an x264 Ubuntu does not ship. The
-`fframes` crates are pinned to `=1.2.0`. `target/` grows to about 4 GB; later builds take
-seconds.
+`fframes` crates are pinned exactly in `template/Cargo.toml`. `target/` grows to about 4 GB;
+later builds take seconds.
 
 Every command runs from the project with:
 
@@ -74,8 +79,22 @@ mkdir -p "$TMPDIR"
 B=./target/release/demo-video
 ```
 
-Check the install with `$B timeline` and `$B frame 1s`, then read the PNG in `frames/`. Never run
-`$B preview`: it opens a window on `:1`, where you are filming.
+Check the install with `$B timeline` and `$B frame 1s`, then read the PNG in `frames/`.
+
+Then fetch fframes' own skill, matching the pinned version:
+
+```sh
+sh scripts/fframes-skill          # → ~/video/fframes-video/SKILL.md and references/
+```
+
+Read its `SKILL.md` for the command line (time specs, the review loop) and `references/api.md`
+when writing scenes; its `$R` is `$B` here. Use this section's install, not its own. Where it
+and this setup differ, as checked at fframes 1.2.0 (check again when bumping the pin):
+
+- It says the first build downloads prebuilt FFmpeg; here it is built from source, as above.
+- Its footage example, `video_frame.href()`, does not compile, and `start_from` is a delay rather
+  than an in-point. Play footage through the kit's `Shot`, whose `footage_frame` does it right.
+- Never run `preview`: it opens a window on `:1`, where you are filming.
 
 ## 3. Prepare what you film
 
@@ -100,6 +119,8 @@ Check the install with `$B timeline` and `$B frame 1s`, then read the PNG in `fr
 - **Dry-run every take unrecorded.** It finds what fails (an agent that picks another tool, a
   service that does not start) and warms image caches, so the real take is shorter. Then reset what
   shows: delete dry-run threads, stop services the take starts, close windows on nested desktops.
+  Before each take, check that only demo data is on screen: no real projects, threads,
+  repositories, names or paths.
 
 - **Say what you are about to do on the desktop** before you do it; the developer may be watching
   over VNC.
@@ -107,7 +128,8 @@ Check the install with `$B timeline` and `$B frame 1s`, then read the PNG in `fr
 ## 4. Record
 
 ```sh
-sh scripts/rec start take-thread-1         # writes ~/video/footage/take-thread-1.mp4
+export VIDEO_DIR=~/video                   # the video's folder, for every script
+sh scripts/rec start take-thread-1         # writes $VIDEO_DIR/footage/take-thread-1.mp4
 python3 scripts/glide 826 360 click 0.8    # screenshot coordinates, as `desktop` uses
 xdotool type --delay 22 "Show me your desktop in the browser here: …"
 xdotool key Return
@@ -125,7 +147,7 @@ sh scripts/rec stop
   event; every frame carries its source second, the number `cut.sh` takes:
 
   ```sh
-  sh scripts/sheet take-thread-1            # one frame every 4 s → ~/video/sheets/take-thread-1.jpg
+  sh scripts/sheet take-thread-1            # one frame every 4 s → $VIDEO_DIR/sheets/take-thread-1.jpg
   sh scripts/sheet take-thread-1 86 118     # 86–118 s, one frame per second
   ```
 
@@ -150,7 +172,8 @@ fix or extend the kit. `video()` in `lib.rs` lists the scenes in order, built fr
 
 A `Shot` carries its segment's `len` from `cut.sh`, a chapter label, the speed it was cut at,
 `Cam(t, zoom, x, y)` keyframes eased between, captions as `(start, end, text)`, highlight rings and
-`fade_out`. Camera and ring coordinates are source pixels of the recording. Consecutive scenes
+`fade_out`. Camera and ring coordinates are source pixels of the recording: a screenshot's
+coordinates times `width / sentWidth` from `desktop --json display`. Consecutive scenes
 cross-fade over `XFADE`; a shot's footage plays exactly once, and captions of consecutive shots
 swap rather than overlap. The kit crops the recording desktop's taskbar off the bottom.
 
@@ -158,8 +181,8 @@ Anything else is a scene of the video's own, like the walkthrough's `DiagramScen
 `lib.rs` implementing `fframes::Scene` with the kit's helpers (`scene_opacity`, `ease_out`,
 `window_opacity`, `caption`, `window_chrome`) and palette.
 
-Review before rendering: `$B inspect`, `$B strip all -n 30 --columns 5 --width 560` and
-`$B frame "ShotName@4s,…" -o frames`, reading the images. Then:
+Review with fframes-video's loop before rendering, reading the stills and contact sheets it
+writes. Then:
 
 ```sh
 $B render -o renders/raw.mp4                          # 3½ minutes renders in about 80 s
@@ -178,12 +201,5 @@ Give the developer the path; the chat embeds a local video with `![title](/absol
 - **Interrupted image pulls corrupt Podman storage** inside a Sandbox, and pulls then fail with
   `readlink /var/lib/containers/storage/overlay/l: invalid argument`. In a throwaway Sandbox, run
   `sudo podman system reset --force`.
-- **fframes API.** `frame.animate(timeline!(…))` inside `svgr!` takes only literals and imported
-  constructors; compute anything else with `animate_runtime` and a `LazyLock<AnimationRuntime>`.
-  `SyncVideoFrameInput::start_from` is a delay, not an in-point: shift `frame.index` instead, as
-  `footage_frame` in `kit.rs` does. Past a clip's end the frame is `None`, so clamp.
-  `frame.text_width` needs `&mut Frame`. `<defs>` ids are global across overlapping scenes; suffix
-  them per scene.
-- **Footage.** Everything in `media/` is compiled in and must not be video; footage is read at
-  runtime from `FFRAMES_FOOTAGE_DIR`, so replacing a segment needs no rebuild. A nonzero stream
-  `start_time` shifts a clip; `cut.sh` resets it.
+- **Footage** is read at runtime from `FFRAMES_FOOTAGE_DIR`, `footage/seg` beside the project by
+  default, so replacing a segment needs no rebuild.

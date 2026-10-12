@@ -1,3 +1,25 @@
+# Storyboard
+
+Fill this in and agree it with the developer before installing or filming anything. The
+walkthrough below is a filled-in example.
+
+## Brief
+
+- Audience, and what they should be able to do afterwards:
+- Length, resolution, audio (silent with captions by default), where the result goes:
+- The setup to film (which app build, which Sandboxes and manifests, what data):
+- The moment to show:
+
+## Scenes
+
+| #   | Scene | Length | Made from (drawn, or a recording) |
+| --- | ----- | ------ | --------------------------------- |
+| 1   |       |        |                                   |
+
+## Risks to check in the dry run
+
+-
+
 # Example: T3 Code × agentctl walkthrough
 
 The storyboard agreed with the developer for a coworker who wanted to see how to set up the fork
