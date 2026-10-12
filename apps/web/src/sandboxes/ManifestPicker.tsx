@@ -1,5 +1,5 @@
 import type { AgentctlSandboxManifest } from "@t3tools/contracts";
-import { ChevronsUpDownIcon } from "lucide-react";
+import { ChevronsUpDownIcon, FolderGit2Icon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { Button } from "../components/ui/button";
@@ -15,6 +15,7 @@ import {
 } from "../components/ui/combobox";
 import { Label } from "../components/ui/label";
 import { MiddleTruncate } from "../components/ui/middle-truncate";
+import { Separator } from "../components/ui/separator";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group";
 import {
   filterManifestRepositories,
@@ -115,12 +116,16 @@ export function ManifestPicker({
               {filtered.length === 0 ? (
                 <p className="p-2 text-muted-foreground text-xs">No agent matches.</p>
               ) : (
-                filtered.map((group) => (
+                filtered.map((group, groupIndex) => (
                   <ComboboxGroup key={group.path}>
+                    {groupIndex > 0 ? <Separator className="my-1" /> : null}
                     <ComboboxGroupLabel>
-                      <span className="flex min-w-0 items-baseline justify-between gap-3">
-                        <span className="shrink-0 text-foreground">{group.name}</span>
-                        <span className="min-w-0 font-mono font-normal text-3xs">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="shrink-0 font-semibold text-foreground text-sm">
+                          {group.name}
+                        </span>
+                        <span className="ms-auto min-w-0 font-mono font-normal text-3xs">
                           <MiddleTruncate value={group.path} />
                         </span>
                       </span>
@@ -130,6 +135,7 @@ export function ManifestPicker({
                         key={candidate.directory}
                         index={index++}
                         value={candidate.directory}
+                        className="ms-6"
                       >
                         <span className="truncate">{candidate.label}</span>
                         {candidate.agentName !== null && candidate.agentName !== candidate.label ? (
