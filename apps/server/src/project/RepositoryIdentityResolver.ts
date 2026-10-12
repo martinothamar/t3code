@@ -8,7 +8,9 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 
 import * as ProcessRunner from "../processRunner.ts";
 
@@ -19,6 +21,9 @@ const DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY = 512;
 const DEFAULT_POSITIVE_CACHE_TTL = Duration.minutes(15);
 // Short, so a folder that gains a repository or a remote shows up quickly.
 const DEFAULT_NEGATIVE_CACHE_TTL = Duration.minutes(1);
+// Each repository costs three git probes per positive TTL, so a folder of hundreds of
+// clones is read as its first 64 rather than spawning git for every one.
+const MAX_WORKSPACE_REPOSITORIES = 64;
 
 export interface RepositoryIdentityResolverOptions {
   readonly cacheCapacity?: number;
@@ -36,6 +41,17 @@ export class RepositoryIdentityResolver extends Context.Service<
       cwd: string,
       options?: { readonly refresh?: boolean },
     ) => Effect.Effect<RepositoryIdentity | null>;
+    /**
+     * The repositories in a workspace folder: one that is not inside a repository itself but
+     * holds checkouts in its immediate child folders, such as an agentctl Sandbox's working
+     * directory. Dot-folders and symlinks are skipped, so `.worktrees` is not read as more
+     * repositories.
+     * Empty for a folder inside a repository, so repository-rooted projects keep one identity.
+     */
+    readonly resolveWorkspace: (
+      cwd: string,
+      options?: { readonly refresh?: boolean },
+    ) => Effect.Effect<ReadonlyArray<RepositoryIdentity>>;
   }
 >()("t3/project/RepositoryIdentityResolver") {}
 
@@ -44,7 +60,7 @@ function parseRemoteFetchUrls(stdout: string): Map<string, string> {
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
-    const match = /^(\S+)\s+(\S+)\s+\((fetch|push)\)$/.exec(trimmed);
+    const match = /^(\S+)\s+(\S+)\s+\((fetch|push)\)(?:\s+\[[^\]]*\])?$/.exec(trimmed);
     if (!match) continue;
     const [, remoteName = "", remoteUrl = "", direction = ""] = match;
     if (direction !== "fetch" || remoteName.length === 0 || remoteUrl.length === 0) {
@@ -55,9 +71,40 @@ function parseRemoteFetchUrls(stdout: string): Map<string, string> {
   return remotes;
 }
 
-function pickPrimaryRemote(
+/**
+ * The remote `gh repo set-default` marked and the repository it names: `base` for the remote's
+ * own, or `owner/name` on its host for one that is no remote here. More than one mark leaves gh
+ * to prompt, so it reads as none.
+ */
+function parseGhDefault(
+  stdout: string,
   remotes: ReadonlyMap<string, string>,
 ): { readonly remoteName: string; readonly remoteUrl: string } | null {
+  const marks = stdout
+    .split("\n")
+    .map((line) => /^remote\.(.+)\.gh-resolved\s+(\S+)$/.exec(line.trim()))
+    .filter((match): match is RegExpExecArray => match !== null && remotes.has(match[1]!));
+  const [mark, ...others] = marks;
+  if (mark === undefined || others.length > 0) return null;
+  const remoteName = mark[1]!;
+  const remoteUrl = remotes.get(remoteName)!;
+  if (mark[2] === "base") return { remoteName, remoteUrl };
+  const [owner, name, ...rest] = mark[2]!.split("/");
+  const [host] = normalizeGitRemoteUrl(remoteUrl).split("/");
+  return owner && name && host && rest.length === 0
+    ? { remoteName, remoteUrl: `https://${host}/${owner}/${name}.git` }
+    : null;
+}
+
+/**
+ * The remote whose repository the checkout's pull requests go to: the one `gh repo set-default`
+ * chose, otherwise `upstream`, as a fork's usually go there, then `origin`.
+ */
+function pickPrimaryRemote(
+  remotes: ReadonlyMap<string, string>,
+  ghDefault: { readonly remoteName: string; readonly remoteUrl: string } | null,
+): { readonly remoteName: string; readonly remoteUrl: string } | null {
+  if (ghDefault !== null) return ghDefault;
   for (const preferredRemoteName of ["upstream", "origin"] as const) {
     const remoteUrl = remotes.get(preferredRemoteName);
     if (remoteUrl) {
@@ -143,19 +190,36 @@ const resolveRepositoryIdentityFromCacheKey = Effect.fn(
   cacheKey: string,
 ): Effect.fn.Return<RepositoryIdentity | null, never, ProcessRunner.ProcessRunner> {
   const processRunner = yield* ProcessRunner.ProcessRunner;
-  const remoteResult = yield* processRunner
-    .run({
-      command: "git",
-      args: ["-C", cacheKey, "remote", "-v"],
-      timeoutBehavior: "timedOutResult",
-    })
-    .pipe(Effect.option);
+  const [remoteResult, ghDefaultResult] = yield* Effect.all(
+    [
+      processRunner
+        .run({
+          command: "git",
+          args: ["-C", cacheKey, "remote", "-v"],
+          timeoutBehavior: "timedOutResult",
+        })
+        .pipe(Effect.option),
+      // Exits 1 when gh never set a default; that reads as none.
+      processRunner
+        .run({
+          command: "git",
+          args: ["-C", cacheKey, "config", "--get-regexp", "^remote\\..*\\.gh-resolved$"],
+          timeoutBehavior: "timedOutResult",
+        })
+        .pipe(Effect.option),
+    ],
+    { concurrency: 2 },
+  );
   if (remoteResult._tag === "None" || remoteResult.value.code !== 0) {
     return null;
   }
 
   const remotes = parseRemoteFetchUrls(remoteResult.value.stdout);
-  const remote = pickPrimaryRemote(remotes);
+  const ghDefault =
+    ghDefaultResult._tag === "Some" && ghDefaultResult.value.code === 0
+      ? parseGhDefault(ghDefaultResult.value.stdout, remotes)
+      : null;
+  const remote = pickPrimaryRemote(remotes, ghDefault);
   return remote
     ? buildRepositoryIdentity({ ...remote, originUrl: remotes.get("origin"), rootPath: cacheKey })
     : null;
@@ -165,6 +229,8 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
   options: RepositoryIdentityResolverOptions = {},
 ) {
   const processRunner = yield* ProcessRunner.ProcessRunner;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const cacheCapacity = options.cacheCapacity ?? DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY;
   const refine = options.refine ?? Effect.succeed;
   // Git errors and timeouts resolve to null, so they use the negative TTL like
@@ -210,7 +276,59 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
     },
   );
 
-  return RepositoryIdentityResolver.of({ resolve });
+  // Read on the negative TTL: the answer changes when a checkout is cloned or removed.
+  const workspaceCheckoutCache = yield* Cache.makeWith<string, ReadonlyArray<string>>(
+    (cwd) =>
+      fileSystem.readDirectory(cwd).pipe(
+        Effect.flatMap((names) =>
+          Effect.filter(
+            names.filter((name) => !name.startsWith(".")),
+            // A `.git` directory for a clone, or a `.git` file for a worktree. A symlink could
+            // lead outside the folder, so only real child folders count.
+            (name) =>
+              fileSystem.readLink(path.join(cwd, name)).pipe(
+                Effect.as(false),
+                Effect.catch(() =>
+                  fileSystem
+                    .exists(path.join(cwd, name, ".git"))
+                    .pipe(Effect.orElseSucceed(() => false)),
+                ),
+              ),
+            { concurrency: 16 },
+          ),
+        ),
+        Effect.map((names) =>
+          // Sorted after the checks: a concurrent filter keeps names in the order they finish.
+          names
+            .toSorted()
+            .slice(0, MAX_WORKSPACE_REPOSITORIES)
+            .map((name) => path.join(cwd, name)),
+        ),
+        Effect.orElseSucceed((): ReadonlyArray<string> => []),
+      ),
+    {
+      capacity: cacheCapacity,
+      timeToLive: () => options.negativeCacheTtl ?? DEFAULT_NEGATIVE_CACHE_TTL,
+    },
+  );
+
+  const resolveWorkspace: RepositoryIdentityResolver["Service"]["resolveWorkspace"] =
+    Effect.fnUntraced(function* (cwd, options) {
+      if (options?.refresh) {
+        yield* Cache.invalidate(repositoryRootCache, cwd);
+        yield* Cache.invalidate(workspaceCheckoutCache, cwd);
+      }
+      if ((yield* Cache.get(repositoryRootCache, cwd)) !== null) return [];
+      const checkouts = yield* Cache.get(workspaceCheckoutCache, cwd);
+      const identities = yield* Effect.forEach(
+        checkouts,
+        (checkout) => resolve(checkout, options),
+        { concurrency: 4 },
+      );
+      return identities.filter((identity) => identity !== null);
+    });
+
+  return RepositoryIdentityResolver.of({ resolve, resolveWorkspace });
 });
 
 export const layer = Layer.effect(RepositoryIdentityResolver, make()).pipe(

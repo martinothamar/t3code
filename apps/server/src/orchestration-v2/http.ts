@@ -65,12 +65,13 @@ export const layer = HttpApiBuilder.group(
             // identity resolution can exceed the client shell-snapshot budget
             // (ProcessRunner allows probes up to one minute). Background workers
             // plus the WS enrichment subscription fill in repositoryIdentity.
-            projectEnrichment.getAvailable(project.workspaceRoot).pipe(
-              Effect.map((enrichment) => ({
-                ...project,
-                repositoryIdentity: enrichment.repositoryIdentity,
-              })),
-            ),
+            projectEnrichment
+              .getAvailable(project.workspaceRoot)
+              .pipe(
+                Effect.map((enrichment) =>
+                  ProjectEnrichmentService.withEnrichment(project, enrichment),
+                ),
+              ),
           { concurrency: 16 },
         ),
     );

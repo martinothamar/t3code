@@ -31,6 +31,14 @@ describe("selectGitHubBaseRepository", () => {
       select({ remotes: fork, resolved: "remote.origin.gh-resolved acme/other" }),
       { owner: "acme", name: "other" },
     );
+    // A partial clone annotates its fetch line with the filter.
+    assert.deepStrictEqual(
+      select({
+        remotes: fork.replace("me/web.git (fetch)", "me/web.git (fetch) [blob:none]"),
+        resolved: "remote.origin.gh-resolved base",
+      }),
+      { owner: "me", name: "web" },
+    );
     // gh ranks remote names in any case.
     assert.deepStrictEqual(
       select({

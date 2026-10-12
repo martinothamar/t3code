@@ -17,7 +17,7 @@ export function parseFetchRemotes(
 ): ReadonlyArray<{ readonly name: string; readonly url: string }> {
   return remotes
     .split("\n")
-    .map((line) => /^(\S+)\s+(\S+)\s+\(fetch\)$/u.exec(line.trim()))
+    .map((line) => /^(\S+)\s+(\S+)\s+\(fetch\)(?:\s+\[[^\]]*\])?$/u.exec(line.trim()))
     .filter((match): match is RegExpExecArray => match !== null)
     .map((match) => ({ name: match[1]!, url: match[2]! }));
 }

@@ -2,6 +2,7 @@ import { SourceControlProviderKind } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  projectRepositorySelectors,
   sourceControlRepositorySelector,
   detectSourceControlProviderFromRemoteUrl,
   getChangeRequestTerminologyForKind,
@@ -247,4 +248,30 @@ it("puts owner and name back together for an identity recorded before displayNam
 it("names nothing for a project with no remote to name it by", () => {
   expect(sourceControlRepositorySelector(null)).toBeNull();
   expect(sourceControlRepositorySelector({ provider: "github" })).toBeNull();
+});
+
+describe("projectRepositorySelectors", () => {
+  const identity = (displayName: string) => ({
+    canonicalKey: `github.com/${displayName.toLowerCase()}`,
+    locator: {
+      source: "git-remote" as const,
+      remoteName: "origin",
+      remoteUrl: `https://github.com/${displayName}.git`,
+    },
+    provider: "github",
+    displayName,
+  });
+
+  it("names a workspace folder's repositories once each", () => {
+    expect(
+      projectRepositorySelectors({
+        repositoryIdentity: null,
+        workspaceRepositories: [identity("acme/app"), identity("Acme/App"), identity("acme/infra")],
+      }),
+    ).toEqual(["acme/app", "acme/infra"]);
+    expect(projectRepositorySelectors({ repositoryIdentity: identity("acme/app") })).toEqual([
+      "acme/app",
+    ]);
+    expect(projectRepositorySelectors({ repositoryIdentity: null })).toEqual([]);
+  });
 });

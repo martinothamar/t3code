@@ -724,10 +724,7 @@ const enrichProjectShells = Effect.fn("ws.orchestrationV2.enrichProjectShells")(
           // snapshot or completion marker on slow git probes.
           projectEnrichment.getAvailable(project.workspaceRoot).pipe(
             Effect.map((enrichment) => ({
-              project: {
-                ...project,
-                repositoryIdentity: enrichment.repositoryIdentity,
-              },
+              project: ProjectEnrichmentService.withEnrichment(project, enrichment),
               repositoryIdentityResolved: enrichment.repositoryIdentityResolved,
             })),
           ),
@@ -1055,18 +1052,16 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       // project's metadata once a minute.
       Stream.mapEffect((changes) =>
         Effect.gen(function* () {
-          const identities = new Map(
-            Array.from(changes, (change) => [
-              change.workspaceRoot,
-              change.enrichment.repositoryIdentity,
-            ]),
+          const enrichments = new Map(
+            Array.from(changes, (change) => [change.workspaceRoot, change.enrichment]),
           );
           const snapshotSequence = yield* applicationEvents.latestApplicationSequence;
-          const changedProjects = (yield* projects.listShells()).flatMap((project) =>
-            identities.has(project.workspaceRoot)
-              ? [{ ...project, repositoryIdentity: identities.get(project.workspaceRoot) ?? null }]
-              : [],
-          );
+          const changedProjects = (yield* projects.listShells()).flatMap((project) => {
+            const enrichment = enrichments.get(project.workspaceRoot);
+            return enrichment === undefined
+              ? []
+              : [ProjectEnrichmentService.withEnrichment(project, enrichment)];
+          });
           return shellStreamItemFromEnrichmentRefresh({
             snapshot: {
               schemaVersion: ORCHESTRATION_V2_PROJECTION_SCHEMA_VERSION,

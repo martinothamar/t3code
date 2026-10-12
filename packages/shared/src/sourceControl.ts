@@ -310,6 +310,29 @@ export function sourceControlRepositorySelector(
   return identity.owner && identity.name ? `${identity.owner}/${identity.name}` : null;
 }
 
+/**
+ * The repositories a project's pull requests come from, as `sourceControlRepositorySelector`
+ * names them: its own, or for a folder that is no repository, the checkouts it holds. Two
+ * checkouts of one repository name it once.
+ */
+export function projectRepositorySelectors(project: {
+  readonly repositoryIdentity?: RepositoryIdentity | null | undefined;
+  readonly workspaceRepositories?: ReadonlyArray<RepositoryIdentity> | undefined;
+}): ReadonlyArray<string> {
+  const identities =
+    project.repositoryIdentity != null
+      ? [project.repositoryIdentity]
+      : (project.workspaceRepositories ?? []);
+  const selectors = new Map<string, string>();
+  for (const identity of identities) {
+    const selector = sourceControlRepositorySelector(identity);
+    if (selector !== null && !selectors.has(selector.toLowerCase())) {
+      selectors.set(selector.toLowerCase(), selector);
+    }
+  }
+  return [...selectors.values()];
+}
+
 export function canonicalRepositoryKey(key: string): string {
   return key
     .replace(

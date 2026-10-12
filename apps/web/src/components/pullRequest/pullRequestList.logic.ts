@@ -649,6 +649,7 @@ export function mergePullRequestDiffStats(
   stats: ReadonlyArray<{
     readonly environmentId: string;
     readonly projectId: string;
+    readonly repository: string;
     readonly number: number;
     readonly additions: number;
     readonly deletions: number;
@@ -665,12 +666,16 @@ export function mergePullRequestDiffStats(
   return next;
 }
 
-/** A project id only names a project within its own environment, so the key carries both. */
+/**
+ * A project id only names a project within its own environment, so the key carries both, and a
+ * project whose folder holds several repositories can list the same number from each.
+ */
 export const pullRequestDiffStatKey = (row: {
   readonly environmentId: string;
   readonly projectId: string;
+  readonly repository: string;
   readonly number: number;
-}) => `${row.environmentId} ${row.projectId} ${row.number}`;
+}) => `${row.environmentId} ${row.projectId} ${row.repository} ${row.number}`;
 
 /**
  * Every connected environment's listing, read as one list.

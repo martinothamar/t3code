@@ -52,6 +52,7 @@ it.effect("preserves either enrichment field when the other resolver fails", () 
   Effect.gen(function* () {
     const layerMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) =>
           workspaceRoot === "/repo-fails"
             ? Effect.die("repository resolver failed")
@@ -98,6 +99,54 @@ it.effect("preserves either enrichment field when the other resolver fails", () 
   }),
 );
 
+it.effect("reads a workspace folder's checkouts in place of its own repository", () =>
+  Effect.gen(function* () {
+    const checkouts = [identity("/workspace/app"), identity("/workspace/infra")];
+    const metadataLayer = Layer.merge(
+      Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolve: (workspaceRoot) =>
+          Effect.succeed(workspaceRoot === "/repo" ? identity(workspaceRoot) : null),
+        resolveWorkspace: (workspaceRoot) =>
+          Effect.succeed(workspaceRoot === "/workspace" ? checkouts : []),
+      }),
+      Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
+        resolvePath: () => Effect.succeed(null),
+      }),
+    );
+
+    yield* Effect.gen(function* () {
+      const service = yield* ProjectEnrichment.ProjectEnrichmentService;
+      yield* service.request("/workspace");
+      yield* service.request("/repo");
+      const workspace = yield* waitForAvailable(
+        service,
+        "/workspace",
+        (value) => value.repositoryIdentityResolved,
+      );
+      const repo = yield* waitForAvailable(
+        service,
+        "/repo",
+        (value) => value.repositoryIdentityResolved,
+      );
+      assert.isNull(workspace.repositoryIdentity);
+      assert.deepStrictEqual(workspace.workspaceRepositories, checkouts);
+      assert.deepStrictEqual(repo.workspaceRepositories, []);
+
+      // Only a folder with checkouts carries the field over the wire.
+      const shell = {
+        id: "p1",
+        workspaceRoot: "/repo",
+        workspaceRepositories: checkouts,
+      } as unknown as Parameters<typeof ProjectEnrichment.withEnrichment>[0];
+      assert.deepStrictEqual(
+        ProjectEnrichment.withEnrichment(shell, workspace).workspaceRepositories,
+        checkouts,
+      );
+      assert.notProperty(ProjectEnrichment.withEnrichment(shell, repo), "workspaceRepositories");
+    }).pipe(Effect.provide(layer(metadataLayer)));
+  }),
+);
+
 it.effect("does not warn about favicons for workspace roots that no longer exist", () =>
   Effect.gen(function* () {
     const warnings: Array<unknown> = [];
@@ -106,6 +155,7 @@ it.effect("does not warn about favicons for workspace roots that no longer exist
     });
     const metadataLayer = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) => Effect.succeed(identity(workspaceRoot)),
       }),
       Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
@@ -155,6 +205,7 @@ it.effect("publishes repository completion while favicon enrichment is still pen
     const releaseFavicon = yield* Deferred.make<void>();
     const layerMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) => Effect.succeed(identity(workspaceRoot)),
       }),
       Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
@@ -183,6 +234,7 @@ it.effect("keeps repository workers available when every favicon worker is hung"
     const faviconStarts = yield* Ref.make(0);
     const layerMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) => Effect.succeed(identity(workspaceRoot)),
       }),
       Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
@@ -230,6 +282,7 @@ it.effect("getAvailable returns immediately while repository identity is still u
     const releaseRepository = yield* Deferred.make<void>();
     const layerMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) =>
           Deferred.succeed(repositoryStarted, undefined).pipe(
             Effect.andThen(Deferred.await(releaseRepository)),
@@ -273,6 +326,7 @@ it.effect(
       const releaseRepository = yield* Deferred.make<void>();
       const layerMetadata = Layer.merge(
         Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+          resolveWorkspace: () => Effect.succeed([]),
           resolve: (workspaceRoot) => {
             if (workspaceRoot === "/no-remote") {
               return Effect.succeed(null);
@@ -336,6 +390,7 @@ it.effect("deduplicates requests, bounds pending work, and reloads invalidated r
     const version = yield* Ref.make(1);
     const layerMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) =>
           Effect.gen(function* () {
             yield* Ref.update(repositoryCalls, (calls) => [...calls, workspaceRoot]);
@@ -403,6 +458,7 @@ it.effect("rescans a favicon only after 15 minutes", () =>
     const faviconScans = yield* Ref.make(0);
     const layerMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) => Effect.succeed(identity(workspaceRoot)),
       }),
       Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
@@ -451,6 +507,7 @@ it.effect(
       const faviconScans = yield* Ref.make(0);
       const layerMetadata = Layer.merge(
         Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+          resolveWorkspace: () => Effect.succeed([]),
           resolve: (workspaceRoot) =>
             Ref.get(remoteVersion).pipe(
               Effect.map((version) => (version === 0 ? null : identity(workspaceRoot, version))),
