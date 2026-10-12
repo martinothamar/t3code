@@ -14,7 +14,7 @@ describe("filterComposerPullRequestMatches", () => {
     const result = filterComposerPullRequestMatches({
       entries: [entry(1234, "2026-01-03"), entry(123, "2026-01-01"), entry(1230, "2026-01-02")],
       projectId: "p1",
-      repository: "owner/repo",
+      repositories: ["owner/repo"],
       query: "123",
       limit: 10,
     });
@@ -28,7 +28,7 @@ describe("filterComposerPullRequestMatches", () => {
     filterComposerPullRequestMatches({
       entries,
       projectId: "p1",
-      repository: "owner/repo",
+      repositories: ["owner/repo"],
       query: "",
       limit: 10,
     });
@@ -39,7 +39,7 @@ describe("filterComposerPullRequestMatches", () => {
     const result = filterComposerPullRequestMatches({
       entries: [entry(7, "2026-01-02"), entry(7, "2026-01-01"), entry(8, "2026-01-03")],
       projectId: "p1",
-      repository: "owner/repo",
+      repositories: ["owner/repo"],
       query: "",
       limit: 1,
     });

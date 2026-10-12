@@ -457,11 +457,29 @@ describe("filterComposerPullRequestMatches", () => {
       filterComposerPullRequestMatches({
         entries,
         projectId: "project-1",
-        repository: "t3tools/t3code",
+        repositories: ["t3tools/t3code"],
         query: "7",
         limit: 10,
       }).map((entry) => entry.number),
     ).toEqual([7, 8987, 27]);
+  });
+
+  it("keeps the same number from two repositories of a workspace folder apart", () => {
+    const workspaceEntries = ["acme/app", "acme/infra", "acme/other"].map((repository, index) => ({
+      number: 12,
+      projectId: "sandbox",
+      repository,
+      updatedAt: `2026-09-0${index + 1}T12:00:00.000Z`,
+    }));
+    expect(
+      filterComposerPullRequestMatches({
+        entries: workspaceEntries,
+        projectId: "sandbox",
+        repositories: ["acme/app", "acme/infra"],
+        query: "12",
+        limit: 10,
+      }).map((entry) => entry.repository),
+    ).toEqual(["acme/infra", "acme/app"]);
   });
 
   it("keeps an older exact match when newer substring matches would fill the limit", () => {
@@ -480,7 +498,7 @@ describe("filterComposerPullRequestMatches", () => {
     const matches = filterComposerPullRequestMatches({
       entries: [...newerSubstringMatches, exact],
       projectId: "project-1",
-      repository: "t3tools/t3code",
+      repositories: ["t3tools/t3code"],
       query: "7",
       limit: 10,
     });
@@ -493,7 +511,7 @@ describe("filterComposerPullRequestMatches", () => {
       filterComposerPullRequestMatches({
         entries,
         projectId: "project-1",
-        repository: "t3tools/t3code",
+        repositories: ["t3tools/t3code"],
         query: "",
         limit: 2,
       }).map((entry) => entry.number),

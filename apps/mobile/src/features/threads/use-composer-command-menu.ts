@@ -9,6 +9,7 @@ import { matchComposerThreadItems } from "@t3tools/client-runtime/composerThread
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 
 const EMPTY_THREAD_SHELLS: ReadonlyArray<EnvironmentThreadShell> = [];
+const EMPTY_REPOSITORIES: ReadonlyArray<string> = [];
 import {
   COMPOSER_CONTEXT_MAX_RECORDS,
   PROVIDER_WORKSPACE_SNAPSHOT_TTL_MS,
@@ -178,7 +179,7 @@ export function useComposerCommandMenu({
   currentThreadId = null,
   projectCwd,
   pullRequestProjectId = null,
-  pullRequestRepository = null,
+  pullRequestRepositories = EMPTY_REPOSITORIES,
   selectedProviderStatus,
   hasThread,
   hasCompactableConversation,
@@ -197,7 +198,8 @@ export function useComposerCommandMenu({
   readonly currentThreadId?: ThreadId | null;
   readonly projectCwd: string | null;
   readonly pullRequestProjectId?: ProjectId | null;
-  readonly pullRequestRepository?: string | null;
+  /** The project's own repositories: its own, or a workspace folder's checkouts. */
+  readonly pullRequestRepositories?: ReadonlyArray<string>;
   readonly selectedProviderStatus: ServerProvider | null;
   readonly hasThread: boolean;
   readonly hasCompactableConversation: boolean;
@@ -356,7 +358,7 @@ export function useComposerCommandMenu({
   const pullRequestSearch = useComposerPullRequestSearch({
     environmentId,
     projectId: pullRequestProjectId,
-    repository: pullRequestRepository,
+    repositories: pullRequestRepositories,
     query: trigger?.kind === "pull-request" ? trigger.query : null,
   });
 
@@ -377,7 +379,9 @@ export function useComposerCommandMenu({
           isDraft: entry.isDraft,
         },
         label: `#${entry.number}`,
-        description: `${entry.isDraft ? "Draft" : entry.state} · ${entry.title}`,
+        description: `${entry.isDraft ? "Draft" : entry.state} · ${
+          pullRequestRepositories.length > 1 ? `${entry.repository} · ` : ""
+        }${entry.title}`,
       }));
     }
 
@@ -532,6 +536,7 @@ export function useComposerCommandMenu({
     hasCompactableConversation,
     onUpdateInteractionMode,
     pathSearch.entries,
+    pullRequestRepositories.length,
     pullRequestSearch.entries,
     projectCwd,
     selectedProviderStatus,
@@ -661,7 +666,7 @@ export function useComposerCommandMenu({
       trigger?.kind === "pull-request" ? pullRequestSearch.isPending : pathSearch.isPending,
     error:
       trigger?.kind === "pull-request"
-        ? pullRequestProjectId === null || pullRequestRepository === null
+        ? pullRequestProjectId === null || pullRequestRepositories.length === 0
           ? "Pull requests are unavailable for this project."
           : pullRequestSearch.error
         : null,

@@ -8,26 +8,31 @@ export interface ComposerPullRequestMatch {
 /**
  * Pull requests matching the numeric fragment typed after `#`, de-duplicated. An exact number
  * match always outranks a substring match so the result limit can never drop the pull request
- * the user typed in full; the rest stay newest first.
+ * the user typed in full; the rest stay newest first. `repositories` are the project's own: one
+ * for a project rooted in a repository, or the checkouts of a workspace folder.
  */
 export function filterComposerPullRequestMatches<Entry extends ComposerPullRequestMatch>(input: {
   readonly entries: ReadonlyArray<Entry>;
   readonly projectId: string;
-  readonly repository: string;
+  readonly repositories: ReadonlyArray<string>;
   readonly query: string;
   readonly limit: number;
 }): ReadonlyArray<Entry> {
-  const repository = input.repository.trim().toLowerCase();
+  const repositories = new Set(
+    input.repositories.map((repository) => repository.trim().toLowerCase()),
+  );
   const matchingEntries = input.entries.filter(
     (entry) =>
       entry.projectId === input.projectId &&
-      entry.repository.trim().toLowerCase() === repository &&
+      repositories.has(entry.repository.trim().toLowerCase()) &&
       String(entry.number).includes(input.query),
   );
-  const uniqueEntries = new Map<number, Entry>();
+  // Two repositories can each have the same number, so they stay apart.
+  const uniqueEntries = new Map<string, Entry>();
   for (const entry of matchingEntries) {
-    if (!uniqueEntries.has(entry.number)) {
-      uniqueEntries.set(entry.number, entry);
+    const key = `${entry.repository.trim().toLowerCase()}#${entry.number}`;
+    if (!uniqueEntries.has(key)) {
+      uniqueEntries.set(key, entry);
     }
   }
   const isExactMatch = (entry: Entry) => String(entry.number) === input.query;

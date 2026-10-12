@@ -1,3 +1,4 @@
+import { projectRepositorySelectors } from "@t3tools/shared/sourceControl";
 import { useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
@@ -135,6 +136,8 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { serverEnvironment } from "../../state/server";
 import { fileRoutePathSegments } from "../files/filePath";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
+
+const EMPTY_REPOSITORY_SELECTORS: ReadonlyArray<string> = [];
 
 function NewTaskWorkspaceIcon(props: {
   readonly workspaceMode: "local" | "worktree";
@@ -486,6 +489,11 @@ export function NewTaskDraftScreen(props: {
     () => composerStripAttachments(flow.attachments),
     [flow.attachments],
   );
+  const pullRequestRepositories = useMemo(
+    () =>
+      selectedProject ? projectRepositorySelectors(selectedProject) : EMPTY_REPOSITORY_SELECTORS,
+    [selectedProject],
+  );
   const composerMenu = useComposerCommandMenu({
     draftMessage: flow.prompt,
     ownerKey: flow.draftKey,
@@ -494,7 +502,7 @@ export function NewTaskDraftScreen(props: {
     pullRequestProjectId: selectedEnvironmentServerConfig?.environment.capabilities.pullRequests
       ? (selectedProject?.id ?? null)
       : null,
-    pullRequestRepository: selectedProject?.repositoryIdentity?.displayName ?? null,
+    pullRequestRepositories,
     projectCwd: composerWorkspaceCwd,
     selectedProviderStatus: flow.selectedProviderStatus,
     hasThread: false,
