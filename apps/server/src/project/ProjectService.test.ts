@@ -33,7 +33,6 @@ const layerWorkspacePaths = Layer.succeed(WorkspacePaths.WorkspacePaths, {
 
 const layerMetadata = Layer.merge(
   Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-    resolveAlternate: () => Effect.succeed(null),
     resolveWorkspace: () => Effect.succeed([]),
     resolve: (workspaceRoot) =>
       Effect.succeed({
@@ -499,7 +498,6 @@ it.effect(
 
       const layerSlowMetadata = Layer.merge(
         Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-          resolveAlternate: () => Effect.succeed(null),
           resolveWorkspace: () => Effect.succeed([]),
           resolve: (workspaceRoot) =>
             Effect.gen(function* () {
@@ -599,7 +597,6 @@ it.effect("keeps project snapshots available when optional metadata enrichment f
   Effect.gen(function* () {
     const layerFailingMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolveAlternate: () => Effect.succeed(null),
         resolveWorkspace: () => Effect.succeed([]),
         resolve: () => Effect.succeed(null),
       }),
@@ -640,7 +637,6 @@ it.effect("invalidates workspace-derived metadata when a project moves", () =>
     const metadataVersion = yield* Ref.make(1);
     const layerVersionedMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolveAlternate: () => Effect.succeed(null),
         resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) =>
           Ref.get(metadataVersion).pipe(

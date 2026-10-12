@@ -158,9 +158,9 @@ checked out in its immediate subfolders, and threads in it show the status of th
 linked to them. Symlinks and folders whose names start with `.` are skipped, and a new checkout
 shows up within two minutes. Writing a guide needs a project rooted in that repository.
 
-In a checkout with both an `origin` and an `upstream` remote, such as a fork, Pull requests
-lists the pull requests of both. A thread's own pull request and `#` references belong to the
-repository `gh repo set-default` chose for the checkout, or to `upstream` when none is set.
+A checkout's pull requests come from the repository `gh repo set-default` chose for it. Without
+one, they come from its `upstream` remote, then its `origin`. For a fork whose pull requests are
+opened on the fork itself, run `gh repo set-default` with the fork in that checkout.
 
 Enable **Remove agent credits when merging** in Settings → Source Control to remove recognized
 agent co-author and generated-by lines from GitHub merge and squash commit messages. Human

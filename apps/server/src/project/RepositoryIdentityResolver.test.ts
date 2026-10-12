@@ -314,32 +314,38 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
   );
 
-  it.effect("follows the remote gh made the default, and keeps the other as the alternate", () =>
+  it.effect("follows the repository gh made the default", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const cwd = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-repository-identity-gh-default-",
       });
       yield* git(cwd, ["init"]);
-      yield* git(cwd, ["remote", "add", "origin", "https://github.com/me/app.git"]);
+      yield* git(cwd, ["remote", "add", "origin", "git@github.com:me/app.git"]);
       yield* git(cwd, ["remote", "add", "upstream", "https://github.com/acme/app.git"]);
       const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+      const resolved = () =>
+        resolver
+          .resolve(cwd, { refresh: true })
+          .pipe(Effect.map((identity) => identity?.canonicalKey));
 
       // Without a default, a fork's pull requests go upstream.
-      expect((yield* resolver.resolve(cwd))?.canonicalKey).toBe("github.com/acme/app");
-      expect((yield* resolver.resolveAlternate(cwd))?.canonicalKey).toBe("github.com/me/app");
+      expect(yield* resolved()).toBe("github.com/acme/app");
 
-      // As `gh repo set-default me/app` records it.
+      // As `gh repo set-default me/app` records a repository that is a remote.
       yield* git(cwd, ["config", "remote.origin.gh-resolved", "base"]);
-      expect((yield* resolver.resolve(cwd, { refresh: true }))?.canonicalKey).toBe(
-        "github.com/me/app",
-      );
-      expect((yield* resolver.resolveAlternate(cwd))?.canonicalKey).toBe("github.com/acme/app");
+      expect(yield* resolved()).toBe("github.com/me/app");
 
-      // A checkout with one remote has no alternate.
+      // Two marks leave gh to ask, so neither counts.
+      yield* git(cwd, ["config", "remote.upstream.gh-resolved", "base"]);
+      expect(yield* resolved()).toBe("github.com/acme/app");
+
+      // As `gh repo set-default acme/app` records it in a clone of the fork alone.
       yield* git(cwd, ["remote", "remove", "upstream"]);
-      yield* resolver.resolve(cwd, { refresh: true });
-      expect(yield* resolver.resolveAlternate(cwd)).toBeNull();
+      yield* git(cwd, ["config", "remote.origin.gh-resolved", "acme/app"]);
+      const identity = yield* resolver.resolve(cwd, { refresh: true });
+      expect(identity?.canonicalKey).toBe("github.com/acme/app");
+      expect(identity?.provider).toBe("github");
     }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
   );
 

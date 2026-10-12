@@ -52,7 +52,6 @@ it.effect("preserves either enrichment field when the other resolver fails", () 
   Effect.gen(function* () {
     const layerMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolveAlternate: () => Effect.succeed(null),
         resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) =>
           workspaceRoot === "/repo-fails"
@@ -108,7 +107,6 @@ it.effect("does not warn about favicons for workspace roots that no longer exist
     });
     const metadataLayer = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolveAlternate: () => Effect.succeed(null),
         resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) => Effect.succeed(identity(workspaceRoot)),
       }),
@@ -159,7 +157,6 @@ it.effect("publishes repository completion while favicon enrichment is still pen
     const releaseFavicon = yield* Deferred.make<void>();
     const layerMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolveAlternate: () => Effect.succeed(null),
         resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) => Effect.succeed(identity(workspaceRoot)),
       }),
@@ -189,7 +186,6 @@ it.effect("keeps repository workers available when every favicon worker is hung"
     const faviconStarts = yield* Ref.make(0);
     const layerMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolveAlternate: () => Effect.succeed(null),
         resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) => Effect.succeed(identity(workspaceRoot)),
       }),
@@ -238,7 +234,6 @@ it.effect("getAvailable returns immediately while repository identity is still u
     const releaseRepository = yield* Deferred.make<void>();
     const layerMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolveAlternate: () => Effect.succeed(null),
         resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) =>
           Deferred.succeed(repositoryStarted, undefined).pipe(
@@ -283,7 +278,6 @@ it.effect(
       const releaseRepository = yield* Deferred.make<void>();
       const layerMetadata = Layer.merge(
         Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-          resolveAlternate: () => Effect.succeed(null),
           resolveWorkspace: () => Effect.succeed([]),
           resolve: (workspaceRoot) => {
             if (workspaceRoot === "/no-remote") {
@@ -348,7 +342,6 @@ it.effect("deduplicates requests, bounds pending work, and reloads invalidated r
     const version = yield* Ref.make(1);
     const layerMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolveAlternate: () => Effect.succeed(null),
         resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) =>
           Effect.gen(function* () {
@@ -417,7 +410,6 @@ it.effect("rescans a favicon only after 15 minutes", () =>
     const faviconScans = yield* Ref.make(0);
     const layerMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolveAlternate: () => Effect.succeed(null),
         resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) => Effect.succeed(identity(workspaceRoot)),
       }),
@@ -467,7 +459,6 @@ it.effect(
       const faviconScans = yield* Ref.make(0);
       const layerMetadata = Layer.merge(
         Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-          resolveAlternate: () => Effect.succeed(null),
           resolveWorkspace: () => Effect.succeed([]),
           resolve: (workspaceRoot) =>
             Ref.get(remoteVersion).pipe(

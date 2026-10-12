@@ -21,7 +21,7 @@ const DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY = 512;
 const DEFAULT_POSITIVE_CACHE_TTL = Duration.minutes(15);
 // Short, so a folder that gains a repository or a remote shows up quickly.
 const DEFAULT_NEGATIVE_CACHE_TTL = Duration.minutes(1);
-// Each repository costs two git probes per positive TTL, so a folder of hundreds of
+// Each repository costs three git probes per positive TTL, so a folder of hundreds of
 // clones is read as its first 64 rather than spawning git for every one.
 const MAX_WORKSPACE_REPOSITORIES = 64;
 
@@ -41,12 +41,6 @@ export class RepositoryIdentityResolver extends Context.Service<
       cwd: string,
       options?: { readonly refresh?: boolean },
     ) => Effect.Effect<RepositoryIdentity | null>;
-    /**
-     * The repository of the checkout's other remote among `origin` and `upstream`, when it names
-     * another than `resolve` does: a fork's upstream, or the fork of a checkout whose pull
-     * requests go upstream. Null otherwise.
-     */
-    readonly resolveAlternate: (cwd: string) => Effect.Effect<RepositoryIdentity | null>;
     /**
      * The repositories in a workspace folder: one that is not inside a repository itself but
      * holds checkouts in its immediate child folders, such as an agentctl Sandbox's working
@@ -77,14 +71,29 @@ function parseRemoteFetchUrls(stdout: string): Map<string, string> {
   return remotes;
 }
 
-/** The remotes `gh repo set-default` marked as the repository its commands target. */
-function parseGhDefaultRemotes(stdout: string): ReadonlySet<string> {
-  const names = new Set<string>();
-  for (const line of stdout.split("\n")) {
-    const match = /^remote\.(.+)\.gh-resolved\s+base$/.exec(line.trim());
-    if (match?.[1]) names.add(match[1]);
-  }
-  return names;
+/**
+ * The remote `gh repo set-default` marked and the repository it names: `base` for the remote's
+ * own, or `owner/name` on its host for one that is no remote here. More than one mark leaves gh
+ * to prompt, so it reads as none.
+ */
+function parseGhDefault(
+  stdout: string,
+  remotes: ReadonlyMap<string, string>,
+): { readonly remoteName: string; readonly remoteUrl: string } | null {
+  const marks = stdout
+    .split("\n")
+    .map((line) => /^remote\.(.+)\.gh-resolved\s+(\S+)$/.exec(line.trim()))
+    .filter((match): match is RegExpExecArray => match !== null && remotes.has(match[1]!));
+  const [mark, ...others] = marks;
+  if (mark === undefined || others.length > 0) return null;
+  const remoteName = mark[1]!;
+  const remoteUrl = remotes.get(remoteName)!;
+  if (mark[2] === "base") return { remoteName, remoteUrl };
+  const [owner, name, ...rest] = mark[2]!.split("/");
+  const [host] = normalizeGitRemoteUrl(remoteUrl).split("/");
+  return owner && name && host && rest.length === 0
+    ? { remoteName, remoteUrl: `https://${host}/${owner}/${name}.git` }
+    : null;
 }
 
 /**
@@ -93,9 +102,10 @@ function parseGhDefaultRemotes(stdout: string): ReadonlySet<string> {
  */
 function pickPrimaryRemote(
   remotes: ReadonlyMap<string, string>,
-  ghDefaultRemotes: ReadonlySet<string>,
+  ghDefault: { readonly remoteName: string; readonly remoteUrl: string } | null,
 ): { readonly remoteName: string; readonly remoteUrl: string } | null {
-  for (const preferredRemoteName of [...ghDefaultRemotes, "upstream", "origin"]) {
+  if (ghDefault !== null) return ghDefault;
+  for (const preferredRemoteName of ["upstream", "origin"] as const) {
     const remoteUrl = remotes.get(preferredRemoteName);
     if (remoteUrl) {
       return { remoteName: preferredRemoteName, remoteUrl };
@@ -174,17 +184,11 @@ const resolveRepositoryIdentityCacheKey = Effect.fn("RepositoryIdentityResolver.
   },
 );
 
-/** A checkout's repository, and the other of `origin` and `upstream` where it names another. */
-interface CheckoutRepositories {
-  readonly primary: RepositoryIdentity;
-  readonly alternate: RepositoryIdentity | null;
-}
-
 const resolveRepositoryIdentityFromCacheKey = Effect.fn(
   "RepositoryIdentityResolver.resolveFromCacheKey",
 )(function* (
   cacheKey: string,
-): Effect.fn.Return<CheckoutRepositories | null, never, ProcessRunner.ProcessRunner> {
+): Effect.fn.Return<RepositoryIdentity | null, never, ProcessRunner.ProcessRunner> {
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const [remoteResult, ghDefaultResult] = yield* Effect.all(
     [
@@ -211,25 +215,14 @@ const resolveRepositoryIdentityFromCacheKey = Effect.fn(
   }
 
   const remotes = parseRemoteFetchUrls(remoteResult.value.stdout);
-  const ghDefaultRemotes =
+  const ghDefault =
     ghDefaultResult._tag === "Some" && ghDefaultResult.value.code === 0
-      ? parseGhDefaultRemotes(ghDefaultResult.value.stdout)
-      : new Set<string>();
-  const remote = pickPrimaryRemote(remotes, ghDefaultRemotes);
-  if (!remote) return null;
-  const identityOf = (selected: { readonly remoteName: string; readonly remoteUrl: string }) =>
-    buildRepositoryIdentity({ ...selected, originUrl: remotes.get("origin"), rootPath: cacheKey });
-  const primary = identityOf(remote);
-  const alternateName = remote.remoteName === "origin" ? "upstream" : "origin";
-  const alternateUrl = remotes.get(alternateName);
-  const alternate =
-    alternateUrl === undefined
-      ? null
-      : identityOf({ remoteName: alternateName, remoteUrl: alternateUrl });
-  return {
-    primary,
-    alternate: alternate?.canonicalKey === primary.canonicalKey ? null : alternate,
-  };
+      ? parseGhDefault(ghDefaultResult.value.stdout, remotes)
+      : null;
+  const remote = pickPrimaryRemote(remotes, ghDefault);
+  return remote
+    ? buildRepositoryIdentity({ ...remote, originUrl: remotes.get("origin"), rootPath: cacheKey })
+    : null;
 });
 
 export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
@@ -259,22 +252,13 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
     { capacity: cacheCapacity, timeToLive },
   );
 
-  const refined = (identity: RepositoryIdentity) =>
-    refine(identity).pipe(Effect.orElseSucceed(() => identity));
-  const repositoryIdentityCache = yield* Cache.makeWith<string, CheckoutRepositories | null>(
+  const repositoryIdentityCache = yield* Cache.makeWith<string, RepositoryIdentity | null>(
     (cacheKey) =>
       resolveRepositoryIdentityFromCacheKey(cacheKey).pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
-        Effect.flatMap((repositories) =>
-          repositories === null
-            ? Effect.succeed(null)
-            : Effect.all({
-                primary: refined(repositories.primary),
-                alternate:
-                  repositories.alternate === null
-                    ? Effect.succeed(null)
-                    : refined(repositories.alternate),
-              }),
+        Effect.filterOrElse(
+          (identity): identity is null => identity === null,
+          (identity) => refine(identity).pipe(Effect.orElseSucceed(() => identity)),
         ),
       ),
     { capacity: cacheCapacity, timeToLive },
@@ -282,24 +266,15 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
 
   // Untraced because almost every call is a cache hit. The lookups that spawn
   // git keep their own spans.
-  const resolveCheckout = Effect.fnUntraced(function* (
-    cwd: string,
-    options: { readonly refresh?: boolean } | undefined,
-  ) {
-    if (options?.refresh) yield* Cache.invalidate(repositoryRootCache, cwd);
-    const cacheKey = yield* Cache.get(repositoryRootCache, cwd);
-    if (cacheKey === null) return null;
-    if (options?.refresh) yield* Cache.invalidate(repositoryIdentityCache, cacheKey);
-    return yield* Cache.get(repositoryIdentityCache, cacheKey);
-  });
-
-  const resolve: RepositoryIdentityResolver["Service"]["resolve"] = (cwd, options) =>
-    resolveCheckout(cwd, options).pipe(Effect.map((repositories) => repositories?.primary ?? null));
-
-  const resolveAlternate: RepositoryIdentityResolver["Service"]["resolveAlternate"] = (cwd) =>
-    resolveCheckout(cwd, undefined).pipe(
-      Effect.map((repositories) => repositories?.alternate ?? null),
-    );
+  const resolve: RepositoryIdentityResolver["Service"]["resolve"] = Effect.fnUntraced(
+    function* (cwd, options) {
+      if (options?.refresh) yield* Cache.invalidate(repositoryRootCache, cwd);
+      const cacheKey = yield* Cache.get(repositoryRootCache, cwd);
+      if (cacheKey === null) return null;
+      if (options?.refresh) yield* Cache.invalidate(repositoryIdentityCache, cacheKey);
+      return yield* Cache.get(repositoryIdentityCache, cacheKey);
+    },
+  );
 
   // Read on the negative TTL: the answer changes when a checkout is cloned or removed.
   const workspaceCheckoutCache = yield* Cache.makeWith<string, ReadonlyArray<string>>(
@@ -349,7 +324,7 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
       return identities.filter((identity) => identity !== null);
     });
 
-  return RepositoryIdentityResolver.of({ resolve, resolveAlternate, resolveWorkspace });
+  return RepositoryIdentityResolver.of({ resolve, resolveWorkspace });
 });
 
 export const layer = Layer.effect(RepositoryIdentityResolver, make()).pipe(
