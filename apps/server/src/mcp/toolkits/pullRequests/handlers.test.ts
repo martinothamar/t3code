@@ -374,6 +374,36 @@ describe("pull request toolkit handlers", () => {
     }),
   );
 
+  it.effect("links by repository and number in a workspace folder, from that checkout's host", () =>
+    Effect.gen(function* () {
+      const checkout = (host: string, provider: string, repository: string) => ({
+        canonicalKey: `${host}/${repository}`,
+        locator: {
+          source: "git-remote" as const,
+          remoteName: "origin",
+          remoteUrl: `https://${host}/${repository}.git`,
+        },
+        provider,
+        displayName: repository,
+      });
+      const harness = yield* makeHarness({
+        project: {
+          ...makeProject(null),
+          workspaceRepositories: [
+            checkout("github.com", "github", "acme/app"),
+            checkout("gitlab.com", "gitlab", "acme/infra"),
+          ],
+        },
+      });
+      const result = yield* harness.call("link_pull_request", {
+        repository: "acme/infra",
+        number: 9,
+      });
+      expect(result.host).toBe("gitlab.com");
+      expect(result.url).toBe("https://gitlab.com/acme/infra/-/merge_requests/9");
+    }),
+  );
+
   it.effect("builds the URL in the project host's own shape", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({
