@@ -329,7 +329,7 @@ impl Scene for DiagramScene {
                     <path d={format!("M730 565 H{}", 730.0 + 210.0 * link)} stroke={GREEN} stroke-width="5" stroke-linecap="round" />
                     <path d="M928 553 L944 565 L928 577" fill="none" stroke={GREEN} stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity={link} />
                     <text x="835" y="545" text-anchor="middle" font-family={MONO} font-weight="700" font-size="28" fill={GREEN}>"SSH"</text>
-                    <text x="835" y="605" text-anchor="middle" font-family={MONO} font-weight="400" font-size="19" fill={MUTED}>"agentctl-altinn-desktop-1"</text>
+                    <text x="835" y="602" text-anchor="middle" font-family={MONO} font-weight="400" font-size="15" fill={MUTED}>"agentctl-altinn-desktop-1"</text>
                 </g>
                 {caption_svgs}
             </g>

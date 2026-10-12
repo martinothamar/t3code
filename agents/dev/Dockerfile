@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # agentd can build Agent images, and a minimal desktop: Xtigervnc as X and VNC server in one
 # process, openbox, tint2, and noVNC served by websockify for `agentctl vnc --web`. The `desktop`
 # helper captures with ffmpeg and acts with xdotool; gnome-keyring is the Secret Service Electron's
-# safeStorage needs.
+# safeStorage needs. Inter and JetBrains Mono are the demo-video skill's fonts.
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         build-essential \
@@ -15,6 +15,8 @@ RUN apt-get update \
         curl \
         dbus \
         ffmpeg \
+        fonts-inter \
+        fonts-jetbrains-mono \
         fonts-liberation \
         fonts-noto-color-emoji \
         fonts-noto-core \

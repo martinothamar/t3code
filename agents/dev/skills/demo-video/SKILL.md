@@ -1,6 +1,6 @@
 ---
 name: demo-video
-description: Make a captioned demo video of T3 Code from real screen recordings, with fframes (Rust + SVG, rendered on the CPU here). Covers installing fframes, writing a storyboard, filming T3 Code and nested agentctl Sandboxes on the desktop, cutting and speeding up takes, and composing and rendering 1080p. Use when asked for a walkthrough, setup or feature video.
+description: Make a captioned demo video of T3 Code from real screen recordings, with fframes. Covers writing a storyboard, installing fframes, filming T3 Code and nested agentctl Sandboxes on the desktop, cutting and speeding up takes, and composing and rendering 1080p. Use when asked for a demo video, a walkthrough or a feature video.
 ---
 
 # Demo video
@@ -13,15 +13,13 @@ next one. fframes is only the tool: the video carries no fframes branding or out
 The pipeline:
 
 1. Agree on a storyboard with the developer.
-2. Install fframes, once per Sandbox.
+2. Have a subagent install fframes, once per Sandbox.
 3. Prepare what you film: the released app, its own data, and nested Sandboxes. Do a dry run.
 4. Record takes of the desktop with [scripts/rec](scripts/rec) and [scripts/glide](scripts/glide).
 5. Cut them into sped-up segments with [scripts/cut.sh](scripts/cut.sh).
 6. Compose the scenes and shots in the project, review stills, render.
 
-`SKILL` below is this folder: `~/.claude/skills/demo-video` for Claude Code,
-`~/.agents/skills/demo-video` for Codex. Work in `~/video` (`VIDEO_DIR` for the scripts), outside
-every checkout:
+Work in `~/video` (`VIDEO_DIR` for the scripts), outside every checkout:
 
 ```
 ~/video/
@@ -42,24 +40,23 @@ diagrams, a typed terminal, a manifest) and which are recordings.
 
 ## 2. Install fframes
 
-fframes renders with Skia on Vulkan. This Sandbox has no GPU, so Mesa's software Vulkan
-(lavapipe) runs it, at 30–50 fps for 1080p frames with footage.
+Give this section to a subagent while you prepare the filming, and have it report the build and a
+frame it rendered and read.
+
+fframes renders with Skia on Vulkan. Without a GPU, Mesa's lavapipe in `mesa-vulkan-drivers` runs
+Vulkan in software, at 30–50 fps for 1080p frames with footage. The fonts come from the image's
+`fonts-inter` and `fonts-jetbrains-mono`.
 
 ```sh
 sudo apt-get install -y mesa-vulkan-drivers vulkan-tools libvulkan-dev clang libclang-dev \
   nasm yasm ninja-build pkg-config libx264-dev libx265-dev libvpx-dev libopus-dev \
   libasound2-dev libfreetype-dev libfontconfig-dev
-cargo install --locked cargo-fframes   # 1.2.0; `cargo fframes new` scaffolds an empty project
 
-mkdir -p ~/video && cp -r "$SKILL/template" ~/video/project && cd ~/video/project
-mkdir -p media && cd media
-gh release download v4.1 -R rsms/inter -p Inter-4.1.zip
-gh release download v2.304 -R JetBrains/JetBrainsMono -p JetBrainsMono-2.304.zip
-unzip -j Inter-4.1.zip 'extras/ttf/Inter-Regular.ttf' 'extras/ttf/Inter-Medium.ttf' \
-  'extras/ttf/Inter-SemiBold.ttf' 'extras/ttf/Inter-Bold.ttf'
-unzip -j JetBrainsMono-2.304.zip 'fonts/ttf/JetBrainsMono-Regular.ttf' \
-  'fonts/ttf/JetBrainsMono-Medium.ttf' 'fonts/ttf/JetBrainsMono-Bold.ttf'
-rm ./*.zip && cd .. && cargo build --release
+mkdir -p ~/video && cp -r template ~/video/project && cd ~/video/project
+mkdir -p media
+cp /usr/share/fonts/opentype/inter/Inter-{Regular,Medium,SemiBold,Bold}.otf \
+  /usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-{Regular,Medium,Bold}.ttf media/
+cargo build --release
 ```
 
 The first build compiles FFmpeg from source, a few minutes: `template/.cargo/config.toml` sets
@@ -71,7 +68,7 @@ Every command runs from the project with:
 
 ```sh
 unset DISPLAY                                    # nothing opens a window on the desktop
-export TMPDIR=~/video/project/.tmp               # renders leave chunks here; /tmp is a small tmpfs
+export TMPDIR=~/video/project/.tmp               # renders leave chunk files here and never delete them
 mkdir -p "$TMPDIR"
 B=./target/release/demo-video
 ```
@@ -109,11 +106,11 @@ Check the install with `$B timeline` and `$B frame 1s`, then read the PNG in `fr
 ## 4. Record
 
 ```sh
-sh "$SKILL/scripts/rec" start take-thread-1    # writes ~/video/footage/take-thread-1.mp4
-python3 "$SKILL/scripts/glide" 826 360 click 0.8   # screenshot coordinates, as `desktop` uses
+sh scripts/rec start take-thread-1         # writes ~/video/footage/take-thread-1.mp4
+python3 scripts/glide 826 360 click 0.8    # screenshot coordinates, as `desktop` uses
 xdotool type --delay 22 "Show me your desktop in the browser here: …"
 xdotool key Return
-sh "$SKILL/scripts/rec" stop
+sh scripts/rec stop
 ```
 
 - One take per storyboard section, kept running through waits: cutting is cheap, retakes are not.
@@ -131,7 +128,7 @@ sh "$SKILL/scripts/rec" stop
 
 ## 5. Cut
 
-`sh "$SKILL/scripts/cut.sh" TAKE SEGMENT START END SPEED` writes `footage/seg/SEGMENT.mp4` and
+`sh scripts/cut.sh TAKE SEGMENT START END SPEED` writes `footage/seg/SEGMENT.mp4` and
 prints its length. Speed up waiting (provisioning 8×, an installer 2.5×), keep clicks and results
 at 1–1.5×, and keep each segment under about 15 seconds so a caption can describe it.
 
