@@ -14,7 +14,7 @@ describe("filterComposerPullRequestMatches", () => {
     const result = filterComposerPullRequestMatches({
       entries: [entry(1234, "2026-01-03"), entry(123, "2026-01-01"), entry(1230, "2026-01-02")],
       projectId: "p1",
-      repository: "owner/repo",
+      repositories: ["owner/repo"],
       query: "123",
       limit: 10,
     });
@@ -28,7 +28,7 @@ describe("filterComposerPullRequestMatches", () => {
     filterComposerPullRequestMatches({
       entries,
       projectId: "p1",
-      repository: "owner/repo",
+      repositories: ["owner/repo"],
       query: "",
       limit: 10,
     });
@@ -39,10 +39,23 @@ describe("filterComposerPullRequestMatches", () => {
     const result = filterComposerPullRequestMatches({
       entries: [entry(7, "2026-01-02"), entry(7, "2026-01-01"), entry(8, "2026-01-03")],
       projectId: "p1",
-      repository: "owner/repo",
+      repositories: ["owner/repo"],
       query: "",
       limit: 1,
     });
     expect(result).toHaveLength(1);
+  });
+  it("keeps the same repository on two hosts apart", () => {
+    const result = filterComposerPullRequestMatches({
+      entries: [
+        { ...entry(7, "2026-01-02"), host: "github.com" },
+        { ...entry(7, "2026-01-01"), host: "github.acme.test" },
+      ],
+      projectId: "p1",
+      repositories: ["owner/repo"],
+      query: "7",
+      limit: 10,
+    });
+    expect(result.map((match) => match.host)).toEqual(["github.com", "github.acme.test"]);
   });
 });

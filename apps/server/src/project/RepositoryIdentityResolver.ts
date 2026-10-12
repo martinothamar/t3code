@@ -60,7 +60,7 @@ function parseRemoteFetchUrls(stdout: string): Map<string, string> {
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
-    const match = /^(\S+)\s+(\S+)\s+\((fetch|push)\)$/.exec(trimmed);
+    const match = /^(\S+)\s+(\S+)\s+\((fetch|push)\)(?:\s+\[[^\]]*\])?$/.exec(trimmed);
     if (!match) continue;
     const [, remoteName = "", remoteUrl = "", direction = ""] = match;
     if (direction !== "fetch" || remoteName.length === 0 || remoteUrl.length === 0) {
@@ -282,7 +282,7 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
       fileSystem.readDirectory(cwd).pipe(
         Effect.flatMap((names) =>
           Effect.filter(
-            names.filter((name) => !name.startsWith(".")).toSorted(),
+            names.filter((name) => !name.startsWith(".")),
             // A `.git` directory for a clone, or a `.git` file for a worktree. A symlink could
             // lead outside the folder, so only real child folders count.
             (name) =>
@@ -298,7 +298,11 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
           ),
         ),
         Effect.map((names) =>
-          names.slice(0, MAX_WORKSPACE_REPOSITORIES).map((name) => path.join(cwd, name)),
+          // Sorted after the checks: a concurrent filter keeps names in the order they finish.
+          names
+            .toSorted()
+            .slice(0, MAX_WORKSPACE_REPOSITORIES)
+            .map((name) => path.join(cwd, name)),
         ),
         Effect.orElseSucceed((): ReadonlyArray<string> => []),
       ),

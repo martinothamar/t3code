@@ -7,7 +7,10 @@ import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { AttachmentFilePreview } from "../files/AttachmentFilePreview";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
-import { filterComposerPullRequestMatches } from "@t3tools/shared/composerPullRequestMatches";
+import {
+  composerPullRequestKey,
+  filterComposerPullRequestMatches,
+} from "@t3tools/shared/composerPullRequestMatches";
 import { importPastedComposerText, readPastedComposerContext } from "../composerInlineTokenPaste";
 import { elementContextToPreviewAnnotation } from "../../lib/elementContext";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
@@ -1621,7 +1624,8 @@ export interface ChatComposerProps {
   terminalOpen: boolean;
   gitCwd: string | null;
   pullRequestProjectId: ProjectId | null;
-  pullRequestRepository: string | null;
+  /** The project's own repositories: its own, or a workspace folder's checkouts. */
+  pullRequestRepositories: ReadonlyArray<string>;
   restingControlsHost: HTMLDivElement | null;
   restingControlsHaveLeadingContext: boolean;
   onRestingControlsVisibilityChange: (visible: boolean) => void;
@@ -1766,7 +1770,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     terminalOpen,
     gitCwd,
     pullRequestProjectId,
-    pullRequestRepository,
+    pullRequestRepositories,
     restingControlsHost,
     restingControlsHaveLeadingContext,
     onRestingControlsVisibilityChange,
@@ -2650,6 +2654,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return Number.isSafeInteger(number) && number > 0 ? number : null;
   }, [composerTrigger]);
   const debouncedPullRequestNumber = useDebouncedValue(pullRequestTriggerNumber, 180);
+  // A number typed in full is looked up directly only where it can name one repository.
+  const pullRequestRepository =
+    pullRequestRepositories.length === 1 ? (pullRequestRepositories[0] ?? null) : null;
+  const pullRequestsAvailable = pullRequestProjectId !== null && pullRequestRepositories.length > 0;
   const settledPullRequestNumber =
     pullRequestTriggerNumber === debouncedPullRequestNumber ? pullRequestTriggerNumber : null;
   const recentHasExactPullRequest =
@@ -2775,11 +2783,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           (skill.scope ? `${skill.scope} skill` : "Run provider skill"),
       }));
     }
-    if (
-      composerTrigger.kind === "pull-request" &&
-      pullRequestProjectId !== null &&
-      pullRequestRepository !== null
-    ) {
+    if (composerTrigger.kind === "pull-request" && pullRequestsAvailable) {
+      const repositories = new Set(
+        pullRequestRepositories.map((repository) => repository.trim().toLowerCase()),
+      );
       const exactPullRequest =
         exactPullRequestLookup.data?.number === pullRequestTriggerNumber
           ? [exactPullRequestLookup.data]
@@ -2788,7 +2795,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ? filterComposerPullRequestMatches({
             entries: [...exactPullRequest, ...(pullRequestLookup.data?.entries ?? [])],
             projectId: pullRequestProjectId,
-            repository: pullRequestRepository,
+            repositories: pullRequestRepositories,
             query: composerTrigger.query,
             limit: COMPOSER_PULL_REQUEST_RESULT_LIMIT,
           })
@@ -2796,7 +2803,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             (pullRequestLookup.data?.entries ?? []).filter((entry) => {
               if (
                 entry.projectId !== pullRequestProjectId ||
-                entry.repository.trim().toLowerCase() !== pullRequestRepository.trim().toLowerCase()
+                !repositories.has(entry.repository.trim().toLowerCase())
               ) {
                 return false;
               }
@@ -2811,7 +2818,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             composerTrigger.query,
           ).slice(0, COMPOSER_PULL_REQUEST_RESULT_LIMIT);
       return matches.map((pullRequest) => ({
-        id: `pull-request:${pullRequest.projectId}:${pullRequest.repository}:${pullRequest.number}`,
+        id: `pull-request:${pullRequest.projectId}:${composerPullRequestKey(pullRequest)}`,
         type: "pull-request",
         pullRequest: {
           number: pullRequest.number,
@@ -2823,7 +2830,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           isDraft: pullRequest.isDraft,
         },
         label: `#${pullRequest.number}`,
-        description: pullRequest.title,
+        description:
+          repositories.size > 1
+            ? `${pullRequest.repository} · ${pullRequest.title}`
+            : pullRequest.title,
       }));
     }
     return [];
@@ -2837,7 +2847,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     planModeUiEnabled,
     pullRequestLookup.data,
     pullRequestProjectId,
-    pullRequestRepository,
+    pullRequestRepositories,
+    pullRequestsAvailable,
     pullRequestTriggerNumber,
     selectedProvider,
     selectedProviderSkills,
@@ -2919,8 +2930,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const isComposerMenuLoading =
     (composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending) ||
     (composerTriggerKind === "pull-request" &&
-      pullRequestProjectId !== null &&
-      pullRequestRepository !== null &&
+      pullRequestsAvailable &&
       (pullRequestLookup.isPending ||
         pullRequestTextQuery !== debouncedPullRequestTextQuery ||
         pullRequestTriggerNumber !== debouncedPullRequestNumber ||
@@ -2930,7 +2940,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return "No skills found. Try / to browse provider commands.";
     }
     if (composerTriggerKind === "pull-request") {
-      if (pullRequestProjectId === null || pullRequestRepository === null) {
+      if (!pullRequestsAvailable) {
         return "Pull requests are not available for this project.";
       }
       if (
@@ -2952,7 +2962,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     pullRequestLookup.data?.errors,
     pullRequestLookup.error,
     pullRequestProjectId,
-    pullRequestRepository,
+    pullRequestsAvailable,
   ]);
 
   // ------------------------------------------------------------------

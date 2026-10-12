@@ -31,6 +31,11 @@ export interface ThreadDetailsPanelProps extends Pick<
   threadId: ThreadId;
   draftId?: DraftId;
   activeProjectName: string | undefined;
+  /**
+   * The project's folder is no repository but holds checkouts. Initializing Git there would turn
+   * the folder into a repository and hide them, so Version Control is not offered.
+   */
+  projectHoldsRepositories?: boolean;
   activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
@@ -144,7 +149,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             </div>
           </ThreadDetailsSection>
 
-          {props.gitCwd ? (
+          {props.gitCwd && (props.isGitRepo || !props.projectHoldsRepositories) ? (
             <ThreadDetailsSection
               headingId="thread-details-version-control-heading"
               title="Version Control"

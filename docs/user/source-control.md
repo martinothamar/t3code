@@ -154,8 +154,8 @@ or merge. You can edit review titles and descriptions and your own comments wher
 GitLab calls these merge requests.
 
 A project folder that is not a Git repository itself lists the pull requests of the repositories
-checked out in its immediate subfolders, and threads in it show the status of the pull requests
-linked to them. Symlinks and folders whose names start with `.` are skipped, and a new checkout
+checked out in its immediate subfolders. Threads in it show the status of the pull requests
+linked to them, and open links to those repositories' pull requests beside the thread. Symlinks and folders whose names start with `.` are skipped, and a new checkout
 shows up within two minutes. Writing a guide needs a project rooted in that repository.
 
 A checkout's pull requests come from the repository `gh repo set-default` chose for it. Without
@@ -254,7 +254,9 @@ does not show its diff, so marks are made and read on web and desktop.
 
 A thread can hold several pull requests, including reviews from another repository on the same host.
 Use **Link pull request** in the command palette or **Linked pull requests** panel, or right-click a
-pull request link in the conversation. Creating a pull request from Git actions links it automatically.
+pull request link in the conversation. A number links the project's own pull request; in a project
+folder that holds several repositories, write `repo#123`. Creating a pull request from Git actions
+links it automatically.
 Agents can link their pull requests with the `link_pull_request` tool.
 
 Use **Link this PR** in a branch-detected badge's tooltip to keep it with the thread. From a review

@@ -68,23 +68,58 @@ interface ResolvedLink {
   readonly url: string;
 }
 
+interface LinkRepository {
+  readonly host: string;
+  readonly repository: string;
+  readonly webUrl: (number: number) => string | null;
+}
+
+function linkInRepository(
+  repository: LinkRepository,
+  number: number,
+): { link: ResolvedLink } | { error: string } {
+  const webUrl = repository.webUrl(number);
+  const webReference = webUrl === null ? null : parseChangeRequestUrl(webUrl);
+  if (webUrl === null || webReference === null) {
+    return { error: "Paste a full URL; this project's host has no known pull request URL." };
+  }
+  return { link: { ...webReference, url: webUrl } };
+}
+
 /**
  * Which pull request an input names, or why it cannot. A URL carries its own host and
- * repository; a bare `#123` can only mean the thread's own repository.
+ * repository; a bare `#123` can only mean the thread's own repository. `repositories` are the
+ * thread project's: one for a project rooted in a repository, or a workspace folder's
+ * checkouts, among which `repo#123` or `owner/repo#123` picks one.
  */
 export function resolveLinkPullRequestInput(input: {
   readonly reference: string;
-  readonly project: {
-    readonly host: string;
-    readonly repository: string;
-    readonly webUrl: (number: number) => string | null;
-  } | null;
+  readonly repositories: ReadonlyArray<LinkRepository>;
   readonly hasProject: (reference: ResolvedLink) => boolean;
 }): { link: ResolvedLink } | { error: string } | null {
+  const trimmed = input.reference.trim();
+  const named =
+    parseChangeRequestUrl(trimmed) === null
+      ? /^([\w.-]+(?:\/[\w.-]+)*)#(\d+)$/u.exec(trimmed)
+      : null;
+  if (named?.[1] && named[2]) {
+    const name = named[1].toLowerCase();
+    const matches = input.repositories.filter((candidate) => {
+      const repository = candidate.repository.toLowerCase();
+      return repository === name || repository.split("/").at(-1) === name;
+    });
+    const number = Number(named[2]);
+    if (!Number.isSafeInteger(number) || number < 1) return null;
+    if (matches.length === 1) return linkInRepository(matches[0]!, number);
+    return {
+      error:
+        matches.length === 0
+          ? `This project holds no repository named ${named[1]}.`
+          : `${named[1]} names more than one repository here; write owner/repo#${number}.`,
+    };
+  }
   const parsed =
-    parseChangeRequestUrl(input.reference.trim()) !== null
-      ? input.reference.trim()
-      : parsePullRequestReference(input.reference);
+    parseChangeRequestUrl(trimmed) !== null ? trimmed : parsePullRequestReference(input.reference);
   if (parsed === null) return null;
   const url = parseChangeRequestUrl(parsed);
   if (url !== null) {
@@ -97,17 +132,14 @@ export function resolveLinkPullRequestInput(input: {
   }
   const number = Number(parsed);
   if (!Number.isSafeInteger(number) || number < 1) return null;
-  if (input.project === null) {
+  const [only, ...others] = input.repositories;
+  if (only === undefined) {
     return { error: "Paste a full URL to link a pull request from another repository." };
   }
-  const webUrl = input.project.webUrl(number);
-  const webReference = webUrl === null ? null : parseChangeRequestUrl(webUrl);
-  if (webUrl === null || webReference === null) {
-    return { error: "Paste a full URL; this project's host has no known pull request URL." };
+  if (others.length > 0) {
+    return { error: "This folder holds several repositories; enter repo#123, or paste the URL." };
   }
-  return {
-    link: { ...webReference, url: webUrl },
-  };
+  return linkInRepository(only, number);
 }
 
 function LinkPullRequestDialog({
@@ -125,28 +157,40 @@ function LinkPullRequestDialog({
     () => projects.filter((project) => project.environmentId === threadRef.environmentId),
     [projects, threadRef.environmentId],
   );
-  const ownProject = useMemo(() => {
+  const ownRepositories = useMemo((): ReadonlyArray<LinkRepository> => {
     const project = environmentProjects.find((candidate) => candidate.id === projectId);
-    const identity = project?.repositoryIdentity;
-    if (!project || !identity) return null;
-    const repository =
-      identity.displayName ??
-      (identity.owner && identity.name ? `${identity.owner}/${identity.name}` : null);
-    if (repository === null) return null;
-    const definition = sourceControlClients.get(identity.provider ?? "unknown");
-    const host = pullRequestHostOf(identity, definition.kind);
-    return {
-      host,
-      repository,
-      webUrl: (number: number) =>
-        definition.changeRequestUrl({
+    if (!project) return [];
+    const identities =
+      project.repositoryIdentity != null
+        ? [project.repositoryIdentity]
+        : (project.workspaceRepositories ?? []);
+    // Two checkouts of one repository are one repository to link from.
+    const seen = new Set<string>();
+    return identities.flatMap((identity) => {
+      const repository =
+        identity.displayName ??
+        (identity.owner && identity.name ? `${identity.owner}/${identity.name}` : null);
+      if (repository === null) return [];
+      const definition = sourceControlClients.get(identity.provider ?? "unknown");
+      const host = pullRequestHostOf(identity, definition.kind);
+      const key = `${host}/${repository}`.toLowerCase();
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [
+        {
           host,
           repository,
-          number,
-          remoteUrl: identity.locator.remoteUrl,
-          webUrl: identity.webUrl,
-        }),
-    };
+          webUrl: (number: number) =>
+            definition.changeRequestUrl({
+              host,
+              repository,
+              number,
+              remoteUrl: identity.locator.remoteUrl,
+              webUrl: identity.webUrl,
+            }),
+        },
+      ];
+    });
   }, [environmentProjects, projectId]);
   const linking = usePullRequestLinking(threadRef.environmentId);
   const [pending, setPending] = useState(false);
@@ -164,10 +208,10 @@ function LinkPullRequestDialog({
     () =>
       resolveLinkPullRequestInput({
         reference,
-        project: ownProject,
+        repositories: ownRepositories,
         hasProject: (reference) => linking.canLink(reference.url),
       }),
-    [linking, ownProject, reference],
+    [linking, ownRepositories, reference],
   );
 
   const submit = useCallback(async () => {
@@ -186,12 +230,18 @@ function LinkPullRequestDialog({
     onOpenChange(false);
   }, [linking, onOpenChange, resolved, threadRef]);
 
+  // A folder holding several repositories names one with repo#123 instead of a bare number.
+  const severalRepositories = ownRepositories.length > 1;
   const validation = !dirty
     ? null
     : reference.trim().length === 0
-      ? "Paste a pull request URL or enter 123 / #123."
+      ? severalRepositories
+        ? "Paste a pull request URL or enter repo#123."
+        : "Paste a pull request URL or enter 123 / #123."
       : resolved === null
-        ? "Use a pull request URL, 123, or #123."
+        ? severalRepositories
+          ? "Use a pull request URL or repo#123."
+          : "Use a pull request URL, 123, or #123."
         : "error" in resolved
           ? resolved.error
           : null;
@@ -202,8 +252,9 @@ function LinkPullRequestDialog({
         <DialogHeader>
           <DialogTitle>Link pull request</DialogTitle>
           <DialogDescription>
-            Attach a pull request to this thread by its URL, or by its number for this thread's
-            repository.
+            {severalRepositories
+              ? "Attach a pull request to this thread by its URL, or as repo#123 for one of the repositories in this thread's folder."
+              : "Attach a pull request to this thread by its URL, or by its number for this thread's repository."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>

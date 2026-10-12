@@ -516,7 +516,9 @@ export const make = Effect.gen(function* () {
         const matchingUrls = [
           ...new Set(
             result.stdout.split("\n").flatMap((line) => {
-              const url = /^\S+\s+(https?:\/\/\S+)\s+\(fetch\)$/.exec(line.trim())?.[1];
+              const url = /^\S+\s+(https?:\/\/\S+)\s+\(fetch\)(?:\s+\[[^\]]*\])?$/.exec(
+                line.trim(),
+              )?.[1];
               return url && parseForgejoRemote(url)?.host === input.host?.toLowerCase()
                 ? [url]
                 : [];

@@ -99,6 +99,54 @@ it.effect("preserves either enrichment field when the other resolver fails", () 
   }),
 );
 
+it.effect("reads a workspace folder's checkouts in place of its own repository", () =>
+  Effect.gen(function* () {
+    const checkouts = [identity("/workspace/app"), identity("/workspace/infra")];
+    const metadataLayer = Layer.merge(
+      Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolve: (workspaceRoot) =>
+          Effect.succeed(workspaceRoot === "/repo" ? identity(workspaceRoot) : null),
+        resolveWorkspace: (workspaceRoot) =>
+          Effect.succeed(workspaceRoot === "/workspace" ? checkouts : []),
+      }),
+      Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
+        resolvePath: () => Effect.succeed(null),
+      }),
+    );
+
+    yield* Effect.gen(function* () {
+      const service = yield* ProjectEnrichment.ProjectEnrichmentService;
+      yield* service.request("/workspace");
+      yield* service.request("/repo");
+      const workspace = yield* waitForAvailable(
+        service,
+        "/workspace",
+        (value) => value.repositoryIdentityResolved,
+      );
+      const repo = yield* waitForAvailable(
+        service,
+        "/repo",
+        (value) => value.repositoryIdentityResolved,
+      );
+      assert.isNull(workspace.repositoryIdentity);
+      assert.deepStrictEqual(workspace.workspaceRepositories, checkouts);
+      assert.deepStrictEqual(repo.workspaceRepositories, []);
+
+      // Only a folder with checkouts carries the field over the wire.
+      const shell = {
+        id: "p1",
+        workspaceRoot: "/repo",
+        workspaceRepositories: checkouts,
+      } as unknown as Parameters<typeof ProjectEnrichment.withEnrichment>[0];
+      assert.deepStrictEqual(
+        ProjectEnrichment.withEnrichment(shell, workspace).workspaceRepositories,
+        checkouts,
+      );
+      assert.notProperty(ProjectEnrichment.withEnrichment(shell, repo), "workspaceRepositories");
+    }).pipe(Effect.provide(layer(metadataLayer)));
+  }),
+);
+
 it.effect("does not warn about favicons for workspace roots that no longer exist", () =>
   Effect.gen(function* () {
     const warnings: Array<unknown> = [];
