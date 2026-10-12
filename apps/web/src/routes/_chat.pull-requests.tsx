@@ -154,7 +154,7 @@ import {
 } from "../rightPanelStore";
 import { useDebouncedValue } from "../state/queries";
 import { useAllEnvironmentShellsBootstrapped, useProjects } from "../state/entities";
-import { useEnvironments } from "../state/environments";
+import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
   pullRequestEnvironment,
   usePullRequestList,
@@ -372,6 +372,23 @@ function PullRequestsRouteView() {
         )
         .toSorted((left, right) => left.environmentId.localeCompare(right.environmentId)),
     [environments],
+  );
+  // Fork: a shared repository is listed by a server that is connected where one holds it, so a
+  // stopped Sandbox doesn't keep a repository the running ones then skip. The primary serves
+  // this page, so it is always connected.
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const connectedEnvironmentIds = useMemo(
+    () =>
+      new Set(
+        capableEnvironments
+          .filter(
+            (environment) =>
+              environment.environmentId === primaryEnvironmentId ||
+              environment.connection.phase === "connected",
+          )
+          .map((environment) => environment.environmentId),
+      ),
+    [capableEnvironments, primaryEnvironmentId],
   );
   // The server the URL asks for, kept only while it is one the page could read: a link naming a
   // server this workspace no longer has falls back to all of them rather than to nothing.
@@ -657,6 +674,7 @@ function PullRequestsRouteView() {
       projects,
       queryEnvironmentIds,
       queryEnvironmentIds[0],
+      connectedEnvironmentIds,
     );
     const totals = new Map<EnvironmentId, number>();
     for (const project of projects) {
@@ -677,7 +695,7 @@ function PullRequestsRouteView() {
         },
       ];
     });
-  }, [projects, projectsKnown, queryEnvironmentIds, scopedProjectId]);
+  }, [connectedEnvironmentIds, projects, projectsKnown, queryEnvironmentIds, scopedProjectId]);
   // Part of the scope, since a different split is a different question and its answers must not
   // be filed under the same page state.
   const assignmentKey = useMemo(

@@ -82,6 +82,22 @@ describe("assignRepositoriesToEnvironments", () => {
     });
   });
 
+  it("lists a shared repository from a connected Sandbox while the first is stopped", () => {
+    const projects = [
+      workspace("w1", "env-1", "github.com/acme/studio"),
+      workspace("w2", "env-2", "github.com/acme/studio"),
+    ];
+    const assignment = assignRepositoriesToEnvironments(
+      projects,
+      envs("env-1", "env-2"),
+      "env-1" as EnvironmentId,
+      new Set(envs("env-2")),
+    );
+    expect(plain(assignment)).toEqual({
+      "env-2": { projectIds: ["w2"], excludeRepositories: [] },
+    });
+  });
+
   it("lets the preferred server list a repository it isn't first to hold", () => {
     const assignment = assignRepositoriesToEnvironments(
       [

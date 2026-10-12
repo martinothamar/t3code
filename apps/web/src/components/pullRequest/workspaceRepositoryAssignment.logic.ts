@@ -50,14 +50,20 @@ function keysOf(project: RepositoryProject): ReadonlyArray<string> {
   return [...new Set(checkoutsOf(project).map(keyOf))].filter((key) => key !== "");
 }
 
-/** Which server lists each repository: the preferred one where it has it, else the earliest. */
+/**
+ * Which server lists each repository. One that is connected wins over one that isn't, so a
+ * stopped Sandbox doesn't keep a repository the running ones then skip; then the preferred
+ * server; then the earliest.
+ */
 function repositoryOwners(
   projects: ReadonlyArray<RepositoryProject>,
   environmentIds: ReadonlyArray<EnvironmentId>,
   preferredEnvironmentId: EnvironmentId | null | undefined,
+  connected: ReadonlySet<EnvironmentId> | undefined,
 ): Map<string, EnvironmentId> {
   const order = new Map(environmentIds.map((id, index) => [id, index] as const));
   const rank = (environmentId: EnvironmentId) => [
+    connected === undefined || connected.has(environmentId) ? 0 : 1,
     environmentId === preferredEnvironmentId ? 0 : 1,
     order.get(environmentId) ?? Number.MAX_SAFE_INTEGER,
   ];
@@ -91,8 +97,9 @@ export function assignRepositoriesToEnvironments(
   projects: ReadonlyArray<RepositoryProject>,
   environmentIds: ReadonlyArray<EnvironmentId>,
   preferredEnvironmentId?: EnvironmentId | null,
+  connected?: ReadonlySet<EnvironmentId>,
 ): Map<EnvironmentId, EnvironmentAssignment> {
-  const owner = repositoryOwners(projects, environmentIds, preferredEnvironmentId);
+  const owner = repositoryOwners(projects, environmentIds, preferredEnvironmentId, connected);
   const reading = new Set(environmentIds);
   const assignment = new Map<
     EnvironmentId,
