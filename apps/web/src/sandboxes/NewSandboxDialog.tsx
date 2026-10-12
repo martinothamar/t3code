@@ -14,14 +14,8 @@ import {
 } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from "../components/ui/select";
 import { rememberCreatedSandbox } from "./createdSandboxes";
+import { ManifestPicker } from "./ManifestPicker";
 import { suggestSandboxName } from "./sandboxActions";
 import { readAgentctlBridge } from "./sandboxConnections";
 import { refreshSandboxSnapshot, useSandboxes } from "./useSandboxes";
@@ -53,12 +47,6 @@ export function NewSandboxDialogHost() {
       {isOpen ? <NewSandboxDialogContent /> : null}
     </Dialog>
   );
-}
-
-function manifestLabel(manifest: AgentctlSandboxManifest) {
-  const directory = manifest.directory.split(/[\\/]/).at(-1) ?? manifest.directory;
-  const name = manifest.agentName ?? directory;
-  return manifest.variant === null ? name : `${name} · ${manifest.variant}`;
 }
 
 function NewSandboxDialogContent() {
@@ -184,46 +172,29 @@ function NewSandboxDialogContent() {
             void create();
           }}
         >
-          <div className="grid gap-1.5">
-            <Label>Manifest</Label>
-            {manifests === null ? (
-              <div className="text-muted-foreground text-sm">Looking for manifests…</div>
-            ) : manifests.length === 0 ? (
-              <div className="text-muted-foreground text-sm">
-                No agent.yaml manifests in {settings?.manifestRoots.join(", ")}.
-              </div>
-            ) : (
-              <Select value={manifestPath} onValueChange={(value) => setManifestPath(value)}>
-                <SelectTrigger aria-label="Manifest">
-                  <SelectValue>
-                    {manifest ? manifestLabel(manifest) : "Choose a manifest"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup alignItemWithTrigger={false}>
-                  {manifests.map((candidate) => (
-                    <SelectItem key={candidate.path} value={candidate.path}>
-                      <span className="flex min-w-0 flex-col">
-                        <span>{manifestLabel(candidate)}</span>
-                        <span className="truncate text-muted-foreground text-xs">
-                          {candidate.path}
-                        </span>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            )}
-            <div>
-              <Button
-                type="button"
-                size="xs"
-                variant="ghost-muted"
-                onClick={() => void addManifestRoot()}
-              >
-                <FolderSearchIcon className="size-3" />
-                Add manifest folder
-              </Button>
+          {manifests === null ? (
+            <div className="text-muted-foreground text-sm">Looking for manifests…</div>
+          ) : manifests.length === 0 ? (
+            <div className="text-muted-foreground text-sm">
+              No agent.yaml manifests in {settings?.manifestRoots.join(", ")}.
             </div>
+          ) : (
+            <ManifestPicker
+              manifests={manifests}
+              value={manifest}
+              onValueChange={(next) => setManifestPath(next.path)}
+            />
+          )}
+          <div>
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost-muted"
+              onClick={() => void addManifestRoot()}
+            >
+              <FolderSearchIcon className="size-3" />
+              Add manifest folder
+            </Button>
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="new-sandbox-name">Name</Label>

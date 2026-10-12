@@ -42,18 +42,22 @@ export const discoverManifests = Effect.fn("desktop.agentctl.discoverManifests")
       Effect.orElseSucceed(() => null),
     );
 
-  const walk = (directory: string, depth: number): Effect.Effect<void> =>
+  // A manifest belongs to the innermost repository the walk passed through, so the picker can
+  // group by it; a root that is not inside one stands in for it.
+  const walk = (directory: string, repository: string, depth: number): Effect.Effect<void> =>
     Effect.gen(function* () {
       if (visited.has(directory)) return;
       visited.add(directory);
       const entries = yield* fileSystem
         .readDirectory(directory)
         .pipe(Effect.orElseSucceed((): string[] => []));
+      const owner = entries.includes(".git") ? directory : repository;
       for (const fileName of manifestFileNames(entries)) {
         const manifestPath = path.join(directory, fileName);
         manifests.push({
           path: manifestPath,
           directory,
+          repository: owner,
           variant: manifestVariant(fileName),
           agentName: yield* readAgentName(manifestPath),
         });
@@ -64,13 +68,14 @@ export const discoverManifests = Effect.fn("desktop.agentctl.discoverManifests")
         const child = path.join(directory, entry);
         const info = yield* fileSystem.stat(child).pipe(Effect.option);
         if (info._tag === "Some" && info.value.type === "Directory") {
-          yield* walk(child, depth + 1);
+          yield* walk(child, owner, depth + 1);
         }
       }
     });
 
   for (const root of roots) {
-    yield* walk(path.resolve(root), 0);
+    const resolved = path.resolve(root);
+    yield* walk(resolved, resolved, 0);
   }
   return manifests;
 });
