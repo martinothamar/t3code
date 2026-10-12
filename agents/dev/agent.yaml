@@ -27,6 +27,7 @@ spec:
     - source: instructions.md
   skills:
     - source: skills/computer-use
+    - source: skills/demo-video
   harnesses:
     - type: claudeCode
       auth: mediated
