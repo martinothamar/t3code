@@ -1,4 +1,7 @@
-import { filterComposerPullRequestMatches } from "@t3tools/shared/composerPullRequestMatches";
+import {
+  composerPullRequestKey,
+  filterComposerPullRequestMatches,
+} from "@t3tools/shared/composerPullRequestMatches";
 import { resolveFilesystemReadAccess } from "@t3tools/client-runtime/state/filesystem";
 import { environmentSession } from "./session";
 import { useEnvironmentPresentation } from "./presentation";
@@ -150,7 +153,7 @@ export function useComposerPullRequestSearch(input: {
     );
     const unique = new Map<string, (typeof found)[number]>();
     for (const entry of found) {
-      const key = `${entry.repository.trim().toLowerCase()}#${entry.number}`;
+      const key = composerPullRequestKey(entry);
       if (!unique.has(key)) unique.set(key, entry);
     }
     return [...unique.values()]

@@ -7,7 +7,10 @@ import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { AttachmentFilePreview } from "../files/AttachmentFilePreview";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
-import { filterComposerPullRequestMatches } from "@t3tools/shared/composerPullRequestMatches";
+import {
+  composerPullRequestKey,
+  filterComposerPullRequestMatches,
+} from "@t3tools/shared/composerPullRequestMatches";
 import { importPastedComposerText, readPastedComposerContext } from "../composerInlineTokenPaste";
 import { elementContextToPreviewAnnotation } from "../../lib/elementContext";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
@@ -2815,7 +2818,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             composerTrigger.query,
           ).slice(0, COMPOSER_PULL_REQUEST_RESULT_LIMIT);
       return matches.map((pullRequest) => ({
-        id: `pull-request:${pullRequest.projectId}:${pullRequest.repository}:${pullRequest.number}`,
+        id: `pull-request:${pullRequest.projectId}:${composerPullRequestKey(pullRequest)}`,
         type: "pull-request",
         pullRequest: {
           number: pullRequest.number,

@@ -1,4 +1,6 @@
 export interface ComposerPullRequestMatch {
+  /** Keeps the same repository on two hosts apart; entries without one share a key. */
+  readonly host?: string;
   readonly number: number;
   readonly projectId: string;
   readonly repository: string;
@@ -30,7 +32,7 @@ export function filterComposerPullRequestMatches<Entry extends ComposerPullReque
   // Two repositories can each have the same number, so they stay apart.
   const uniqueEntries = new Map<string, Entry>();
   for (const entry of matchingEntries) {
-    const key = `${entry.repository.trim().toLowerCase()}#${entry.number}`;
+    const key = composerPullRequestKey(entry);
     if (!uniqueEntries.has(key)) {
       uniqueEntries.set(key, entry);
     }
@@ -44,4 +46,11 @@ export function filterComposerPullRequestMatches<Entry extends ComposerPullReque
       return exactness !== 0 ? exactness : right.updatedAt.localeCompare(left.updatedAt);
     })
     .slice(0, input.limit);
+}
+
+/** One suggestion per pull request: its host, repository and number. */
+export function composerPullRequestKey(
+  entry: Pick<ComposerPullRequestMatch, "host" | "repository" | "number">,
+): string {
+  return `${entry.host?.toLowerCase() ?? ""}/${entry.repository.trim().toLowerCase()}#${entry.number}`;
 }

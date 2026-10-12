@@ -45,4 +45,17 @@ describe("filterComposerPullRequestMatches", () => {
     });
     expect(result).toHaveLength(1);
   });
+  it("keeps the same repository on two hosts apart", () => {
+    const result = filterComposerPullRequestMatches({
+      entries: [
+        { ...entry(7, "2026-01-02"), host: "github.com" },
+        { ...entry(7, "2026-01-01"), host: "github.acme.test" },
+      ],
+      projectId: "p1",
+      repositories: ["owner/repo"],
+      query: "7",
+      limit: 10,
+    });
+    expect(result.map((match) => match.host)).toEqual(["github.com", "github.acme.test"]);
+  });
 });

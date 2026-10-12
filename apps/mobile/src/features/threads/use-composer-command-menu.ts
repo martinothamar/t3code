@@ -1,3 +1,4 @@
+import { composerPullRequestKey } from "@t3tools/shared/composerPullRequestMatches";
 import type {
   EnvironmentId,
   ProjectId,
@@ -367,7 +368,7 @@ export function useComposerCommandMenu({
 
     if (trigger.kind === "pull-request") {
       return pullRequestSearch.entries.map((entry) => ({
-        id: `pr:${entry.projectId}:${entry.repository}:${entry.number}`,
+        id: `pr:${entry.projectId}:${composerPullRequestKey(entry)}`,
         type: "pull-request",
         pullRequest: {
           number: entry.number,
