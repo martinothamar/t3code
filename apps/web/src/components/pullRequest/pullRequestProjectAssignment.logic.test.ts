@@ -20,8 +20,21 @@ const project = (
 
 const envs = (...ids: ReadonlyArray<string>) => ids as ReadonlyArray<EnvironmentId>;
 
-const plain = (assignment: Map<EnvironmentId, ProjectId[]>) =>
-  Object.fromEntries([...assignment].map(([id, projectIds]) => [id, projectIds]));
+const plain = (assignment: ReturnType<typeof assignProjectsToEnvironments>) =>
+  Object.fromEntries([...assignment].map(([id, { projectIds }]) => [id, projectIds]));
+
+/** A folder that is no repository, holding a checkout of each repository named. */
+const workspace = (
+  id: string,
+  environmentId: string,
+  ...canonicalKeys: ReadonlyArray<string>
+): AssignableProject & { workspaceRoot: string } => ({
+  ...project(id, environmentId),
+  workspaceRepositories: canonicalKeys.map((canonicalKey) => ({
+    canonicalKey,
+    rootPath: `/srv/${environmentId}/${id}/${canonicalKey.split("/").at(-1)}`,
+  })),
+});
 
 describe("one server per repository", () => {
   it("lets the first server list a repository both hold", () => {
@@ -144,6 +157,40 @@ const on = (environmentId: string, projectId: string) => ({
   projectId: projectId as ProjectId,
 });
 
+describe("one server per repository of a folder holding checkouts", () => {
+  it("lists each shared checkout from one Sandbox and the rest from their own", () => {
+    // Numbered Sandboxes of one kind, each holding the same checkout plus one of its own.
+    const assignment = assignProjectsToEnvironments(
+      [
+        workspace("w1", "env-1", "github.com/acme/studio", "github.com/acme/one"),
+        workspace("w2", "env-2", "github.com/acme/studio", "github.com/acme/two"),
+        workspace("w3", "env-3", "github.com/acme/studio"),
+      ],
+      envs("env-1", "env-2", "env-3"),
+      "env-1" as EnvironmentId,
+    );
+    expect(Object.fromEntries(assignment)).toEqual({
+      "env-1": { projectIds: ["w1"], excludeRepositories: [] },
+      "env-2": { projectIds: ["w2"], excludeRepositories: ["github.com/acme/studio"] },
+    });
+  });
+
+  it("weighs a folder's checkout and a project rooted in the repository alike", () => {
+    const assignment = assignProjectsToEnvironments(
+      [
+        project("a1", "env-1", "github.com/acme/app"),
+        workspace("w2", "env-2", "github.com/acme/app", "github.com/acme/tools"),
+      ],
+      envs("env-1", "env-2"),
+      "env-1" as EnvironmentId,
+    );
+    expect(Object.fromEntries(assignment)).toEqual({
+      "env-1": { projectIds: ["a1"], excludeRepositories: [] },
+      "env-2": { projectIds: ["w2"], excludeRepositories: ["github.com/acme/app"] },
+    });
+  });
+});
+
 describe("where a pull request can be acted on", () => {
   it("offers every server holding the repository, the panel's own first", () => {
     const pickable = resolvePickableEnvironments(
@@ -255,5 +302,27 @@ describe("where a pull request can be acted on", () => {
       workspaceRoot: "/srv/env-1/a1-wt",
       label: "Server env-1",
     });
+  });
+  it("offers the other Sandboxes' checkouts of a folder's repository", () => {
+    const projects = [
+      workspace("w1", "env-1", "github.com/acme/studio", "github.com/acme/one"),
+      workspace("w2", "env-2", "github.com/acme/studio"),
+      workspace("w3", "env-3", "github.com/acme/other"),
+    ];
+    const pickable = resolvePickableEnvironments(
+      {
+        environmentId: "env-1" as EnvironmentId,
+        projectId: "w1" as ProjectId,
+        repository: "Acme/Studio",
+      },
+      projects,
+      ["env-1", "env-2", "env-3"].map((id) => ({ environmentId: id as EnvironmentId, label: id })),
+    );
+    expect(
+      pickable.map(({ environmentId, workspaceRoot }) => [environmentId, workspaceRoot]),
+    ).toEqual([
+      ["env-1", "/srv/env-1/w1/studio"],
+      ["env-2", "/srv/env-2/w2/studio"],
+    ]);
   });
 });

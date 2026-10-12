@@ -649,6 +649,7 @@ function PullRequestsRouteView() {
   const environmentQueries = useMemo((): ReadonlyArray<{
     readonly environmentId: EnvironmentId;
     readonly projectIds?: ReadonlyArray<ProjectId>;
+    readonly excludeRepositories?: ReadonlyArray<string>;
   }> => {
     const plain = queryEnvironmentIds.map((environmentId) => ({ environmentId }));
     if (!projectsKnown || scopedProjectId !== undefined) return plain;
@@ -662,12 +663,19 @@ function PullRequestsRouteView() {
       totals.set(project.environmentId, (totals.get(project.environmentId) ?? 0) + 1);
     }
     return queryEnvironmentIds.flatMap((environmentId) => {
-      const projectIds = assignment.get(environmentId);
-      if (projectIds === undefined) return [];
+      const listed = assignment.get(environmentId);
+      if (listed === undefined) return [];
+      const { projectIds, excludeRepositories } = listed;
       // It lists everything it holds anyway, so the filter is left off and a one-server workspace
       // asks exactly the question it asked before.
-      if (projectIds.length === (totals.get(environmentId) ?? 0)) return [{ environmentId }];
-      return [{ environmentId, projectIds }];
+      const everything = projectIds.length === (totals.get(environmentId) ?? 0);
+      return [
+        {
+          environmentId,
+          ...(everything ? {} : { projectIds }),
+          ...(excludeRepositories.length > 0 ? { excludeRepositories } : {}),
+        },
+      ];
     });
   }, [projects, projectsKnown, queryEnvironmentIds, scopedProjectId]);
   // Part of the scope, since a different split is a different question and its answers must not
@@ -675,7 +683,10 @@ function PullRequestsRouteView() {
   const assignmentKey = useMemo(
     () =>
       environmentQueries
-        .map(({ environmentId, projectIds }) => `${environmentId}#${projectIds?.join("+") ?? "*"}`)
+        .map(
+          ({ environmentId, projectIds, excludeRepositories }) =>
+            `${environmentId}#${projectIds?.join("+") ?? "*"}-${excludeRepositories?.join("+") ?? ""}`,
+        )
         .join("|"),
     [environmentQueries],
   );
@@ -720,7 +731,7 @@ function PullRequestsRouteView() {
   /** The listing input each environment is asked for, which differs only in its continuation. */
   const listTargets = useMemo(
     () =>
-      environmentQueries.flatMap(({ environmentId, projectIds }) => {
+      environmentQueries.flatMap(({ environmentId, projectIds, excludeRepositories }) => {
         const cursors = sentCursors?.[environmentId];
         // A continuation asks the environments that said where to carry on from, plus the ones
         // that have more to give but no cursor to give it from — those are read again at the
@@ -741,6 +752,7 @@ function PullRequestsRouteView() {
               limit: pageSize,
               ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
               ...(projectIds ? { projectIds } : {}),
+              ...(excludeRepositories ? { excludeRepositories } : {}),
               ...(search.host ? { host: search.host } : {}),
               ...(hasFilters ? { filters } : {}),
               ...(sentParsed.text ? { query: sentParsed.text } : {}),
@@ -777,7 +789,7 @@ function PullRequestsRouteView() {
    */
   const baselineTargets = useMemo(
     () =>
-      environmentQueries.map(({ environmentId, projectIds }) => ({
+      environmentQueries.map(({ environmentId, projectIds, excludeRepositories }) => ({
         environmentId,
         input: {
           state: search.state,
@@ -785,6 +797,7 @@ function PullRequestsRouteView() {
           limit: PAGE_SIZE,
           ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
           ...(projectIds ? { projectIds } : {}),
+          ...(excludeRepositories ? { excludeRepositories } : {}),
           ...(search.host ? { host: search.host } : {}),
           ...(menuFiltered ? { filters: menuFilters } : {}),
         } satisfies PullRequestListInput,
@@ -807,7 +820,7 @@ function PullRequestsRouteView() {
     baselineQuery.error === null;
   const facetTargets = useMemo(() => {
     if (!filtersOpen) return NO_LIST_TARGETS;
-    return environmentQueries.map(({ environmentId, projectIds }) => ({
+    return environmentQueries.map(({ environmentId, projectIds, excludeRepositories }) => ({
       environmentId,
       input: {
         state: "all",
@@ -815,6 +828,7 @@ function PullRequestsRouteView() {
         limit: PAGE_SIZE,
         ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
         ...(projectIds ? { projectIds } : {}),
+        ...(excludeRepositories ? { excludeRepositories } : {}),
         ...(search.host ? { host: search.host } : {}),
       } satisfies PullRequestListInput,
     }));
@@ -841,7 +855,7 @@ function PullRequestsRouteView() {
       return { authored: NO_LIST_TARGETS, reviewing: NO_LIST_TARGETS };
     }
     const targetsFor = (involvement: PullRequestInvolvement) =>
-      environmentQueries.map(({ environmentId, projectIds }) => ({
+      environmentQueries.map(({ environmentId, projectIds, excludeRepositories }) => ({
         environmentId,
         input: {
           state: search.state,
@@ -849,6 +863,7 @@ function PullRequestsRouteView() {
           limit: PAGE_SIZE,
           ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
           ...(projectIds ? { projectIds } : {}),
+          ...(excludeRepositories ? { excludeRepositories } : {}),
           ...(search.host ? { host: search.host } : {}),
           ...(menuFiltered ? { filters: menuFilters } : {}),
         } satisfies PullRequestListInput,

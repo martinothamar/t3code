@@ -956,7 +956,7 @@ export function PullRequestDetailPanel({
     () =>
       context === "page"
         ? resolvePickableEnvironments(
-            { environmentId, projectId: reference.projectId },
+            { environmentId, projectId: reference.projectId, repository: reference.repository },
             projects,
             environments.map((environment) => ({
               environmentId: environment.environmentId,
@@ -965,7 +965,7 @@ export function PullRequestDetailPanel({
             })),
           )
         : [],
-    [context, environmentId, environments, projects, reference.projectId],
+    [context, environmentId, environments, projects, reference.projectId, reference.repository],
   );
   // Which server the reader chose, and only for the pull request they chose it on: this one panel
   // shows a different pull request every time it is opened, and the choice does not follow.
