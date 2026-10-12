@@ -167,10 +167,8 @@ import {
   writePullRequestDetailSnapshot,
 } from "./pullRequestDetail.logic";
 import { canEditPullRequestChangeRequest } from "./pullRequestEditing.logic";
-import {
-  resolvePickableEnvironments,
-  type PickableEnvironment,
-} from "./pullRequestProjectAssignment.logic";
+import { type PickableEnvironment } from "./pullRequestProjectAssignment.logic";
+import { resolveRepositoryCopies } from "./workspaceRepositoryAssignment.logic";
 import { PullRequestChecksPopover } from "./PullRequestChecksPopover";
 import {
   PullRequestActorLabel,
@@ -955,8 +953,13 @@ export function PullRequestDetailPanel({
   const pickableEnvironments = useMemo(
     () =>
       context === "page"
-        ? resolvePickableEnvironments(
-            { environmentId, projectId: reference.projectId, repository: reference.repository },
+        ? resolveRepositoryCopies(
+            {
+              environmentId,
+              projectId: reference.projectId,
+              host: reference.host,
+              repository: reference.repository,
+            },
             projects,
             environments.map((environment) => ({
               environmentId: environment.environmentId,
@@ -965,7 +968,15 @@ export function PullRequestDetailPanel({
             })),
           )
         : [],
-    [context, environmentId, environments, projects, reference.projectId, reference.repository],
+    [
+      context,
+      environmentId,
+      environments,
+      projects,
+      reference.host,
+      reference.projectId,
+      reference.repository,
+    ],
   );
   // Which server the reader chose, and only for the pull request they chose it on: this one panel
   // shows a different pull request every time it is opened, and the choice does not follow.

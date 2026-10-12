@@ -5,10 +5,6 @@ export interface AssignableProject {
   readonly id: ProjectId;
   readonly environmentId: EnvironmentId;
   readonly repositoryIdentity?: { readonly canonicalKey?: string | undefined } | null | undefined;
-  /** For a folder that is no repository, the checkouts it holds. */
-  readonly workspaceRepositories?:
-    | ReadonlyArray<{ readonly canonicalKey?: string | undefined; readonly rootPath?: string }>
-    | undefined;
 }
 
 /**
@@ -22,53 +18,9 @@ function repositoryKey(project: AssignableProject): string | undefined {
   return project.repositoryIdentity?.canonicalKey?.toLowerCase();
 }
 
-/** The repositories a project lists: its own, or a folder's checkouts. */
-function repositoryKeysOf(project: AssignableProject): ReadonlyArray<string> {
-  const own = repositoryKey(project);
-  if (own) return [own];
-  return [
-    ...new Set(
-      (project.workspaceRepositories ?? []).flatMap((identity) =>
-        identity.canonicalKey ? [identity.canonicalKey.toLowerCase()] : [],
-      ),
-    ),
-  ];
-}
-
-/** Which server lists each repository: the preferred one where it has it, else the first. */
-function repositoryOwners(
-  projects: ReadonlyArray<AssignableProject>,
-  environmentIds: ReadonlyArray<EnvironmentId>,
-  preferredEnvironmentId: EnvironmentId | null | undefined,
-): Map<string, EnvironmentId> {
-  const rank = new Map(environmentIds.map((id, index) => [id, index] as const));
-  const owner = new Map<string, EnvironmentId>();
-  for (const project of projects) {
-    const environmentRank = rank.get(project.environmentId);
-    if (environmentRank === undefined) continue;
-    for (const key of repositoryKeysOf(project)) {
-      const current = owner.get(key);
-      if (current === undefined) {
-        owner.set(key, project.environmentId);
-        continue;
-      }
-      if (current === preferredEnvironmentId) continue;
-      if (
-        project.environmentId === preferredEnvironmentId ||
-        environmentRank < (rank.get(current) ?? Number.MAX_SAFE_INTEGER)
-      ) {
-        owner.set(key, project.environmentId);
-      }
-    }
-  }
-  return owner;
-}
-
 /**
  * Two servers can hold the same repository, and both would list the same pull requests, so one
- * copy is picked by its repository key. A project rooted in a repository another server lists is
- * left out. A folder holding checkouts is kept while any of them is its own to list, and the
- * rest are named in `excludeRepositories` for its server to skip.
+ * copy is picked by its repository key.
  *
  * A project with no identity is never de-duplicated: nothing proves it is a copy of anything, and
  * dropping it would lose its rows outright.
@@ -77,42 +29,38 @@ export function assignProjectsToEnvironments(
   projects: ReadonlyArray<AssignableProject>,
   environmentIds: ReadonlyArray<EnvironmentId>,
   preferredEnvironmentId?: EnvironmentId | null,
-): Map<EnvironmentId, EnvironmentAssignment> {
-  const owner = repositoryOwners(projects, environmentIds, preferredEnvironmentId);
-  const reading = new Set(environmentIds);
-  const assignment = new Map<
-    EnvironmentId,
-    { projectIds: ProjectId[]; excludeRepositories: Set<string> }
-  >();
+): Map<EnvironmentId, ProjectId[]> {
+  const rank = new Map(environmentIds.map((id, index) => [id, index] as const));
+  // Which server lists each repository: the preferred one where it has it, else the first.
+  const owner = new Map<string, EnvironmentId>();
   for (const project of projects) {
-    if (!reading.has(project.environmentId)) continue;
-    const keys = repositoryKeysOf(project);
-    const others = keys.filter((key) => owner.get(key) !== project.environmentId);
-    if (keys.length > 0 && others.length === keys.length) continue;
-    let listed = assignment.get(project.environmentId);
-    if (listed === undefined) {
-      listed = { projectIds: [], excludeRepositories: new Set() };
-      assignment.set(project.environmentId, listed);
+    const key = repositoryKey(project);
+    if (!key) continue;
+    const environmentRank = rank.get(project.environmentId);
+    if (environmentRank === undefined) continue;
+    const current = owner.get(key);
+    if (current === undefined) {
+      owner.set(key, project.environmentId);
+      continue;
     }
-    listed.projectIds.push(project.id);
-    for (const key of others) listed.excludeRepositories.add(key);
+    if (current === preferredEnvironmentId) continue;
+    if (
+      project.environmentId === preferredEnvironmentId ||
+      environmentRank < (rank.get(current) ?? Number.MAX_SAFE_INTEGER)
+    ) {
+      owner.set(key, project.environmentId);
+    }
   }
-  return new Map(
-    [...assignment].map(([environmentId, listed]) => [
-      environmentId,
-      {
-        projectIds: listed.projectIds,
-        excludeRepositories: [...listed.excludeRepositories].toSorted(),
-      },
-    ]),
-  );
-}
-
-/** What one server is asked to list. */
-export interface EnvironmentAssignment {
-  readonly projectIds: ReadonlyArray<ProjectId>;
-  /** Repository keys another server lists, among this one's folders' checkouts. */
-  readonly excludeRepositories: ReadonlyArray<string>;
+  const assignment = new Map<EnvironmentId, ProjectId[]>();
+  for (const project of projects) {
+    if (!rank.has(project.environmentId)) continue;
+    const key = repositoryKey(project);
+    if (key && owner.get(key) !== project.environmentId) continue;
+    const listed = assignment.get(project.environmentId);
+    if (listed === undefined) assignment.set(project.environmentId, [project.id]);
+    else listed.push(project.id);
+  }
+  return assignment;
 }
 
 /** A copy of the repository the reader could act on, named by the server holding it. */
@@ -136,12 +84,7 @@ export interface PickableEnvironment {
  * has always had.
  */
 export function resolvePickableEnvironments(
-  current: {
-    readonly environmentId: EnvironmentId;
-    readonly projectId: ProjectId;
-    /** The pull request's repository, which picks a folder's checkout of it. */
-    readonly repository?: string;
-  },
+  current: { readonly environmentId: EnvironmentId; readonly projectId: ProjectId },
   projects: ReadonlyArray<AssignableProject & { readonly workspaceRoot: string }>,
   environments: ReadonlyArray<{
     readonly environmentId: EnvironmentId;
@@ -153,39 +96,30 @@ export function resolvePickableEnvironments(
     (project) =>
       project.environmentId === current.environmentId && project.id === current.projectId,
   );
-  const repositoryPath = current.repository?.toLowerCase();
-  const key =
-    own === undefined
-      ? undefined
-      : (repositoryKey(own) ??
-        (repositoryPath === undefined
-          ? undefined
-          : repositoryKeysOf(own).find((candidate) => candidate.endsWith(`/${repositoryPath}`))));
+  const key = own === undefined ? undefined : repositoryKey(own);
   const ownEnvironment = environments.find(
     (environment) => environment.environmentId === current.environmentId,
   );
   if (own === undefined || !key || ownEnvironment === undefined) return [];
-  const ownCopy = copyIn(own, key);
-  if (ownCopy === null) return [];
   const others = environments.flatMap((environment) => {
     if (environment.environmentId === current.environmentId) return [];
     // One entry per server, whichever copy comes first: a server holding two worktrees of the
     // repository is still one place to act, and what is being picked here is the server.
-    for (const project of projects) {
-      if (project.environmentId !== environment.environmentId) continue;
-      const copy = copyIn(project, key);
-      if (copy === null) continue;
-      return [
-        {
-          environmentId: environment.environmentId,
-          projectId: project.id,
-          workspaceRoot: copy.workspaceRoot,
-          label: environment.label,
-          ...(environment.machine === undefined ? {} : { machine: environment.machine }),
-        },
-      ];
-    }
-    return [];
+    const copy = projects.find(
+      (project) =>
+        project.environmentId === environment.environmentId && repositoryKey(project) === key,
+    );
+    return copy === undefined
+      ? []
+      : [
+          {
+            environmentId: environment.environmentId,
+            projectId: copy.id,
+            workspaceRoot: copy.workspaceRoot,
+            label: environment.label,
+            ...(environment.machine === undefined ? {} : { machine: environment.machine }),
+          },
+        ];
   });
   if (others.length === 0) return [];
   // The panel's own server first: it is what everything else on the panel is showing, so it is
@@ -194,25 +128,10 @@ export function resolvePickableEnvironments(
     {
       environmentId: current.environmentId,
       projectId: own.id,
-      workspaceRoot: ownCopy.workspaceRoot,
+      workspaceRoot: own.workspaceRoot,
       label: ownEnvironment.label,
       ...(ownEnvironment.machine === undefined ? {} : { machine: ownEnvironment.machine }),
     },
     ...others,
   ];
-}
-
-/** Where a project holds the repository: its own root, or a folder's checkout of it. */
-function copyIn(
-  project: AssignableProject & { readonly workspaceRoot: string },
-  key: string,
-): { readonly workspaceRoot: string } | null {
-  if (repositoryKey(project) === key) return { workspaceRoot: project.workspaceRoot };
-  if (project.repositoryIdentity != null) return null;
-  const checkout = project.workspaceRepositories?.find(
-    (identity) => identity.canonicalKey?.toLowerCase() === key,
-  );
-  return checkout === undefined
-    ? null
-    : { workspaceRoot: checkout.rootPath ?? project.workspaceRoot };
 }
