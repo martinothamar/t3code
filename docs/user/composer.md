@@ -244,8 +244,8 @@ merged, or closed when it was attached. Select it to inspect the captured title 
 then choose **Open pull request** to visit the pull request. On web and desktop, type `#` to browse the newest
 pull requests in the current project's repository, or in each repository a project folder holds.
 Continue typing digits to filter the recent list
-by any part of its pull request numbers. A complete number is also resolved directly, even when that
-pull request is older than the recent list. Type a single word after `#` to search pull requests in
+by any part of its pull request numbers. In a project with one repository, a complete number is also
+resolved directly, even when that pull request is older than the recent list. Type a single word after `#` to search pull requests in
 the repository by text. Choose a result to insert it as a chip.
 
 Another thread can be context too. Type `@` followed by part of its title to pick one from
