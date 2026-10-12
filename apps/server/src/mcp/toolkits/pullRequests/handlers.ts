@@ -60,22 +60,31 @@ interface ResolvedTarget {
 
 /**
  * The repository whose host and provider supply defaults for a repository-and-number input: the
- * project's own, or for a workspace folder, the checkout of that repository, else its first.
+ * project's own, or for a workspace folder, the checkout of that repository on the given host.
+ * A repository the folder doesn't hold takes the host its checkouts share, and none when they
+ * are on several, so the agent is asked for one rather than given a guess.
  */
 function projectRepositoryFor(
   project: OrchestrationProjectShell | undefined,
   repository: string,
+  host: string | undefined,
 ): RepositoryIdentity | null {
   if (project?.repositoryIdentity != null) return project.repositoryIdentity;
-  const checkouts = project?.workspaceRepositories ?? [];
-  return (
-    checkouts.find(
-      (identity) =>
-        sourceControlRepositorySelector(identity)?.toLowerCase() === repository.toLowerCase(),
-    ) ??
-    checkouts[0] ??
-    null
+  const checkouts = (project?.workspaceRepositories ?? []).filter(
+    (identity) => host === undefined || projectHostAndProvider(identity).host === host,
   );
+  const wanted = repository.toLowerCase();
+  const held = checkouts.find((identity) =>
+    [
+      sourceControlRepositorySelector(identity),
+      identity.displayName,
+      // The path below the host, which is how Azure names a repository in full.
+      identity.canonicalKey.split("/").slice(1).join("/"),
+    ].some((name) => name?.toLowerCase() === wanted),
+  );
+  if (held !== undefined) return held;
+  const hosts = new Set(checkouts.map((identity) => projectHostAndProvider(identity).host));
+  return hosts.size === 1 ? (checkouts[0] ?? null) : null;
 }
 
 /** The repository's host and provider supply defaults for a repository-and-number input. */
@@ -111,7 +120,7 @@ const resolveTarget = Effect.fn("PullRequestsToolkit.resolveTarget")(function* (
   if (input.repository === undefined || input.number === undefined) {
     return yield* new PullRequestTargetIncompleteError({});
   }
-  const identity = projectRepositoryFor(project, input.repository);
+  const identity = projectRepositoryFor(project, input.repository, input.host?.toLowerCase());
   const projectHost = projectHostAndProvider(identity);
   const host = (input.host ?? projectHost.host)?.toLowerCase();
   if (host === undefined) {
