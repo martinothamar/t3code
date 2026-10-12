@@ -16,7 +16,8 @@ The pipeline:
 2. Have a subagent install fframes, once per Sandbox.
 3. Prepare what you film: the released app, its own data, and nested Sandboxes. Do a dry run.
 4. Record takes of the desktop with [scripts/rec](scripts/rec) and [scripts/glide](scripts/glide).
-5. Cut them into sped-up segments with [scripts/cut.sh](scripts/cut.sh).
+5. Find cut points with [scripts/sheet](scripts/sheet), and cut sped-up segments with
+   [scripts/cut.sh](scripts/cut.sh).
 6. Compose the scenes and shots in the project, review stills, render.
 
 Work in `~/video` (`VIDEO_DIR` for the scripts), outside every checkout:
@@ -120,10 +121,12 @@ sh scripts/rec stop
 - Record in the order that reuses state, not the video's order. The walkthrough filmed the thread
   in the dry-run Sandbox, then stop/start/delete on it, then creating a fresh one.
 - Take a screenshot at each step boundary to know where things are; the recording does not care.
-- Contact sheets find the cut points, every 4 seconds for a take and every second around an event:
+- Contact sheets find the cut points. Read a whole take's sheet, then one per second around each
+  event; every frame carries its source second, the number `cut.sh` takes:
 
   ```sh
-  ffmpeg -v error -i take.mp4 -vf "fps=1/4,scale=400:-1,drawtext=fontfile=$HOME/video/project/media/JetBrainsMono-Bold.ttf:text='%{pts\:hms}':x=6:y=6:fontsize=22:fontcolor=white:box=1:boxcolor=black@0.7,tile=5x10" -frames:v 1 sheet.jpg
+  sh scripts/sheet take-thread-1            # one frame every 4 s → ~/video/sheets/take-thread-1.jpg
+  sh scripts/sheet take-thread-1 86 118     # 86–118 s, one frame per second
   ```
 
 ## 5. Cut
@@ -134,17 +137,26 @@ at 1–1.5×, and keep each segment under about 15 seconds so a caption can desc
 
 ## 6. Compose
 
-`template/src/lib.rs` is the walkthrough; replace its content, keep its machinery:
+Rewrite `src/lib.rs`, the video's content; `src/kit.rs` is the reusable part, changed only to
+fix or extend the kit. `video()` in `lib.rs` lists the scenes in order, built from the kit's:
 
-- `TitleScene`, `DiagramScene`, `SetupScene` (a terminal typing a list of `Line`s) and
-  `ManifestScene` are drawn scenes.
-- A `Shot` plays one segment in a window card and carries its `len` (from `cut.sh`), a chapter
-  label, a speed badge, `Cam(t, zoom, x, y)` keyframes eased between, and captions. Camera and ring
-  coordinates are source pixels of the recording.
-- Consecutive scenes cross-fade over `XFADE`. A shot's duration is `len - XFADE` so its footage
-  plays exactly once, and its captions are kept inside its own time so they swap rather than
-  overlap.
-- `SRC_VISIBLE_H` crops the recording desktop's taskbar off the bottom.
+| Scene           | Shows                                                                        |
+| --------------- | ---------------------------------------------------------------------------- |
+| `TitleCard`     | Title, subtitle and a chip; always first                                     |
+| `TerminalScene` | `Line`s (comments, typed commands, output) in a terminal; its length follows |
+| `CodeCard`      | A file's lines, the ones marked `true` highlighted                           |
+| `Shot`          | One footage segment in a window card                                         |
+| `StepsCard`     | Numbered steps and links; always last                                        |
+
+A `Shot` carries its segment's `len` from `cut.sh`, a chapter label, the speed it was cut at,
+`Cam(t, zoom, x, y)` keyframes eased between, captions as `(start, end, text)`, highlight rings and
+`fade_out`. Camera and ring coordinates are source pixels of the recording. Consecutive scenes
+cross-fade over `XFADE`; a shot's footage plays exactly once, and captions of consecutive shots
+swap rather than overlap. The kit crops the recording desktop's taskbar off the bottom.
+
+Anything else is a scene of the video's own, like the walkthrough's `DiagramScene`: a struct in
+`lib.rs` implementing `fframes::Scene` with the kit's helpers (`scene_opacity`, `ease_out`,
+`window_opacity`, `caption`, `window_chrome`) and palette.
 
 Review before rendering: `$B inspect`, `$B strip all -n 30 --columns 5 --width 560` and
 `$B frame "ShotName@4s,…" -o frames`, reading the images. Then:
@@ -169,8 +181,9 @@ Give the developer the path; the chat embeds a local video with `![title](/absol
 - **fframes API.** `frame.animate(timeline!(…))` inside `svgr!` takes only literals and imported
   constructors; compute anything else with `animate_runtime` and a `LazyLock<AnimationRuntime>`.
   `SyncVideoFrameInput::start_from` is a delay, not an in-point: shift `frame.index` instead, as
-  `footage_frame` does. Past a clip's end the frame is `None`, so clamp. `frame.text_width` needs
-  `&mut Frame`. `<defs>` ids are global across overlapping scenes; suffix them per scene.
+  `footage_frame` in `kit.rs` does. Past a clip's end the frame is `None`, so clamp.
+  `frame.text_width` needs `&mut Frame`. `<defs>` ids are global across overlapping scenes; suffix
+  them per scene.
 - **Footage.** Everything in `media/` is compiled in and must not be video; footage is read at
   runtime from `FFRAMES_FOOTAGE_DIR`, so replacing a segment needs no rebuild. A nonzero stream
   `start_time` shifts a clip; `cut.sh` resets it.

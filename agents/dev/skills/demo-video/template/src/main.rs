@@ -9,7 +9,7 @@ use fframes_skia_renderer::{
 };
 use std::path::PathBuf;
 use std::process::ExitCode;
-use demo_video::{HEIGHT, DemoMedia, DemoVideo, WIDTH};
+use demo_video::{DemoMedia, HEIGHT, WIDTH};
 
 /// Flags of this video next to the standard ones of `fframes::cli` (render, frame, strip,
 /// inspect, audio, ...). Run `cargo run --release -- --help`.
@@ -35,7 +35,7 @@ fn main() -> ExitCode {
     let dynamic = footage.process_media_source().expect("footage media");
     let all = CombinedMediaProvider::from([&media as &dyn MediaProvider, &dynamic]);
 
-    let video = DemoVideo::new(&media);
+    let video = demo_video::video();
     let options = RenderOptions {
         media: Some(&all),
         video_encoder_options: EncoderOptions {
