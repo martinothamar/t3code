@@ -631,6 +631,50 @@ it.effect("serves a workspace folder's repositories from their own checkouts", (
   }),
 );
 
+it.effect("leaves out the repositories another connection lists", () =>
+  Effect.gen(function* () {
+    const listed: Array<string> = [];
+    const repositories = ["acme/app", "acme/infra"].map(
+      (repository) =>
+        project({ id: "member", title: "", workspaceRoot: "", repository }).repositoryIdentity!,
+    );
+    const service = yield* makeService({
+      projects: [project({ id: "sandbox", title: "sandbox", workspaceRoot: "/workspace" })],
+      resolveWorkspaceRepositories: () =>
+        Effect.succeed(
+          repositories.map((identity) => ({
+            ...identity,
+            rootPath: `/workspace/${identity.displayName!.split("/")[1]}`,
+          })),
+        ),
+      providers: [
+        fakeProvider(SourceControlProviderKind.make("github"), {
+          listChangeRequests: ({ repository }) =>
+            Effect.sync(() => {
+              listed.push(repository);
+              return {
+                items: [changeRequest(1, "2026-07-02T00:00:00Z")],
+                truncated: false,
+                continues: false,
+              };
+            }),
+        }),
+      ],
+    });
+
+    const result = yield* service.list({
+      state: "open",
+      excludeRepositories: ["GitHub.com/Acme/Infra"],
+    });
+    assert.deepStrictEqual(
+      result.entries.map(({ repository }) => repository),
+      ["acme/app"],
+    );
+    // Not read from the host at all, rather than read and dropped.
+    assert.deepStrictEqual(listed, ["acme/app"]);
+  }),
+);
+
 it.effect(
   "lists a repository through the project rooted in it, not a workspace that holds it",
   () =>

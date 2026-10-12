@@ -158,6 +158,10 @@ checked out in its immediate subfolders. Threads in it show the status of the pu
 linked to them, and open links to those repositories' pull requests beside the thread. Symlinks and folders whose names start with `.` are skipped, and a new checkout
 shows up within two minutes. Writing a guide needs a project rooted in that repository.
 
+When several connected environments hold the same repository, such as Sandboxes that each
+clone it, Pull requests lists it from one of them, and a pull request's actions let you pick
+which environment's checkout to work in.
+
 A checkout's pull requests come from the repository `gh repo set-default` chose for it. Without
 one, they come from its `upstream` remote, then its `origin`. For a fork whose pull requests are
 opened on the fork itself, run `gh repo set-default` with the fork in that checkout.
