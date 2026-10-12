@@ -833,7 +833,7 @@ export const make = Effect.gen(function* () {
   });
 
   const listWorkspaceProjects = (
-    filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host">,
+    filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host" | "excludeRepositories">,
   ): Effect.Effect<WorkspaceProjects, PullRequestError> =>
     (filter.projectId === undefined
       ? projects.listShells(
@@ -876,6 +876,11 @@ export const make = Effect.gen(function* () {
         >();
         const viewerRoots = new Map<string, string[]>();
         const seen = new Set<string>();
+        const excluded = new Set(
+          (filter.excludeRepositories ?? []).map((key) =>
+            canonicalRepositoryKey(key.toLowerCase()),
+          ),
+        );
         for (const project of projects) {
           if (filter.projectId !== undefined && project.id !== filter.projectId) continue;
           if (filter.projectIds !== undefined && !filter.projectIds.includes(project.id)) continue;
@@ -909,6 +914,15 @@ export const make = Effect.gen(function* () {
             const roots = viewerRoots.get(host);
             if (roots === undefined) viewerRoots.set(host, [project.workspaceRoot]);
             else if (!roots.includes(project.workspaceRoot)) roots.push(project.workspaceRoot);
+          }
+          // Another connection lists it; the viewer lookup above still counts this checkout.
+          // Legacy identities can lack the key, and then nothing names them to leave out.
+          if (
+            excluded.size > 0 &&
+            identity.canonicalKey !== undefined &&
+            excluded.has(canonicalRepositoryKey(identity.canonicalKey.toLowerCase()))
+          ) {
+            continue;
           }
           const repositoryKey =
             api?.repositoryKey?.({ canonicalKey: identity.canonicalKey }) ?? null;
@@ -2982,6 +2996,7 @@ export const make = Effect.gen(function* () {
         limit,
         query,
         cursorEntries,
+        excludeRepositories,
       ] = JSON.parse(key) as [
         number,
         string,
@@ -2993,6 +3008,7 @@ export const make = Effect.gen(function* () {
         number | null,
         string | null,
         ReadonlyArray<[string, string]> | null,
+        ReadonlyArray<string> | null,
       ];
       return listUncached({
         state,
@@ -3004,6 +3020,7 @@ export const make = Effect.gen(function* () {
         ...(limit === null ? {} : { limit }),
         ...(query === null ? {} : { query }),
         ...(cursorEntries === null ? {} : { cursors: Object.fromEntries(cursorEntries) }),
+        ...(excludeRepositories === null ? {} : { excludeRepositories }),
       } as PullRequestListInput);
     },
     {
@@ -3036,6 +3053,7 @@ export const make = Effect.gen(function* () {
       input.cursors === undefined
         ? null
         : Object.entries(input.cursors).toSorted(([left], [right]) => left.localeCompare(right)),
+      input.excludeRepositories === undefined ? null : [...input.excludeRepositories].sort(),
     ]);
     // A replacement reader can join a lookup still finishing its previous reader's cancellation.
     return Cache.get(listCache, key).pipe(
