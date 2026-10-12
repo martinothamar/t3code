@@ -164,6 +164,8 @@ function LinkPullRequestDialog({
       project.repositoryIdentity != null
         ? [project.repositoryIdentity]
         : (project.workspaceRepositories ?? []);
+    // Two checkouts of one repository are one repository to link from.
+    const seen = new Set<string>();
     return identities.flatMap((identity) => {
       const repository =
         identity.displayName ??
@@ -171,6 +173,9 @@ function LinkPullRequestDialog({
       if (repository === null) return [];
       const definition = sourceControlClients.get(identity.provider ?? "unknown");
       const host = pullRequestHostOf(identity, definition.kind);
+      const key = `${host}/${repository}`.toLowerCase();
+      if (seen.has(key)) return [];
+      seen.add(key);
       return [
         {
           host,
@@ -225,12 +230,18 @@ function LinkPullRequestDialog({
     onOpenChange(false);
   }, [linking, onOpenChange, resolved, threadRef]);
 
+  // A folder holding several repositories names one with repo#123 instead of a bare number.
+  const severalRepositories = ownRepositories.length > 1;
   const validation = !dirty
     ? null
     : reference.trim().length === 0
-      ? "Paste a pull request URL or enter 123 / #123."
+      ? severalRepositories
+        ? "Paste a pull request URL or enter repo#123."
+        : "Paste a pull request URL or enter 123 / #123."
       : resolved === null
-        ? "Use a pull request URL, 123, or #123."
+        ? severalRepositories
+          ? "Use a pull request URL or repo#123."
+          : "Use a pull request URL, 123, or #123."
         : "error" in resolved
           ? resolved.error
           : null;
@@ -241,8 +252,9 @@ function LinkPullRequestDialog({
         <DialogHeader>
           <DialogTitle>Link pull request</DialogTitle>
           <DialogDescription>
-            Attach a pull request to this thread by its URL, or by its number for this thread's
-            repository.
+            {severalRepositories
+              ? "Attach a pull request to this thread by its URL, or as repo#123 for one of the repositories in this thread's folder."
+              : "Attach a pull request to this thread by its URL, or by its number for this thread's repository."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
