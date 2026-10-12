@@ -387,6 +387,13 @@ export interface SupportedProject {
   readonly repositoryKey: string | null;
 }
 
+/** A project with one repository it serves; a lower rank serves a repository first. */
+interface RankedProject {
+  /** 0: the repository the project is rooted in. 1: one a workspace folder holds. */
+  readonly rank: 0 | 1;
+  readonly project: OrchestrationProjectShell;
+}
+
 /**
  * What the workspace has, split by whether this build can read it. Hosts with no
  * implementation are counted rather than dropped, so their projects are explained in the
@@ -803,15 +810,25 @@ export const make = Effect.gen(function* () {
    */
   const withRepositoryIdentities = Effect.fnUntraced(function* (
     project: OrchestrationProjectShell,
-  ): Effect.fn.Return<ReadonlyArray<OrchestrationProjectShell>> {
-    if (project.repositoryIdentity != null) return [project];
+  ): Effect.fn.Return<ReadonlyArray<RankedProject>> {
+    if (project.repositoryIdentity != null) return [{ rank: 0, project }];
     const repositoryIdentity = yield* repositoryIdentities.resolve(project.workspaceRoot);
-    if (repositoryIdentity !== null) return [{ ...project, repositoryIdentity }];
+    if (repositoryIdentity !== null)
+      return [{ rank: 0, project: { ...project, repositoryIdentity } }];
     const identities = yield* repositoryIdentities.resolveWorkspace(project.workspaceRoot);
     return identities.flatMap((identity) =>
       identity.rootPath === undefined
         ? []
-        : [{ ...project, workspaceRoot: identity.rootPath, repositoryIdentity: identity }],
+        : [
+            {
+              rank: 1,
+              project: {
+                ...project,
+                workspaceRoot: identity.rootPath,
+                repositoryIdentity: identity,
+              },
+            },
+          ],
     );
   });
 
@@ -835,7 +852,16 @@ export const make = Effect.gen(function* () {
       Effect.flatMap((projects) =>
         Effect.forEach(projects, withRepositoryIdentities, {
           concurrency: REPOSITORY_CONCURRENCY,
-        }).pipe(Effect.map((expanded) => expanded.flat())),
+        }).pipe(
+          // A repository is listed once, through the first project that holds it, so a project
+          // rooted in it comes before a workspace folder that also holds it.
+          Effect.map((expanded) =>
+            expanded
+              .flat()
+              .toSorted((left, right) => left.rank - right.rank)
+              .map(({ project }) => project),
+          ),
+        ),
       ),
       Effect.flatMap((projects) =>
         refineUnknownProjectKinds(projects, filter).pipe(

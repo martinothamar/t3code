@@ -44,7 +44,8 @@ export class RepositoryIdentityResolver extends Context.Service<
     /**
      * The repositories in a workspace folder: one that is not inside a repository itself but
      * holds checkouts in its immediate child folders, such as an agentctl Sandbox's working
-     * directory. Dot-folders are skipped, so `.worktrees` is not read as more repositories.
+     * directory. Dot-folders and symlinks are skipped, so `.worktrees` is not read as more
+     * repositories.
      * Empty for a folder inside a repository, so repository-rooted projects keep one identity.
      */
     readonly resolveWorkspace: (
@@ -234,11 +235,17 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
         Effect.flatMap((names) =>
           Effect.filter(
             names.filter((name) => !name.startsWith(".")).toSorted(),
-            // A `.git` directory for a clone, or a `.git` file for a worktree.
+            // A `.git` directory for a clone, or a `.git` file for a worktree. A symlink could
+            // lead outside the folder, so only real child folders count.
             (name) =>
-              fileSystem
-                .exists(path.join(cwd, name, ".git"))
-                .pipe(Effect.orElseSucceed(() => false)),
+              fileSystem.readLink(path.join(cwd, name)).pipe(
+                Effect.as(false),
+                Effect.catch(() =>
+                  fileSystem
+                    .exists(path.join(cwd, name, ".git"))
+                    .pipe(Effect.orElseSucceed(() => false)),
+                ),
+              ),
             { concurrency: 16 },
           ),
         ),

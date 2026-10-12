@@ -605,6 +605,14 @@ it.effect("serves a workspace folder's repositories from their own checkouts", (
       ["acme/infra", "/workspace/infra"],
       ["acme/app", "/workspace/app"],
     ]);
+    // A repository the folder doesn't hold is refused, not read from one it does.
+    const refused = yield* Effect.flip(
+      service.summary(
+        { projectId: "sandbox" as ProjectId, repository: "acme/other", number: 1 },
+        { recoverTransientFailure: false },
+      ),
+    );
+    assert.strictEqual(refused._tag, "PullRequestOperationError");
 
     const { stats } = yield* service.listStats({
       refs: result.entries.map(({ projectId, repository, number }) => ({
@@ -621,6 +629,44 @@ it.effect("serves a workspace folder's repositories from their own checkouts", (
       ],
     );
   }),
+);
+
+it.effect(
+  "lists a repository through the project rooted in it, not a workspace that holds it",
+  () =>
+    Effect.gen(function* () {
+      const app = project({
+        id: "app",
+        title: "app",
+        workspaceRoot: "/workspace/app",
+        repository: "acme/app",
+      });
+      const service = yield* makeService({
+        projects: [project({ id: "sandbox", title: "sandbox", workspaceRoot: "/workspace" }), app],
+        resolveWorkspaceRepositories: (cwd) =>
+          Effect.succeed(
+            cwd === "/workspace"
+              ? [{ ...app.repositoryIdentity!, rootPath: "/workspace/app" }]
+              : [],
+          ),
+        providers: [
+          fakeProvider(SourceControlProviderKind.make("github"), {
+            listChangeRequests: () =>
+              Effect.succeed({
+                items: [changeRequest(1, "2026-07-02T00:00:00Z")],
+                truncated: false,
+                continues: false,
+              }),
+          }),
+        ],
+      });
+
+      const result = yield* service.list({ state: "open" });
+      assert.deepStrictEqual(
+        result.entries.map(({ projectId, repository }) => [projectId, repository]),
+        [["app", "acme/app"]],
+      );
+    }),
 );
 
 it.effect("lists GitHub Enterprise PRs for a stored unknown repository after host discovery", () =>

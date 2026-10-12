@@ -268,6 +268,18 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
       yield* checkout("app", "https://github.com/acme/app.git");
       yield* checkout(".worktrees/app-feature", "https://github.com/acme/app.git");
       yield* fileSystem.makeDirectory(path.join(workspace, "notes"));
+      // Checkouts that can't be read are left out without hiding the others.
+      yield* fileSystem.makeDirectory(path.join(workspace, "scratch"));
+      yield* git(path.join(workspace, "scratch"), ["init"]);
+      yield* fileSystem.makeDirectory(path.join(workspace, "broken"));
+      yield* fileSystem.writeFileString(path.join(workspace, "broken", ".git"), "not a gitdir\n");
+      // A symlink to a checkout elsewhere would run reads outside the folder.
+      const elsewhere = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-elsewhere-",
+      });
+      yield* git(elsewhere, ["init"]);
+      yield* git(elsewhere, ["remote", "add", "origin", "https://github.com/acme/elsewhere.git"]);
+      yield* fileSystem.symlink(elsewhere, path.join(workspace, "linked"));
 
       const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
       const repositories = yield* resolver.resolveWorkspace(workspace);
