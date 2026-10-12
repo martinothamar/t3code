@@ -479,6 +479,7 @@ function makeService(input: {
   readonly resolveHandle?: SourceControlProviderRegistry.SourceControlProviderRegistry["Service"]["resolveHandle"];
   readonly resolveRepositoryIdentity?: RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]["resolve"];
   readonly resolveWorkspaceRepositories?: RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]["resolveWorkspace"];
+  readonly resolveAlternateRepository?: RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]["resolveAlternate"];
 }) {
   // Built into the test's own scope rather than provided call by call: the marks store owns a
   // database, and `Effect.provide` would close it the moment the service was handed back.
@@ -507,6 +508,7 @@ function makeService(input: {
         }),
         Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
           resolve: input.resolveRepositoryIdentity ?? (() => Effect.succeed(null)),
+          resolveAlternate: input.resolveAlternateRepository ?? (() => Effect.succeed(null)),
           resolveWorkspace: input.resolveWorkspaceRepositories ?? (() => Effect.succeed([])),
         }),
         SourceControlRateLimit.layer,
@@ -667,6 +669,92 @@ it.effect(
         [["app", "acme/app"]],
       );
     }),
+);
+
+it.effect("lists a fork's upstream from the fork's checkout, behind a project rooted in it", () =>
+  Effect.gen(function* () {
+    const listed: Array<readonly [string, string, string]> = [];
+    const summarized: Array<readonly [string, string]> = [];
+    const upstream = project({
+      id: "member",
+      title: "",
+      workspaceRoot: "",
+      repository: "acme/app",
+    });
+    const makeForkService = (projects: ReadonlyArray<OrchestrationProjectShell>) =>
+      makeService({
+        projects,
+        resolveAlternateRepository: (cwd) =>
+          Effect.succeed(cwd === "/fork" ? upstream.repositoryIdentity! : null),
+        providers: [
+          fakeProvider(SourceControlProviderKind.make("github"), {
+            listChangeRequests: ({ cwd, repository }) =>
+              Effect.sync(() => {
+                listed.push([projects.length === 1 ? "alone" : "beside", repository, cwd]);
+                return {
+                  items: [changeRequest(1, "2026-07-02T00:00:00Z")],
+                  truncated: false,
+                  continues: false,
+                };
+              }),
+            getChangeRequestSummary: ({ cwd, repository }) =>
+              Effect.sync(() => {
+                summarized.push([repository, cwd]);
+                return changeRequest(1, "2026-07-02T00:00:00Z");
+              }),
+          }),
+        ],
+      });
+    const fork = project({
+      id: "fork",
+      title: "fork",
+      workspaceRoot: "/fork",
+      repository: "me/app",
+    });
+
+    const alone = yield* makeForkService([fork]);
+    const result = yield* alone.list({ state: "open" });
+    assert.deepStrictEqual(
+      result.entries.map(({ projectId, repository }) => [projectId, repository]).toSorted(),
+      [
+        ["fork", "acme/app"],
+        ["fork", "me/app"],
+      ],
+    );
+    yield* alone.summary(
+      { projectId: "fork" as ProjectId, repository: "acme/app", number: 1 },
+      { recoverTransientFailure: false },
+    );
+    assert.deepStrictEqual(summarized, [["acme/app", "/fork"]]);
+
+    const beside = yield* makeForkService([
+      fork,
+      project({
+        id: "upstream",
+        title: "upstream",
+        workspaceRoot: "/upstream",
+        repository: "acme/app",
+      }),
+    ]);
+    const both = yield* beside.list({ state: "open" });
+    assert.deepStrictEqual(
+      both.entries.map(({ projectId, repository }) => [projectId, repository]).toSorted(),
+      [
+        ["fork", "me/app"],
+        ["upstream", "acme/app"],
+      ],
+    );
+    assert.deepStrictEqual(
+      listed
+        .filter(([run]) => run === "beside")
+        .map(([, repository, cwd]) => [repository, cwd])
+        .toSorted(),
+      [
+        ["acme/app", "/upstream"],
+        ["me/app", "/fork"],
+      ],
+    );
+  }),
 );
 
 it.effect("lists GitHub Enterprise PRs for a stored unknown repository after host discovery", () =>

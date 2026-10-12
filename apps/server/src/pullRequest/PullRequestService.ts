@@ -389,8 +389,11 @@ export interface SupportedProject {
 
 /** A project with one repository it serves; a lower rank serves a repository first. */
 interface RankedProject {
-  /** 0: the repository the project is rooted in. 1: one a workspace folder holds. */
-  readonly rank: 0 | 1;
+  /**
+   * 0: the repository the project is rooted in. 1: one a workspace folder holds. 2: a checkout's
+   * other remote, such as a fork's upstream.
+   */
+  readonly rank: 0 | 1 | 2;
   readonly project: OrchestrationProjectShell;
 }
 
@@ -808,7 +811,7 @@ export const make = Effect.gen(function* () {
    * itself, reads as one project per repository it holds, each run from its own checkout, so
    * everything downstream serves them as it serves a project rooted in that repository.
    */
-  const withRepositoryIdentities = Effect.fnUntraced(function* (
+  const withCheckoutRepositories = Effect.fnUntraced(function* (
     project: OrchestrationProjectShell,
   ): Effect.fn.Return<ReadonlyArray<RankedProject>> {
     if (project.repositoryIdentity != null) return [{ rank: 0, project }];
@@ -830,6 +833,28 @@ export const make = Effect.gen(function* () {
             },
           ],
     );
+  });
+
+  /**
+   * Each checkout also serves its other remote's repository, so a fork lists its own pull
+   * requests and its upstream's. Those come last, behind any project rooted in that repository.
+   */
+  const withRepositoryIdentities = Effect.fnUntraced(function* (
+    project: OrchestrationProjectShell,
+  ): Effect.fn.Return<ReadonlyArray<RankedProject>> {
+    const checkouts = yield* withCheckoutRepositories(project);
+    const alternates = yield* Effect.forEach(checkouts, ({ project: checkout }) =>
+      repositoryIdentities
+        .resolveAlternate(checkout.workspaceRoot)
+        .pipe(
+          Effect.map((repositoryIdentity): ReadonlyArray<RankedProject> =>
+            repositoryIdentity === null
+              ? []
+              : [{ rank: 2, project: { ...checkout, repositoryIdentity } }],
+          ),
+        ),
+    );
+    return [...checkouts, ...alternates.flat()];
   });
 
   const listWorkspaceProjects = (

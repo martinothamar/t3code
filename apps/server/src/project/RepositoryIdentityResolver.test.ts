@@ -105,14 +105,16 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
       expect(calls).toEqual([
         ["-C", "/repo/packages/web", "rev-parse", "--show-toplevel"],
         ["-C", "/repo", "remote", "-v"],
+        ["-C", "/repo", "config", "--get-regexp", "^remote\\..*\\.gh-resolved$"],
       ]);
 
       const refreshed = yield* resolver.resolve("/repo/packages/web", { refresh: true });
       expect(refreshed?.rootPath).toBe("/repo/packages/web");
       expect(yield* resolver.resolve("/repo/packages/web")).toEqual(refreshed);
-      expect(calls.slice(2)).toEqual([
+      expect(calls.slice(3)).toEqual([
         ["-C", "/repo/packages/web", "rev-parse", "--show-toplevel"],
         ["-C", "/repo/packages/web", "remote", "-v"],
+        ["-C", "/repo/packages/web", "config", "--get-regexp", "^remote\\..*\\.gh-resolved$"],
       ]);
       remoteUrl = "git@ssh.forge.test:team/repo.git";
       const forgejo = yield* resolver.resolve(rootPath, { refresh: true });
@@ -171,6 +173,7 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
         ["-C", "/repo/packages/web", "rev-parse", "--show-toplevel"],
         ["-C", "/repo/packages/web", "rev-parse", "--show-toplevel"],
         ["-C", "/repo", "remote", "-v"],
+        ["-C", "/repo", "config", "--get-regexp", "^remote\\..*\\.gh-resolved$"],
       ]);
     }).pipe(Effect.provide(Layer.merge(TestClock.layer(), layerResolver)));
   });
@@ -308,6 +311,35 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
         "github.com/acme/docs",
         "github.com/acme/infra",
       ]);
+    }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
+  );
+
+  it.effect("follows the remote gh made the default, and keeps the other as the alternate", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-gh-default-",
+      });
+      yield* git(cwd, ["init"]);
+      yield* git(cwd, ["remote", "add", "origin", "https://github.com/me/app.git"]);
+      yield* git(cwd, ["remote", "add", "upstream", "https://github.com/acme/app.git"]);
+      const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+
+      // Without a default, a fork's pull requests go upstream.
+      expect((yield* resolver.resolve(cwd))?.canonicalKey).toBe("github.com/acme/app");
+      expect((yield* resolver.resolveAlternate(cwd))?.canonicalKey).toBe("github.com/me/app");
+
+      // As `gh repo set-default me/app` records it.
+      yield* git(cwd, ["config", "remote.origin.gh-resolved", "base"]);
+      expect((yield* resolver.resolve(cwd, { refresh: true }))?.canonicalKey).toBe(
+        "github.com/me/app",
+      );
+      expect((yield* resolver.resolveAlternate(cwd))?.canonicalKey).toBe("github.com/acme/app");
+
+      // A checkout with one remote has no alternate.
+      yield* git(cwd, ["remote", "remove", "upstream"]);
+      yield* resolver.resolve(cwd, { refresh: true });
+      expect(yield* resolver.resolveAlternate(cwd)).toBeNull();
     }).pipe(Effect.provide(RepositoryIdentityResolver.layer)),
   );
 

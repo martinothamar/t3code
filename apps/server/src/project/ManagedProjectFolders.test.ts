@@ -45,6 +45,7 @@ const layerEnrichment = ProjectEnrichmentService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolveAlternate: () => Effect.succeed(null),
         resolveWorkspace: () => Effect.succeed([]),
         resolve: () => Effect.succeed(null),
       }),
