@@ -3,7 +3,8 @@ FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884
 ENV DEBIAN_FRONTEND=noninteractive
 
 # What agentd needs from the image (systemd as init, OpenSSH for `access: ssh`, tmux for Sessions,
-# sudo), and what Pi's tools reach for: Git, ripgrep and fd.
+# sudo), what Pi's tools reach for (Git, ripgrep and fd), and libatomic, which the T3 Code server
+# that the desktop app installs over SSH links against.
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         ca-certificates \
@@ -13,6 +14,7 @@ RUN apt-get update \
         iproute2 \
         jq \
         less \
+        libatomic1 \
         openssh-server \
         procps \
         python3 \
