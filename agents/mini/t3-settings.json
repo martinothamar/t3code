@@ -1,0 +1,6 @@
+{
+  "providerInstances": {
+    "pi": { "driver": "pi", "enabled": true }
+  },
+  "textGenerationModelSelection": { "instanceId": "pi", "model": "aivar/sigma2:Qwen3.8-27B" }
+}

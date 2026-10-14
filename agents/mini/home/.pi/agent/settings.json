@@ -1,0 +1,5 @@
+{
+  "$schema": "https://pi.dev/schemas/settings.schema.json",
+  "defaultProvider": "aivar",
+  "defaultModel": "sigma2:Qwen3.8-27B"
+}
