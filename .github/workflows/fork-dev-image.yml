@@ -36,7 +36,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          persist-credentials: false
+          # Immediate credential removal traverses .repos' gitlinks without .gitmodules.
+          # Use checkout's default post-job cleanup, as Fork CI does.
           sparse-checkout: agents/dev
 
       - name: Set up Docker
