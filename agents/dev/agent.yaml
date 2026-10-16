@@ -5,9 +5,8 @@ metadata:
 spec:
   sandbox:
     image:
-      type: build
-      context: .
-      dockerfile: Dockerfile
+      type: reference
+      reference: ghcr.io/martinothamar/t3code/t3code-dev:latest
     platform:
       os: linux
     resources:

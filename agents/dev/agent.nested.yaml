@@ -9,6 +9,10 @@ metadata:
 
 spec:
   sandbox:
+    image:
+      type: build
+      context: .
+      dockerfile: Dockerfile
     resources:
       cpu: "4"
       memory: "6Gi"

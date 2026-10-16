@@ -1,0 +1,83 @@
+# Pull requests and manual runs on other branches only build; main also publishes to GHCR.
+name: Fork dev image
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - agents/dev/**
+      - .github/workflows/fork-dev-image.yml
+  push:
+    branches:
+      - main
+    paths:
+      - agents/dev/**
+      - .github/workflows/fork-dev-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: fork-dev-image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}/t3code-dev
+
+jobs:
+  build:
+    name: Build dev image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          sparse-checkout: agents/dev
+
+      - name: Set up Docker
+        uses: docker/setup-docker-action@e43656e248c0bd0647d3f5c195d116aacf6fcaf4 # v4.7.0
+        with:
+          daemon-config: |
+            {
+              "features": {
+                "containerd-snapshotter": true
+              }
+            }
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - name: Login to GHCR
+        if: github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Build and publish image
+        env:
+          PUBLISH: ${{ github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+
+          set --
+          if [ "$PUBLISH" = true ]; then
+            set -- \
+              --tag "${IMAGE}:sha-${GITHUB_SHA::10}" \
+              --tag "${IMAGE}:latest" \
+              --push \
+              --cache-to "type=registry,ref=${IMAGE}:buildcache,mode=max,image-manifest=true"
+          fi
+
+          docker buildx build \
+            --provenance=false \
+            --sbom=false \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --cache-from "type=registry,ref=${IMAGE}:buildcache" \
+            --platform linux/amd64,linux/arm64 \
+            "$@" \
+            agents/dev
