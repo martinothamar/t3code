@@ -27,12 +27,28 @@ from [rustup](https://rustup.rs) and your platform's
 node scripts/fork/install-desktop.ts --from-source
 ```
 
-Run the script again to update. [Installing](./docs/operations/fork-desktop-build.md) has the
-details.
+With Make installed, `make install` and `make install-source` run the same commands; `make` lists
+the shortcuts. [Installing](./docs/operations/fork-desktop-build.md) has the details.
 
 To connect to Sandboxes, run `agentctl ssh-config install` once, and give your Agents
 `access: [{type: ssh}]` in their manifests. They then show up in the app; see
 [agentctl Sandboxes](./docs/user/agentctl-sandboxes.md).
+
+## Updating
+
+We force-push `main` when updating the fork, so update your checkout with a fetch and hard reset
+instead of `git pull`. Save local commits on another branch and stash uncommitted changes first:
+the reset discards tracked changes and moves your local `main` to match `origin/main`.
+
+```sh
+git switch main
+git fetch origin
+git reset --hard origin/main
+```
+
+Or, while on `main`, run `make update`. This updates the checkout; then run `make install` for the
+latest desktop release or `make install-source` to build and install the updated checkout. Without
+Make, run the corresponding install script above again.
 
 ## Developing the fork
 
