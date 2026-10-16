@@ -46,7 +46,7 @@ git fetch origin
 git reset --hard origin/main
 ```
 
-Or, while on `main`, run `make update`. This updates the checkout; then run `make install` for the
+Or, while on `main`, run `make pull`. This updates the checkout; then run `make install` for the
 latest desktop release or `make install-source` to build and install the updated checkout. Without
 Make, run the corresponding install script above again.
 
