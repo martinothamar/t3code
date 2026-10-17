@@ -105,6 +105,9 @@ pointer. Say what you are about to do on it before you do it, and stop when they
 
 ## Nested Agents
 
+Use only cheap models when testing nested Agents, such as Claude Haiku or GPT Luna, with the
+lowest available reasoning effort.
+
 `agentctl` and `agentd` are installed, and the Sandbox has `/dev/kvm` and Podman, so the agentctl
 integration can be exercised against nested Agents. Log the nested `agentd` in with the
 placeholders this Sandbox already holds, and keep nested secret files outside any checkout:
