@@ -1,14 +1,18 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
+import { EnvironmentId, requiredScopesForServerSettingsPatch } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
 
 import { environmentCatalog } from "../connection/catalog";
 import { useEnvironmentPresentation } from "../state/presentation";
 import { useEnvironmentQuery } from "../state/query";
+import { primaryServerConfigAtom, serverEnvironment } from "../state/server";
+import { readEnvironmentScope } from "../state/session";
 import { environmentShell } from "../state/shell";
 import { useAtomCommand } from "../state/use-atom-command";
-import { isSandboxBeingDeleted } from "./sandboxConnections";
+import { isSandboxBeingDeleted, readAgentctlBridge } from "./sandboxConnections";
 import { useEnsureSandboxProject } from "./sandboxProjects";
+import { sandboxSettingsSeedPatch } from "./sandboxSettingsSeed";
 import { useSandboxes } from "./useSandboxes";
 
 /**
@@ -48,6 +52,7 @@ export function SandboxConnectionCoordinator() {
         environmentId={EnvironmentId.make(sandbox.environmentId)}
         running={sandbox.phase === "ready" && sandbox.action === null}
         workingDirectory={sandbox.workingDirectory}
+        settingsSeeded={sandbox.settingsSeeded}
       />
     ),
   );
@@ -58,10 +63,21 @@ function SandboxEnvironmentCoordinator(props: {
   readonly environmentId: EnvironmentId;
   readonly running: boolean;
   readonly workingDirectory: string | null;
+  readonly settingsSeeded: boolean;
 }) {
   const { presentation } = useEnvironmentPresentation(props.environmentId);
   const shell = useEnvironmentQuery(environmentShell.stateAtom(props.environmentId));
   const ensureProject = useEnsureSandboxProject();
+  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    reportFailure: false,
+  });
+  const localConfig = useAtomValue(primaryServerConfigAtom);
+  const sandboxConfig = useAtomValue(serverEnvironment.configValueAtom(props.environmentId));
+  // The Sandbox's providers arrive after it connects; waiting for them keeps
+  // model selections from being skipped for good.
+  const configsLoaded =
+    localConfig !== null && sandboxConfig !== null && sandboxConfig.providers.length > 0;
+  const seeding = useRef(false);
   const retryNow = useAtomCommand(environmentCatalog.retryNow, { reportFailure: false });
   const connected = presentation?.connection.phase === "connected";
   // Only a live project list can show the project is missing; a cached one may predate a removal.
@@ -86,6 +102,44 @@ function SandboxEnvironmentCoordinator(props: {
       if (error !== null) console.warn("Could not add the Sandbox project.", error);
     });
   }, [ready, ensureProject, props.name, props.environmentId, props.workingDirectory]);
+
+  // A new Sandbox starts with the preferences changed on this computer, once,
+  // so a later deliberate choice in the Sandbox is never undone.
+  const seedSettings = useEffectEvent(async () => {
+    if (seeding.current || props.settingsSeeded || !configsLoaded) {
+      return;
+    }
+    seeding.current = true;
+    try {
+      const patch = sandboxSettingsSeedPatch({
+        local: localConfig.settings,
+        sandbox: sandboxConfig.settings,
+        sandboxProviderInstanceIds: new Set(
+          sandboxConfig.providers.map((provider) => provider.instanceId),
+        ),
+      });
+      if (Object.keys(patch).length > 0) {
+        const allowed = requiredScopesForServerSettingsPatch(patch).every((scope) =>
+          readEnvironmentScope(props.environmentId, scope),
+        );
+        if (!allowed) return;
+        const result = await updateSettings({
+          environmentId: props.environmentId,
+          input: { patch },
+        });
+        if (result._tag === "Failure") {
+          console.warn("Could not seed the Sandbox settings.");
+          return;
+        }
+      }
+      await readAgentctlBridge()?.markSettingsSeeded(props.name, props.environmentId);
+    } finally {
+      seeding.current = false;
+    }
+  });
+  useEffect(() => {
+    if (ready && configsLoaded) void seedSettings();
+  }, [ready, configsLoaded]);
 
   return null;
 }

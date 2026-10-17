@@ -12,5 +12,6 @@ export const AGENTCTL_CHANNELS = {
   removeManifestRoot: "desktop:agentctl-remove-manifest-root",
   refreshManifestRoots: "desktop:agentctl-refresh-manifest-roots",
   pullManifestRoots: "desktop:agentctl-pull-manifest-roots",
+  markSettingsSeeded: "desktop:agentctl-mark-settings-seeded",
   openManifestRoot: "desktop:agentctl-open-manifest-root",
 } as const;

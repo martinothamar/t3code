@@ -23,6 +23,7 @@ function sandbox(overrides: Partial<AgentctlSandbox> = {}): AgentctlSandbox {
     sshAccess: true,
     sshTarget: { alias: "agentctl-worker", hostname: "worker", username: "agent", port: 22 },
     environmentId: EnvironmentId.make("env-worker"),
+    settingsSeeded: false,
     workingDirectory: "/home/agent/code",
     connectError: null,
     action: null,
