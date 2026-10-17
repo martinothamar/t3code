@@ -419,6 +419,9 @@ describe("DesktopAgentctlSandboxes", () => {
         yield* sandboxes.addManifestRoot("/a");
         const settings = yield* sandboxes.removeManifestRoot("/a");
         assert.deepStrictEqual(settings.manifestRoots, ["/b"]);
+        assert.deepStrictEqual(yield* sandboxes.listManifestRoots, [
+          { directory: "/b", repository: null },
+        ]);
       }),
     ),
   );

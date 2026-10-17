@@ -7,7 +7,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-import { pullManifestRepositories } from "./pullManifestRepositories.ts";
+import { pullManifestRepositories, resolveManifestRepository } from "./pullManifestRepositories.ts";
 
 const git = (directory: string, ...args: string[]) =>
   NodeChildProcess.execFileSync(
@@ -55,6 +55,29 @@ const fixture = Effect.gen(function* () {
 });
 
 describe("pullManifestRepositories", () => {
+  it.effect(
+    "identifies actual checkouts, nested folders, and worktrees without treating parent folders as repositories",
+    () =>
+      Effect.gen(function* () {
+        const { checkout, root, home, fs, path } = yield* fixture;
+        const repository = yield* resolveManifestRepository(checkout);
+        assert.isNotNull(repository);
+        assert.strictEqual(
+          yield* resolveManifestRepository(path.join(checkout, "agents")),
+          repository,
+        );
+        assert.strictEqual(yield* resolveManifestRepository(root), null);
+        const fake = path.join(home, "fake");
+        yield* fs.makeDirectory(path.join(fake, ".git"), { recursive: true });
+        assert.strictEqual(yield* resolveManifestRepository(fake), null);
+        const worktree = path.join(home, "linked");
+        git(checkout, "worktree", "add", "-b", "linked", worktree);
+        const linkedRepository = yield* resolveManifestRepository(worktree);
+        assert.isNotNull(linkedRepository);
+        assert.notStrictEqual(linkedRepository, repository);
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
   it.effect("pulls multiple repositories under a manifest folder and discovers new variants", () =>
     Effect.gen(function* () {
       const { root, checkout, upstream, advance, fs, path } = yield* fixture;

@@ -3,6 +3,7 @@ import {
   AgentctlSandboxSettings,
   type AgentctlActionResult,
   type AgentctlCreateSandboxInput,
+  type AgentctlManifestRoot,
   type AgentctlSandboxAction,
   type AgentctlSandboxManifest,
   type AgentctlSandboxesSnapshot,
@@ -29,7 +30,7 @@ import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as AgentctlCli from "./AgentctlCli.ts";
 import { isConnectable, shouldCloseTunnel, sshAliasFor, type AgentResource } from "./agentState.ts";
 import { discoverManifests } from "./manifests.ts";
-import { pullManifestRepositories } from "./pullManifestRepositories.ts";
+import { pullManifestRepositories, resolveManifestRepository } from "./pullManifestRepositories.ts";
 import {
   DEFAULT_SANDBOX_SETTINGS,
   IDLE_RUNTIME,
@@ -57,6 +58,7 @@ export class DesktopAgentctlSandboxes extends Context.Service<
     readonly remove: (name: string) => Effect.Effect<AgentctlActionResult>;
     readonly create: (input: AgentctlCreateSandboxInput) => Effect.Effect<AgentctlActionResult>;
     readonly listManifests: Effect.Effect<ReadonlyArray<AgentctlSandboxManifest>>;
+    readonly listManifestRoots: Effect.Effect<ReadonlyArray<AgentctlManifestRoot>>;
     readonly getSettings: Effect.Effect<AgentctlSandboxSettings>;
     /** Folders are merged here, so two views never overwrite each other's changes. */
     readonly addManifestRoot: (folder: string) => Effect.Effect<AgentctlSandboxSettings>;
@@ -414,6 +416,17 @@ export const make = Effect.gen(function* () {
       Effect.provide(context),
     ),
     getSettings,
+    listManifestRoots: getSettings.pipe(
+      Effect.flatMap((settings) =>
+        Effect.forEach(settings.manifestRoots, (directory) =>
+          resolveManifestRepository(directory).pipe(
+            Effect.orElseSucceed(() => null),
+            Effect.map((repository) => ({ directory, repository })),
+          ),
+        ),
+      ),
+      Effect.provide(context),
+    ),
     addManifestRoot: (folder) =>
       updateManifestRoots((roots) => (roots.includes(folder) ? roots : [...roots, folder])),
     removeManifestRoot: (folder) =>

@@ -1,13 +1,16 @@
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
-import {
-  EnvironmentId,
-  type AgentctlSandbox,
-  type AgentctlSandboxSettings,
-} from "@t3tools/contracts";
+import { EnvironmentId, type AgentctlSandbox, type AgentctlManifestRoot } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
-import { DownloadIcon, FolderPlusIcon, PlusIcon, XIcon } from "lucide-react";
+import {
+  DownloadIcon,
+  FolderGit2Icon,
+  FolderIcon,
+  FolderPlusIcon,
+  PlusIcon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { SettingsRow, SettingsSection } from "../components/settings/settingsLayout";
@@ -236,27 +239,31 @@ function SandboxRow({ sandbox }: { readonly sandbox: AgentctlSandbox }) {
 
 /** Where "New Sandbox" looks for manifests. */
 function ManifestFolders() {
-  const [settings, setSettings] = useState<AgentctlSandboxSettings | null>(null);
+  const [roots, setRoots] = useState<ReadonlyArray<AgentctlManifestRoot> | null>(null);
   const [pulling, setPulling] = useState<string | null>(null);
 
   useEffect(() => {
     void readAgentctlBridge()
-      ?.getSettings()
+      ?.listManifestRoots()
       .then((next) => {
-        setSettings(next);
+        setRoots(next);
       });
   }, []);
 
-  if (settings === null) return null;
+  if (roots === null) return null;
   const addRoot = async () => {
     const folder = await window.desktopBridge?.pickFolder();
     if (!folder) return;
-    const saved = await readAgentctlBridge()?.addManifestRoot(folder);
-    if (saved) setSettings(saved);
+    const bridge = readAgentctlBridge();
+    if (bridge === null) return;
+    await bridge.addManifestRoot(folder);
+    setRoots(await bridge.listManifestRoots());
   };
   const removeRoot = async (folder: string) => {
-    const saved = await readAgentctlBridge()?.removeManifestRoot(folder);
-    if (saved) setSettings(saved);
+    const bridge = readAgentctlBridge();
+    if (bridge === null) return;
+    await bridge.removeManifestRoot(folder);
+    setRoots(await bridge.listManifestRoots());
   };
   const pullRoot = async (folder: string) => {
     const bridge = readAgentctlBridge();
@@ -288,34 +295,48 @@ function ManifestFolders() {
         </Button>
       }
     >
-      {settings.manifestRoots.length === 0 ? (
+      {roots.length === 0 ? (
         <SettingsRow
           title="No folders yet"
           description="New Sandbox finds every agent.yaml and agent.<variant>.yaml in these folders."
         />
       ) : (
-        settings.manifestRoots.map((root) => (
+        roots.map(({ directory, repository }) => (
           <SettingsRow
-            key={root}
-            title={<span className="truncate font-mono text-xs">{root}</span>}
+            key={directory}
+            title={
+              <span className="inline-flex min-w-0 items-center gap-2">
+                {repository === null ? (
+                  <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+                ) : (
+                  <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
+                )}
+                <span className="truncate">
+                  {directory.split(/[\\/]/).findLast(Boolean) ?? directory}
+                </span>
+              </span>
+            }
+            description={<span className="break-all font-mono text-xs">{directory}</span>}
             control={
               <div className="flex shrink-0 items-center gap-1">
-                <Button
-                  size="xs"
-                  variant="outline"
-                  aria-label={`Pull repositories in ${root}`}
-                  disabled={pulling !== null}
-                  onClick={() => void pullRoot(root)}
-                >
-                  <DownloadIcon className="size-3" />
-                  {pulling === root ? "Pulling…" : "Pull"}
-                </Button>
+                {repository !== null ? (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    aria-label={`Pull repositories in ${directory}`}
+                    disabled={pulling !== null}
+                    onClick={() => void pullRoot(directory)}
+                  >
+                    <DownloadIcon className="size-3" />
+                    {pulling === directory ? "Pulling…" : "Pull"}
+                  </Button>
+                ) : null}
                 <Button
                   size="icon-xs"
                   variant="ghost-muted"
-                  aria-label={`Remove ${root}`}
-                  disabled={pulling === root}
-                  onClick={() => void removeRoot(root)}
+                  aria-label={`Remove ${directory}`}
+                  disabled={pulling === directory}
+                  onClick={() => void removeRoot(directory)}
                 >
                   <XIcon className="size-3" />
                 </Button>

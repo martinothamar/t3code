@@ -89,6 +89,13 @@ export const AgentctlSandboxSettings = Schema.Struct({
 });
 export type AgentctlSandboxSettings = typeof AgentctlSandboxSettings.Type;
 
+export const AgentctlManifestRoot = Schema.Struct({
+  directory: Schema.String,
+  /** The owning Git checkout, or null for a folder outside a repository. */
+  repository: Schema.NullOr(Schema.String),
+});
+export type AgentctlManifestRoot = typeof AgentctlManifestRoot.Type;
+
 export const AgentctlCreateSandboxInput = Schema.Struct({
   manifestPath: Schema.String,
   name: Schema.String,
@@ -109,6 +116,7 @@ export interface DesktopAgentctlBridge {
   remove: (name: string) => Promise<AgentctlActionResult>;
   create: (input: AgentctlCreateSandboxInput) => Promise<AgentctlActionResult>;
   listManifests: () => Promise<readonly AgentctlSandboxManifest[]>;
+  listManifestRoots: () => Promise<readonly AgentctlManifestRoot[]>;
   getSettings: () => Promise<AgentctlSandboxSettings>;
   addManifestRoot: (folder: string) => Promise<AgentctlSandboxSettings>;
   removeManifestRoot: (folder: string) => Promise<AgentctlSandboxSettings>;

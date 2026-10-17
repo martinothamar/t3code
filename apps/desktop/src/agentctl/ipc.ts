@@ -1,6 +1,7 @@
 import {
   AgentctlActionResult,
   AgentctlCreateSandboxInput,
+  AgentctlManifestRoot,
   AgentctlSandboxManifest,
   AgentctlSandboxSettings,
   AgentctlSandboxesSnapshot,
@@ -57,6 +58,14 @@ const getSettings = DesktopIpc.makeIpcMethod({
   handler: () => Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.getSettings),
 });
 
+const listManifestRoots = DesktopIpc.makeIpcMethod({
+  channel: AGENTCTL_CHANNELS.listManifestRoots,
+  payload: Schema.Void,
+  result: Schema.Array(AgentctlManifestRoot),
+  handler: () =>
+    Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.listManifestRoots),
+});
+
 const manifestRoot = (channel: string, run: "addManifestRoot" | "removeManifestRoot") =>
   DesktopIpc.makeIpcMethod({
     channel,
@@ -76,6 +85,7 @@ export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctl
     yield* ipc.handle(create);
     yield* ipc.handle(pullManifestRoot);
     yield* ipc.handle(listManifests);
+    yield* ipc.handle(listManifestRoots);
     yield* ipc.handle(getSettings);
     yield* ipc.handle(manifestRoot(AGENTCTL_CHANNELS.addManifestRoot, "addManifestRoot"));
     yield* ipc.handle(manifestRoot(AGENTCTL_CHANNELS.removeManifestRoot, "removeManifestRoot"));
