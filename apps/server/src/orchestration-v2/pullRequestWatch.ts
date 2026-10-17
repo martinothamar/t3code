@@ -8,16 +8,28 @@ import type {
 
 /**
  * Wakes in a row that bring only comments. Check, conflict, or push news resets the count, so
- * this only stops a chatty bot looping an agent that is replying to it.
+ * this stops a chatty bot, or the agent's own unmarked replies, from looping it.
  */
 export const PULL_REQUEST_WATCH_WAKE_LIMIT = 10;
 const LISTED_ITEMS = 10;
 const SNIPPET_LENGTH = 200;
+/**
+ * Agents end what they post on a pull request with `<!-- t3code:agent -->`. One account can be
+ * both the user's and the agent's, so the author alone cannot tell the agent's own remarks apart.
+ * Only a marker on the last line, alone, counts, so a remark that quotes it still wakes the agent.
+ */
+const AGENT_MARKER_TEXT = "<!-- t3code:agent -->";
+const AGENT_MARKER = /(?:^|\n)[ \t]*<!--\s*t3code:agent\b[^>]*-->\s*$/u;
 
 export type PullRequestWatchChange =
   | { readonly kind: "checks-failed"; readonly failed: ReadonlyArray<PullRequestCheck> }
   | { readonly kind: "checks-passed"; readonly count: number; readonly required: boolean }
-  | { readonly kind: "remarks"; readonly remarks: ReadonlyArray<PullRequestComment> }
+  | {
+      readonly kind: "remarks";
+      readonly remarks: ReadonlyArray<PullRequestComment>;
+      /** The agent's own login, to point out its unmarked remarks, which are likely the user's. */
+      readonly own: string | undefined;
+    }
   | { readonly kind: "conflicting" };
 
 export interface PullRequestWatchReport {
@@ -67,15 +79,19 @@ export function evaluatePullRequestWatch(
   const own = (detail.viewer ?? detail.author?.login)?.toLowerCase();
   const through = Date.parse(watch.remarksThrough);
   const activeAt = (remark: PullRequestComment) => remark.editedAt ?? remark.createdAt;
-  // GitHub times are per second, so remarks at the boundary time are told apart by ID.
+  const byAgent = (remark: PullRequestComment) =>
+    remark.author?.login.toLowerCase() === own && AGENT_MARKER.test(remark.body);
+  // GitHub times are per second, so remarks at the boundary time are told apart by ID. A draft
+  // is held back until its review is submitted, which gives it a new time.
   const fresh = (remarks ?? []).filter((remark) => {
     const at = Date.parse(activeAt(remark));
     return (
       (at > through || (at === through && !watch.remarkIds.includes(remark.id))) &&
-      remark.author?.login.toLowerCase() !== own
+      remark.pending !== true &&
+      !byAgent(remark)
     );
   });
-  if (fresh.length > 0) changes.push({ kind: "remarks", remarks: fresh });
+  if (fresh.length > 0) changes.push({ kind: "remarks", remarks: fresh, own });
   const latest = Math.max(through, ...fresh.map((remark) => Date.parse(activeAt(remark))));
   const atLatest = fresh.filter((remark) => Date.parse(activeAt(remark)) === latest);
   const remarksThrough = latest === through ? watch.remarksThrough : activeAt(atLatest[0]!);
@@ -143,16 +159,25 @@ function changeLines(
       return [
         `- All ${change.count} ${change.required ? "required " : ""}${change.count === 1 ? "check" : "checks"} passed${context.commit}.`,
       ];
-    case "remarks":
+    case "remarks": {
+      const isOwn = (remark: PullRequestComment) =>
+        change.own !== undefined && remark.author?.login.toLowerCase() === change.own;
       return [
         `- ${change.remarks.length} new ${change.remarks.length === 1 ? "comment" : "comments"}:`,
         ...listed(change.remarks, (remark) => {
           const where = remark.path === null ? "" : ` on ${remark.path}`;
           const body = snippet(remark.body);
           const said = body.length === 0 ? (remark.reviewState ?? "reviewed") : `"${body}"`;
-          return `  - ${remark.author?.login ?? "someone"}${where}: ${said}${remark.url ? ` ${remark.url}` : ""}`;
+          const who = `${remark.author?.login ?? "someone"}${isOwn(remark) ? " (your account)" : ""}`;
+          return `  - ${who}${where}: ${said}${remark.url ? ` ${remark.url}` : ""}`;
         }),
+        ...(change.remarks.some(isOwn)
+          ? [
+              `  Comments from your account without the ${AGENT_MARKER_TEXT} marker are most likely the user's: you may share the account. If you posted one, ignore it and end what you post with the marker on its own line.`,
+            ]
+          : []),
       ];
+    }
     case "conflicting":
       return [`- The branch now conflicts with ${context.baseBranch}.`];
   }
