@@ -37,18 +37,16 @@ To connect to Sandboxes, run `agentctl ssh-config install` once, and give your A
 ## Updating
 
 We force-push `main` when updating the fork, so update your checkout with a fetch and hard reset
-instead of `git pull`. Save local commits on another branch and stash uncommitted changes first:
-the reset discards tracked changes and moves your local `main` to match `origin/main`.
+instead of `git pull`.
 
 ```sh
 git switch main
 git fetch origin
 git reset --hard origin/main
-```
 
-Or, while on `main`, run `make pull`. This updates the checkout; then run `make install` for the
-latest desktop release or `make install-source` to build and install the updated checkout. Without
-Make, run the corresponding install script above again.
+# Or
+make pull
+```
 
 ## Developing the fork
 
