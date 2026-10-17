@@ -103,6 +103,10 @@ export const ThreadComment = Schema.Struct({
   body: Schema.String,
   /** Identifies when the comment was created. */
   createdAt: Shared.DateTime,
+  /** Identifies when the comment was published at. */
+  publishedAt: Schema.NullOr(Shared.DateTime),
+  /** Identifies the state of the comment. */
+  state: GraphQL.enumLiterals(Shared.PullRequestReviewCommentState.literals),
   /** The moment the editor made the last edit */
   lastEditedAt: Schema.NullOr(Shared.DateTime),
   /** The HTTP URL permalink for this review comment. */
@@ -416,7 +420,7 @@ export const ReviewThreads = GraphQL.query("ReviewThreads", {
       { name: "repository", body: ["(owner:$", "owner", " name:$", "name", "){pullRequest(number:$", "number", "){reviewThreads(first:100 after:$", "after", "){totalCount pageInfo{hasNextPage endCursor}nodes{id isResolved isOutdated path line diffSide comments(first:10){totalCount pageInfo{hasNextPage endCursor}nodes{...ThreadComment}}}}viewerCanUpdate viewerDidAuthor author{__typename login avatarUrl}...Reactions comments(first:100){nodes{id lastEditedAt author{__typename login avatarUrl}...Reactions}}reviews(first:100){nodes{id lastEditedAt author{__typename login avatarUrl}...Reactions}}reviewRequests(first:$", "requestedReviewers", "){nodes{requestedReviewer{__typename...on User{login name avatarUrl}...on Bot{login avatarUrl}...on Team{combinedSlug teamName:name teamAvatarUrl:avatarUrl}}}}latestReviews(first:50){nodes{state author{__typename login avatarUrl}}}reviewDismissals:timelineItems(itemTypes:[REVIEW_DISMISSED_EVENT]first:100){pageInfo{hasNextPage endCursor}nodes{__typename...on ReviewDismissedEvent{dismissalMessage review{id}}}}commits(last:100){nodes{commit{oid messageHeadline committedDate authors(first:3){nodes{name avatarUrl user{login}}}}}}}}"] }
     ],
     fragments: [
-      { name: "ThreadComment", body: ["on PullRequestReviewComment{id author{__typename login avatarUrl}body createdAt lastEditedAt url...Reactions}"] },
+      { name: "ThreadComment", body: ["on PullRequestReviewComment{id author{__typename login avatarUrl}body createdAt publishedAt state lastEditedAt url...Reactions}"] },
       { name: "Reactions", body: ["on Reactable{__typename reactionGroups{content viewerHasReacted reactors(first:10){totalCount nodes{__typename...on User{login}...on Bot{login}...on Organization{login}...on Mannequin{login}}}}}"] }
     ]
   },
@@ -494,7 +498,7 @@ export const ReviewThreadComments = GraphQL.query("ReviewThreadComments", {
       { name: "node", body: ["(id:$", "threadId", "){__typename...on PullRequestReviewThread{pullRequest{id}comments(first:100 after:$", "after", "){pageInfo{hasNextPage endCursor}nodes{...ThreadComment}}}}"] }
     ],
     fragments: [
-      { name: "ThreadComment", body: ["on PullRequestReviewComment{id author{__typename login avatarUrl}body createdAt lastEditedAt url...Reactions}"] },
+      { name: "ThreadComment", body: ["on PullRequestReviewComment{id author{__typename login avatarUrl}body createdAt publishedAt state lastEditedAt url...Reactions}"] },
       { name: "Reactions", body: ["on Reactable{__typename reactionGroups{content viewerHasReacted reactors(first:10){totalCount nodes{__typename...on User{login}...on Bot{login}...on Organization{login}...on Mannequin{login}}}}}"] }
     ]
   },
