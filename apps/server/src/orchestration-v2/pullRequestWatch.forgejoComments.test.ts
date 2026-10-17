@@ -62,7 +62,9 @@ describe("Forgejo comment watch boundary", () => {
     assert.strictEqual(finalComment.editedAt, "2026-10-10T20:04:50.000Z");
     assert.isUndefined(decodedComment(createdAt).editedAt);
     const completed = evaluatePullRequestWatch(seen, finalDetail, [finalComment]);
-    assert.deepEqual(completed.changes, [{ kind: "remarks", remarks: [finalComment] }]);
+    assert.deepEqual(completed.changes, [
+      { kind: "remarks", remarks: [finalComment], own: "agent-user" },
+    ]);
     assert.strictEqual(completed.next.remarksThrough, "2026-10-10T20:04:50.000Z");
     assert.deepEqual(
       evaluatePullRequestWatch(completed.next, finalDetail, [finalComment]).changes,
@@ -74,11 +76,17 @@ describe("Forgejo comment watch boundary", () => {
     );
     const secondEdit = decodedComment("2026-10-10T20:05:50Z");
     const second = evaluatePullRequestWatch(completed.next, finalDetail, [secondEdit]);
-    assert.deepEqual(second.changes, [{ kind: "remarks", remarks: [secondEdit] }]);
+    assert.deepEqual(second.changes, [
+      { kind: "remarks", remarks: [secondEdit], own: "agent-user" },
+    ]);
     assert.deepEqual(evaluatePullRequestWatch(second.next, finalDetail, [secondEdit]).changes, []);
     assert.deepEqual(
       evaluatePullRequestWatch(seen, finalDetail, [
-        { ...finalComment, author: { login: "agent-user", name: null, avatarUrl: null } },
+        {
+          ...finalComment,
+          author: { login: "agent-user", name: null, avatarUrl: null },
+          body: `${finalComment.body}\n<!-- t3code:agent -->`,
+        },
       ]).changes,
       [],
     );

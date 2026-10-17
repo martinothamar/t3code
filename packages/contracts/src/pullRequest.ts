@@ -159,6 +159,8 @@ export const PullRequestComment = Schema.Struct({
   reviewState: Schema.NullOr(Schema.String),
   reactions: Schema.optional(Schema.Array(PullRequestReaction)),
   canEdit: Schema.optional(Schema.Boolean),
+  /** A draft in the reader's own unsubmitted review, which nobody else can see yet. */
+  pending: Schema.optional(Schema.Boolean),
 });
 export type PullRequestComment = typeof PullRequestComment.Type;
 
@@ -177,6 +179,8 @@ export const PullRequestThreadComment = Schema.Struct({
   url: Schema.NullOr(Schema.String),
   reactions: Schema.optional(Schema.Array(PullRequestReaction)),
   canEdit: Schema.optional(Schema.Boolean),
+  /** A draft in the reader's own unsubmitted review, which nobody else can see yet. */
+  pending: Schema.optional(Schema.Boolean),
 });
 export type PullRequestThreadComment = typeof PullRequestThreadComment.Type;
 
