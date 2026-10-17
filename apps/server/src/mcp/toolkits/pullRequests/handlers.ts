@@ -27,6 +27,7 @@ import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as PullRequestWatchService from "../../../pullRequest/PullRequestWatchService.ts";
 import { resolveTarget, type ResolvedTarget } from "../../../pullRequest/pullRequestTarget.ts";
+import { withAgentMarker } from "../../../orchestration-v2/pullRequestWatch.ts";
 import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
 import * as PullRequestService from "../../../pullRequest/PullRequestService.ts";
 import { reviewPositionInPatch } from "../../../pullRequest/pullRequestReviewPosition.ts";
@@ -497,7 +498,7 @@ const make = Effect.gen(function* () {
           path: comment.path,
           position,
           ...(start === undefined ? {} : { startPosition: start }),
-          body: comment.body,
+          body: withAgentMarker(comment.body),
         });
       }
       if (diff.nextCursor === null) break;
@@ -1161,8 +1162,12 @@ const make = Effect.gen(function* () {
         if (input.body !== undefined) {
           yield* (
             reviewThreadId === undefined
-              ? pullRequests.comment({ ...ref, body: input.body })
-              : pullRequests.replyToThread({ ...ref, threadId: reviewThreadId, body: input.body })
+              ? pullRequests.comment({ ...ref, body: withAgentMarker(input.body) })
+              : pullRequests.replyToThread({
+                  ...ref,
+                  threadId: reviewThreadId,
+                  body: withAgentMarker(input.body),
+                })
           ).pipe(Effect.mapError(forgeFailure));
         }
         if (reviewThreadId !== undefined && input.resolved !== undefined) {
@@ -1201,7 +1206,7 @@ const make = Effect.gen(function* () {
           .submitReview({
             ...ref,
             verdict: input.verdict,
-            body: input.body ?? "",
+            body: withAgentMarker(input.body ?? ""),
             comments,
             ...(input.expectedHeadSha === undefined
               ? {}
