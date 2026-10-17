@@ -18,13 +18,12 @@ const MODEL_SELECTION_KEYS = [
  * The preferences a new Sandbox should start with: each project-scoped key the
  * user changed on this computer while the Sandbox still has the default.
  * A Sandbox's own choices are never overwritten. Model selections are only
- * copied when the Sandbox has that provider instance; without its provider
- * list (`sandboxProviderInstanceIds` null) they are skipped.
+ * copied when the Sandbox has that provider instance.
  */
 export function sandboxSettingsSeedPatch(input: {
   readonly local: ServerSettings;
   readonly sandbox: ServerSettings;
-  readonly sandboxProviderInstanceIds: ReadonlySet<string> | null;
+  readonly sandboxProviderInstanceIds: ReadonlySet<string>;
 }): ServerSettingsPatch {
   const patch: Record<string, unknown> = {};
   for (const key of PROJECT_SCOPED_SERVER_SETTING_KEYS) {
@@ -35,7 +34,7 @@ export function sandboxSettingsSeedPatch(input: {
       const selection = input.local[key as (typeof MODEL_SELECTION_KEYS)[number]];
       if (
         selection !== null &&
-        !input.sandboxProviderInstanceIds?.has(String(selection.instanceId))
+        !input.sandboxProviderInstanceIds.has(String(selection.instanceId))
       ) {
         continue;
       }

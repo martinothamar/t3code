@@ -73,7 +73,10 @@ function SandboxEnvironmentCoordinator(props: {
   });
   const localConfig = useAtomValue(primaryServerConfigAtom);
   const sandboxConfig = useAtomValue(serverEnvironment.configValueAtom(props.environmentId));
-  const configsLoaded = localConfig !== null && sandboxConfig !== null;
+  // The Sandbox's providers arrive after it connects; waiting for them keeps
+  // model selections from being skipped for good.
+  const configsLoaded =
+    localConfig !== null && sandboxConfig !== null && sandboxConfig.providers.length > 0;
   const seeding = useRef(false);
   const retryNow = useAtomCommand(environmentCatalog.retryNow, { reportFailure: false });
   const connected = presentation?.connection.phase === "connected";
@@ -103,7 +106,7 @@ function SandboxEnvironmentCoordinator(props: {
   // A new Sandbox starts with the preferences changed on this computer, once,
   // so a later deliberate choice in the Sandbox is never undone.
   const seedSettings = useEffectEvent(async () => {
-    if (seeding.current || props.settingsSeeded || localConfig === null || sandboxConfig === null) {
+    if (seeding.current || props.settingsSeeded || !configsLoaded) {
       return;
     }
     seeding.current = true;
@@ -111,10 +114,9 @@ function SandboxEnvironmentCoordinator(props: {
       const patch = sandboxSettingsSeedPatch({
         local: localConfig.settings,
         sandbox: sandboxConfig.settings,
-        sandboxProviderInstanceIds:
-          sandboxConfig.providers.length === 0
-            ? null
-            : new Set(sandboxConfig.providers.map((provider) => provider.instanceId)),
+        sandboxProviderInstanceIds: new Set(
+          sandboxConfig.providers.map((provider) => provider.instanceId),
+        ),
       });
       if (Object.keys(patch).length > 0) {
         const allowed = requiredScopesForServerSettingsPatch(patch).every((scope) =>

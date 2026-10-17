@@ -67,7 +67,7 @@ describe("sandboxSettingsSeedPatch", () => {
   });
 
   it("copies a model selection only for a provider instance the Sandbox has", () => {
-    const patch = (selection: typeof codex, ids: ReadonlySet<string> | null) =>
+    const patch = (selection: typeof codex, ids: ReadonlySet<string>) =>
       sandboxSettingsSeedPatch({
         local: settings({ defaultModelSelection: selection }),
         sandbox: settings({}),
@@ -75,6 +75,6 @@ describe("sandboxSettingsSeedPatch", () => {
       });
     expect(patch(codex, providers)).toEqual({ defaultModelSelection: codex });
     expect(patch(other, providers)).toEqual({});
-    expect(patch(codex, null)).toEqual({});
+    expect(patch(codex, new Set())).toEqual({});
   });
 });
