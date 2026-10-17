@@ -1872,6 +1872,36 @@ describe("EnvironmentRegistry", () => {
       }).pipe(Effect.provide(harness.layer));
     }),
   );
+
+  it.effect("keeps a platform SSH environment unsaved and clears it when the host drops it", () =>
+    Effect.gen(function* () {
+      // The profile the SSH broker records while connecting.
+      const harness = yield* makeHarness([], [SSH_PROFILE]);
+
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.reconcilePlatform([
+          new SshConnectionRegistration({ target: SSH_CONNECTION, profile: SSH_PROFILE }),
+        ]);
+
+        expect(
+          (yield* SubscriptionRef.get(registry.entries)).has(SSH_CONNECTION.environmentId),
+        ).toBe(true);
+        expect(yield* Ref.get(harness.storedTargets)).toEqual([]);
+        const error = yield* Effect.flip(registry.remove(SSH_CONNECTION.environmentId));
+        expect(error._tag).toBe("PlatformEnvironmentRemovalError");
+
+        yield* registry.reconcilePlatform([]);
+
+        expect(
+          (yield* SubscriptionRef.get(registry.entries)).has(SSH_CONNECTION.environmentId),
+        ).toBe(false);
+        expect((yield* Ref.get(harness.storedProfiles)).has(SSH_CONNECTION.connectionId)).toBe(
+          false,
+        );
+      }).pipe(Effect.provide(harness.layer), Effect.scoped);
+    }),
+  );
 });
 
 describe("EnvironmentRegistry routes", () => {
