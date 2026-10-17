@@ -7,6 +7,7 @@ import {
   pullRequestHostOf,
   type OrchestrationProjectShell,
   type OrchestrationV2ThreadShell,
+  type RepositoryIdentity,
   type SourceControlProviderKind,
   type ThreadId,
   type ThreadPullRequestLink,
@@ -57,12 +58,40 @@ interface ResolvedTarget {
   readonly url: string;
 }
 
-/** The project's host and provider supply defaults for a repository-and-number input. */
-function projectHostAndProvider(project: OrchestrationProjectShell | undefined): {
+/**
+ * The repository whose host and provider supply defaults for a repository-and-number input: the
+ * project's own, or for a workspace folder, the checkout of that repository on the given host.
+ * A repository the folder doesn't hold takes the host its checkouts share, and none when they
+ * are on several, so the agent is asked for one rather than given a guess.
+ */
+function projectRepositoryFor(
+  project: OrchestrationProjectShell | undefined,
+  repository: string,
+  host: string | undefined,
+): RepositoryIdentity | null {
+  if (project?.repositoryIdentity != null) return project.repositoryIdentity;
+  const checkouts = (project?.workspaceRepositories ?? []).filter(
+    (identity) => host === undefined || projectHostAndProvider(identity).host === host,
+  );
+  const wanted = repository.toLowerCase();
+  const held = checkouts.find((identity) =>
+    [
+      sourceControlRepositorySelector(identity),
+      identity.displayName,
+      // The path below the host, which is how Azure names a repository in full.
+      identity.canonicalKey.split("/").slice(1).join("/"),
+    ].some((name) => name?.toLowerCase() === wanted),
+  );
+  if (held !== undefined) return held;
+  const hosts = new Set(checkouts.map((identity) => projectHostAndProvider(identity).host));
+  return hosts.size === 1 ? (checkouts[0] ?? null) : null;
+}
+
+/** The repository's host and provider supply defaults for a repository-and-number input. */
+function projectHostAndProvider(identity: RepositoryIdentity | null): {
   readonly host: string | null;
   readonly kind: SourceControlProviderKind | null;
 } {
-  const identity = project?.repositoryIdentity;
   const kind = (identity?.provider as SourceControlProviderKind | undefined) ?? null;
   if (!identity || kind === null) return { host: null, kind: null };
   return {
@@ -91,7 +120,8 @@ const resolveTarget = Effect.fn("PullRequestsToolkit.resolveTarget")(function* (
   if (input.repository === undefined || input.number === undefined) {
     return yield* new PullRequestTargetIncompleteError({});
   }
-  const projectHost = projectHostAndProvider(project);
+  const identity = projectRepositoryFor(project, input.repository, input.host?.toLowerCase());
+  const projectHost = projectHostAndProvider(identity);
   const host = (input.host ?? projectHost.host)?.toLowerCase();
   if (host === undefined) {
     return yield* new PullRequestHostRequiredError({});
@@ -104,7 +134,7 @@ const resolveTarget = Effect.fn("PullRequestsToolkit.resolveTarget")(function* (
       host,
       repository,
       input.number,
-      project?.repositoryIdentity?.locator.remoteUrl,
+      identity?.locator.remoteUrl,
     ) ?? `https://${host}/${repository}/pull/${input.number}`;
   return {
     ...normalizeThreadPullRequestKey({ host, repository, number: input.number, url }),

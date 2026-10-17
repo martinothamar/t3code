@@ -22,7 +22,7 @@ describe("resolveLinkPullRequestInput", () => {
     expect(
       resolveLinkPullRequestInput({
         reference: ` ${url} `,
-        project: null,
+        repositories: [],
         hasProject: (candidate) => candidate.host === host,
       }),
     ).toEqual({ link: { host, repository: "acme/web", number: 42, url } });
@@ -34,14 +34,14 @@ describe("resolveLinkPullRequestInput", () => {
     expect(
       resolveLinkPullRequestInput({
         reference: "https://dev.azure.com/org-a/project/_git/web/pullrequest/42",
-        project: null,
+        repositories: [],
         hasProject,
       }),
     ).toMatchObject({ link: { repository: "org-a/project/_git/web", number: 42 } });
     expect(
       resolveLinkPullRequestInput({
         reference: "https://dev.azure.com/org-b/project/_git/web/pullrequest/42",
-        project: null,
+        repositories: [],
         hasProject,
       }),
     ).toMatchObject({ error: expect.stringContaining("org-b/project/_git/web") });
@@ -51,12 +51,19 @@ describe("resolveLinkPullRequestInput", () => {
     expect(
       resolveLinkPullRequestInput({
         reference: "#42",
-        project: {
-          host: "ssh.dev.azure.com",
-          repository: "v3/org/project/web",
-          webUrl: (number) =>
-            changeRequestWebUrl("azure-devops", "ssh.dev.azure.com", "v3/org/project/web", number),
-        },
+        repositories: [
+          {
+            host: "ssh.dev.azure.com",
+            repository: "v3/org/project/web",
+            webUrl: (number) =>
+              changeRequestWebUrl(
+                "azure-devops",
+                "ssh.dev.azure.com",
+                "v3/org/project/web",
+                number,
+              ),
+          },
+        ],
         hasProject: () => true,
       }),
     ).toMatchObject({
@@ -71,13 +78,21 @@ describe("resolveLinkPullRequestInput", () => {
 
   it("returns null for input that is not a reference", () => {
     expect(
-      resolveLinkPullRequestInput({ reference: "hello", project, hasProject: () => true }),
+      resolveLinkPullRequestInput({
+        reference: "hello",
+        repositories: [project],
+        hasProject: () => true,
+      }),
     ).toBeNull();
   });
 
   it("resolves a bare number against the thread's own repository", () => {
     expect(
-      resolveLinkPullRequestInput({ reference: "#42", project, hasProject: () => true }),
+      resolveLinkPullRequestInput({
+        reference: "#42",
+        repositories: [project],
+        hasProject: () => true,
+      }),
     ).toEqual({
       link: {
         host: "github.com",
@@ -92,7 +107,7 @@ describe("resolveLinkPullRequestInput", () => {
     expect(
       resolveLinkPullRequestInput({
         reference: "https://github.com/acme/api/pull/7",
-        project,
+        repositories: [project],
         hasProject: (reference) => reference.host === "github.com",
       }),
     ).toEqual({
@@ -108,7 +123,7 @@ describe("resolveLinkPullRequestInput", () => {
   it("refuses a URL on a host nothing is checked out from", () => {
     const result = resolveLinkPullRequestInput({
       reference: "https://gitlab.com/acme/api/-/merge_requests/7",
-      project,
+      repositories: [project],
       hasProject: () => false,
     });
     expect(result).toMatchObject({ error: expect.stringContaining("gitlab.com") });
@@ -116,7 +131,7 @@ describe("resolveLinkPullRequestInput", () => {
 
   it("asks for a URL when a bare number has no project to resolve against", () => {
     expect(
-      resolveLinkPullRequestInput({ reference: "12", project: null, hasProject: () => true }),
+      resolveLinkPullRequestInput({ reference: "12", repositories: [], hasProject: () => true }),
     ).toMatchObject({ error: expect.stringContaining("full URL") });
   });
 
@@ -124,10 +139,27 @@ describe("resolveLinkPullRequestInput", () => {
     expect(
       resolveLinkPullRequestInput({
         reference: "gh pr checkout https://github.com/acme/web/pull/3",
-        project,
+        repositories: [project],
         hasProject: () => true,
       }),
     ).toMatchObject({ link: { number: 3, repository: "acme/web" } });
+  });
+
+  it("picks one of a workspace folder's repositories by name", () => {
+    const infra = {
+      host: "github.com",
+      repository: "acme/infra",
+      webUrl: (number: number) => changeRequestWebUrl("github", "github.com", "acme/infra", number),
+    };
+    const repositories = [project, infra];
+    const resolve = (reference: string) =>
+      resolveLinkPullRequestInput({ reference, repositories, hasProject: () => true });
+
+    expect(resolve("infra#12")).toMatchObject({ link: { repository: "acme/infra", number: 12 } });
+    expect(resolve("acme/web#12")).toMatchObject({ link: { repository: "acme/web", number: 12 } });
+    expect(resolve("other#12")).toMatchObject({ error: expect.stringContaining("other") });
+    // A bare number could mean either, so it asks which.
+    expect(resolve("#12")).toMatchObject({ error: expect.stringContaining("repo#123") });
   });
 });
 

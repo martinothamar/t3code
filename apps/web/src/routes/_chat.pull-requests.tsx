@@ -100,7 +100,7 @@ import {
   type PullRequestListSort,
   writePullRequestListPreferences,
 } from "../components/pullRequest/pullRequestListPreferences";
-import { assignProjectsToEnvironments } from "../components/pullRequest/pullRequestProjectAssignment.logic";
+import { assignRepositoriesToEnvironments } from "../components/pullRequest/workspaceRepositoryAssignment.logic";
 import { pullRequestFilterProjects } from "../components/pullRequest/pullRequestProjectFilter.logic";
 import { environmentMachineIcon } from "../components/EnvironmentMachineIcon";
 import { PullRequestDetailPanel } from "../components/pullRequest/PullRequestDetailPanel";
@@ -158,7 +158,7 @@ import {
 import { useDebouncedValue } from "../state/queries";
 import { useAllEnvironmentShellsBootstrapped, useProjects } from "../state/entities";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
-import { useEnvironments } from "../state/environments";
+import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
   pullRequestEnvironment,
   usePullRequestList,
@@ -378,6 +378,23 @@ function PullRequestsRouteView() {
         )
         .toSorted((left, right) => left.environmentId.localeCompare(right.environmentId)),
     [environments],
+  );
+  // Fork: a shared repository is listed by a server that is connected where one holds it, so a
+  // stopped Sandbox doesn't keep a repository the running ones then skip. The primary serves
+  // this page, so it is always connected.
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const connectedEnvironmentIds = useMemo(
+    () =>
+      new Set(
+        capableEnvironments
+          .filter(
+            (environment) =>
+              environment.environmentId === primaryEnvironmentId ||
+              environment.connection.phase === "connected",
+          )
+          .map((environment) => environment.environmentId),
+      ),
+    [capableEnvironments, primaryEnvironmentId],
   );
   // The server the URL asks for, kept only while it is one the page could read: a link naming a
   // server this workspace no longer has falls back to all of them rather than to nothing.
@@ -658,33 +675,45 @@ function PullRequestsRouteView() {
   const environmentQueries = useMemo((): ReadonlyArray<{
     readonly environmentId: EnvironmentId;
     readonly projectIds?: ReadonlyArray<ProjectId>;
+    readonly excludeRepositories?: ReadonlyArray<string>;
   }> => {
     const plain = queryEnvironmentIds.map((environmentId) => ({ environmentId }));
     if (!projectsKnown || scopedProjectId !== undefined) return plain;
-    const assignment = assignProjectsToEnvironments(
+    const assignment = assignRepositoriesToEnvironments(
       projects,
       queryEnvironmentIds,
       queryEnvironmentIds[0],
+      connectedEnvironmentIds,
     );
     const totals = new Map<EnvironmentId, number>();
     for (const project of projects) {
       totals.set(project.environmentId, (totals.get(project.environmentId) ?? 0) + 1);
     }
     return queryEnvironmentIds.flatMap((environmentId) => {
-      const projectIds = assignment.get(environmentId);
-      if (projectIds === undefined) return [];
+      const listed = assignment.get(environmentId);
+      if (listed === undefined) return [];
+      const { projectIds, excludeRepositories } = listed;
       // It lists everything it holds anyway, so the filter is left off and a one-server workspace
       // asks exactly the question it asked before.
-      if (projectIds.length === (totals.get(environmentId) ?? 0)) return [{ environmentId }];
-      return [{ environmentId, projectIds }];
+      const everything = projectIds.length === (totals.get(environmentId) ?? 0);
+      return [
+        {
+          environmentId,
+          ...(everything ? {} : { projectIds }),
+          ...(excludeRepositories.length > 0 ? { excludeRepositories } : {}),
+        },
+      ];
     });
-  }, [projects, projectsKnown, queryEnvironmentIds, scopedProjectId]);
+  }, [connectedEnvironmentIds, projects, projectsKnown, queryEnvironmentIds, scopedProjectId]);
   // Part of the scope, since a different split is a different question and its answers must not
   // be filed under the same page state.
   const assignmentKey = useMemo(
     () =>
       environmentQueries
-        .map(({ environmentId, projectIds }) => `${environmentId}#${projectIds?.join("+") ?? "*"}`)
+        .map(
+          ({ environmentId, projectIds, excludeRepositories }) =>
+            `${environmentId}#${projectIds?.join("+") ?? "*"}-${excludeRepositories?.join("+") ?? ""}`,
+        )
         .join("|"),
     [environmentQueries],
   );
@@ -729,7 +758,7 @@ function PullRequestsRouteView() {
   /** The listing input each environment is asked for, which differs only in its continuation. */
   const listTargets = useMemo(
     () =>
-      environmentQueries.flatMap(({ environmentId, projectIds }) => {
+      environmentQueries.flatMap(({ environmentId, projectIds, excludeRepositories }) => {
         const cursors = sentCursors?.[environmentId];
         // A continuation asks the environments that said where to carry on from, plus the ones
         // that have more to give but no cursor to give it from — those are read again at the
@@ -750,6 +779,7 @@ function PullRequestsRouteView() {
               limit: pageSize,
               ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
               ...(projectIds ? { projectIds } : {}),
+              ...(excludeRepositories ? { excludeRepositories } : {}),
               ...(search.host ? { host: search.host } : {}),
               ...(hasFilters ? { filters } : {}),
               ...(sentParsed.text ? { query: sentParsed.text } : {}),
@@ -786,7 +816,7 @@ function PullRequestsRouteView() {
    */
   const baselineTargets = useMemo(
     () =>
-      environmentQueries.map(({ environmentId, projectIds }) => ({
+      environmentQueries.map(({ environmentId, projectIds, excludeRepositories }) => ({
         environmentId,
         input: {
           state: search.state,
@@ -794,6 +824,7 @@ function PullRequestsRouteView() {
           limit: PAGE_SIZE,
           ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
           ...(projectIds ? { projectIds } : {}),
+          ...(excludeRepositories ? { excludeRepositories } : {}),
           ...(search.host ? { host: search.host } : {}),
           ...(menuFiltered ? { filters: menuFilters } : {}),
         } satisfies PullRequestListInput,
@@ -816,7 +847,7 @@ function PullRequestsRouteView() {
     baselineQuery.error === null;
   const facetTargets = useMemo(() => {
     if (!filtersOpen) return NO_LIST_TARGETS;
-    return environmentQueries.map(({ environmentId, projectIds }) => ({
+    return environmentQueries.map(({ environmentId, projectIds, excludeRepositories }) => ({
       environmentId,
       input: {
         state: "all",
@@ -824,6 +855,7 @@ function PullRequestsRouteView() {
         limit: PAGE_SIZE,
         ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
         ...(projectIds ? { projectIds } : {}),
+        ...(excludeRepositories ? { excludeRepositories } : {}),
         ...(search.host ? { host: search.host } : {}),
       } satisfies PullRequestListInput,
     }));
@@ -850,7 +882,7 @@ function PullRequestsRouteView() {
       return { authored: NO_LIST_TARGETS, reviewing: NO_LIST_TARGETS };
     }
     const targetsFor = (involvement: PullRequestInvolvement) =>
-      environmentQueries.map(({ environmentId, projectIds }) => ({
+      environmentQueries.map(({ environmentId, projectIds, excludeRepositories }) => ({
         environmentId,
         input: {
           state: search.state,
@@ -858,6 +890,7 @@ function PullRequestsRouteView() {
           limit: PAGE_SIZE,
           ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
           ...(projectIds ? { projectIds } : {}),
+          ...(excludeRepositories ? { excludeRepositories } : {}),
           ...(search.host ? { host: search.host } : {}),
           ...(menuFiltered ? { filters: menuFilters } : {}),
         } satisfies PullRequestListInput,

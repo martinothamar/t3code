@@ -1,3 +1,4 @@
+import { projectRepositorySelectors } from "@t3tools/shared/sourceControl";
 import type { ComposerTextPaste } from "../../native/T3ComposerEditor.types";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
@@ -129,6 +130,8 @@ import {
   useThreadSettingsSheetPresentation,
   type NavigationWithFinishTransitioning,
 } from "./use-thread-settings-sheet-presentation";
+
+const EMPTY_REPOSITORY_SELECTORS: ReadonlyArray<string> = [];
 
 /**
  * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
@@ -491,6 +494,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     return report !== null;
   }, [currentModelSelection.instanceId, onShowUsageLimits, props.serverConfig]);
 
+  const pullRequestRepositories = useMemo(
+    () => (project ? projectRepositorySelectors(project) : EMPTY_REPOSITORY_SELECTORS),
+    [project],
+  );
   const composerMenu = useComposerCommandMenu({
     draftMessage: props.draftMessage,
     ownerKey: composerOwnerKey,
@@ -501,7 +508,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     pullRequestProjectId: props.serverConfig?.environment.capabilities.pullRequests
       ? (project?.id ?? null)
       : null,
-    pullRequestRepository: project?.repositoryIdentity?.displayName ?? null,
+    pullRequestRepositories,
     threadPullRequests: props.selectedThread.pullRequests,
     selectedProviderStatus,
     hasThread: true,

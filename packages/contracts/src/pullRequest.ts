@@ -596,6 +596,14 @@ export const PullRequestListInput = Schema.Struct({
    */
   projectIds: Schema.optional(Schema.Array(ProjectId).check(Schema.isMaxLength(100))),
   /**
+   * Repositories, by canonical key, another connection lists, for a client spreading the
+   * repositories of folders that hold checkouts across its connections. A folder can't be left
+   * out whole the way a project rooted in one repository can, so its shared checkouts are.
+   */
+  excludeRepositories: Schema.optional(
+    Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(500)),
+  ),
+  /**
    * Narrows the listing to one host, named as the host itself rather than as its provider kind:
    * github.com and a GitHub Enterprise install are two accounts, and a kind cannot tell them
    * apart. Absent means every host the workspace has.

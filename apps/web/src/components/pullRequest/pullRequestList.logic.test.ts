@@ -115,6 +115,7 @@ describe("visible pull request line-count targets", () => {
       {
         environmentId: ENV_1,
         projectId: "project-1",
+        repository: "pingdotgg/t3code",
         number: 1,
         additions: 1,
         deletions: 1,
@@ -176,6 +177,7 @@ describe("visible pull request line-count targets", () => {
       {
         environmentId: ENV_1,
         projectId: "project-1",
+        repository: "pingdotgg/t3code",
         number: 1,
         additions: 1,
         deletions: 1,
@@ -215,6 +217,7 @@ describe("visible pull request line-count targets", () => {
       entries.map((item) => ({
         environmentId: ENV_1,
         projectId: item.projectId,
+        repository: item.repository,
         number: item.number,
         additions: item.additions,
         deletions: item.deletions,
@@ -293,6 +296,7 @@ describe("visible pull request line-count targets", () => {
       entries.map((item) => ({
         environmentId: ENV_1,
         projectId: item.projectId,
+        repository: item.repository,
         number: item.number,
         additions: item.additions,
         deletions: item.deletions,
@@ -991,7 +995,7 @@ describe("blocked-on-me ranking", () => {
 });
 
 describe("line counts that arrive after the rows", () => {
-  const stats = new Map([["env-1 project-1 7", { additions: 42, deletions: 3 }]]);
+  const stats = new Map([["env-1 project-1 pingdotgg/t3code 7", { additions: 42, deletions: 3 }]]);
 
   it("fills in a row whose host left the counts for later", () => {
     const row = entry({ number: 7, additions: 0, deletions: 0 });
@@ -1012,33 +1016,117 @@ describe("line counts that arrive after the rows", () => {
 describe("merging line counts across keyed stats queries", () => {
   it("keeps counts already held while a fresh batch says nothing about them", () => {
     const held = mergePullRequestDiffStats(new Map(), [
-      { environmentId: "env-1", projectId: "project-1", number: 1, additions: 10, deletions: 2 },
-      { environmentId: "env-1", projectId: "project-1", number: 2, additions: 5, deletions: 1 },
+      {
+        environmentId: "env-1",
+        projectId: "project-1",
+        repository: "pingdotgg/t3code",
+        number: 1,
+        additions: 10,
+        deletions: 2,
+      },
+      {
+        environmentId: "env-1",
+        projectId: "project-1",
+        repository: "pingdotgg/t3code",
+        number: 2,
+        additions: 5,
+        deletions: 1,
+      },
     ]);
     // A third row appeared; its batch is still pending and contributes nothing yet.
     const merged = mergePullRequestDiffStats(held, []);
-    expect(merged.get("env-1 project-1 1")).toEqual({ additions: 10, deletions: 2 });
-    expect(merged.get("env-1 project-1 2")).toEqual({ additions: 5, deletions: 1 });
+    expect(merged.get("env-1 project-1 pingdotgg/t3code 1")).toEqual({
+      additions: 10,
+      deletions: 2,
+    });
+    expect(merged.get("env-1 project-1 pingdotgg/t3code 2")).toEqual({
+      additions: 5,
+      deletions: 1,
+    });
   });
 
   it("replaces a count once its replacement arrives, keeping its neighbours", () => {
     const held = mergePullRequestDiffStats(new Map(), [
-      { environmentId: "env-1", projectId: "project-1", number: 1, additions: 10, deletions: 2 },
+      {
+        environmentId: "env-1",
+        projectId: "project-1",
+        repository: "pingdotgg/t3code",
+        number: 1,
+        additions: 10,
+        deletions: 2,
+      },
     ]);
     const merged = mergePullRequestDiffStats(held, [
-      { environmentId: "env-1", projectId: "project-1", number: 1, additions: 11, deletions: 2 },
-      { environmentId: "env-1", projectId: "project-1", number: 3, additions: 7, deletions: 0 },
+      {
+        environmentId: "env-1",
+        projectId: "project-1",
+        repository: "pingdotgg/t3code",
+        number: 1,
+        additions: 11,
+        deletions: 2,
+      },
+      {
+        environmentId: "env-1",
+        projectId: "project-1",
+        repository: "pingdotgg/t3code",
+        number: 3,
+        additions: 7,
+        deletions: 0,
+      },
     ]);
-    expect(merged.get("env-1 project-1 1")).toEqual({ additions: 11, deletions: 2 });
-    expect(merged.get("env-1 project-1 3")).toEqual({ additions: 7, deletions: 0 });
+    expect(merged.get("env-1 project-1 pingdotgg/t3code 1")).toEqual({
+      additions: 11,
+      deletions: 2,
+    });
+    expect(merged.get("env-1 project-1 pingdotgg/t3code 3")).toEqual({
+      additions: 7,
+      deletions: 0,
+    });
+  });
+
+  it("keeps the same number from two repositories of one project apart", () => {
+    const held = mergePullRequestDiffStats(new Map(), [
+      {
+        environmentId: "env-1",
+        projectId: "project-1",
+        repository: "acme/app",
+        number: 1,
+        additions: 3,
+        deletions: 0,
+      },
+      {
+        environmentId: "env-1",
+        projectId: "project-1",
+        repository: "acme/infra",
+        number: 1,
+        additions: 5,
+        deletions: 0,
+      },
+    ]);
+    expect(
+      withDiffStat(entry({ repository: "acme/app", number: 1, additions: 0, deletions: 0 }), held),
+    ).toMatchObject({ additions: 3 });
+    expect(
+      withDiffStat(
+        entry({ repository: "acme/infra", number: 1, additions: 0, deletions: 0 }),
+        held,
+      ),
+    ).toMatchObject({ additions: 5 });
   });
 
   it("does not mutate the map it was handed", () => {
-    const held = new Map([["env-1 project-1 1", { additions: 1, deletions: 1 }]]);
+    const held = new Map([["env-1 project-1 pingdotgg/t3code 1", { additions: 1, deletions: 1 }]]);
     mergePullRequestDiffStats(held, [
-      { environmentId: "env-1", projectId: "project-1", number: 1, additions: 2, deletions: 2 },
+      {
+        environmentId: "env-1",
+        projectId: "project-1",
+        repository: "pingdotgg/t3code",
+        number: 1,
+        additions: 2,
+        deletions: 2,
+      },
     ]);
-    expect(held.get("env-1 project-1 1")).toEqual({ additions: 1, deletions: 1 });
+    expect(held.get("env-1 project-1 pingdotgg/t3code 1")).toEqual({ additions: 1, deletions: 1 });
   });
 });
 

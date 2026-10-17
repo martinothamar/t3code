@@ -1,8 +1,12 @@
 import type { ThreadPullRequestLink } from "@t3tools/contracts";
 
-import { visibleThreadPullRequests } from "./threadPullRequests.ts";
+import { legacyThreadPullRequestKey, visibleThreadPullRequests } from "./threadPullRequests.ts";
 
 export interface ComposerPullRequestMatch {
+  /** Keeps the same repository on two hosts apart; entries without one share a key. */
+  readonly host?: string;
+  /** Exact-number detail reads omit the host; recover it from their URL. */
+  readonly url?: string;
   readonly number: number;
   readonly projectId: string;
   readonly repository: string;
@@ -23,6 +27,7 @@ export function composerPullRequestsFromLinks(
       : [
           {
             projectId,
+            host: link.host,
             repository: link.repository,
             number: link.number,
             url: link.url,
@@ -39,7 +44,7 @@ export function composerPullRequestsFromLinks(
 
 /**
  * Pull requests matching the numeric fragment typed after `#`, de-duplicated. `entries` are kept
- * to the project's repository; `linked` rows (the thread's own pull requests) may come from any
+ * to the project's repositories; `linked` rows (the thread's own pull requests) may come from any
  * repository. An exact number match always outranks a substring match so the result limit can
  * never drop the pull request the user typed in full; then linked rows lead, newest first.
  */
@@ -50,30 +55,32 @@ export function filterComposerPullRequestMatches<
   readonly entries: ReadonlyArray<Entry>;
   readonly linked?: ReadonlyArray<Linked>;
   readonly projectId: string;
-  readonly repository: string;
+  readonly repositories: ReadonlyArray<string>;
   readonly query: string;
   readonly limit: number;
 }): ReadonlyArray<Entry | Linked> {
-  const repository = input.repository.trim().toLowerCase();
-  const keyOf = (entry: ComposerPullRequestMatch) =>
-    `${entry.repository.trim().toLowerCase()}#${entry.number}`;
+  const repositories = new Set(
+    input.repositories.map((repository) => repository.trim().toLowerCase()),
+  );
   const linked = (input.linked ?? []).filter((entry) => String(entry.number).includes(input.query));
-  const linkedKeys = new Set(linked.map(keyOf));
+  const linkedKeys = new Set(linked.map(composerPullRequestKey));
   const matchingEntries = input.entries.filter(
     (entry) =>
       entry.projectId === input.projectId &&
-      entry.repository.trim().toLowerCase() === repository &&
+      repositories.has(entry.repository.trim().toLowerCase()) &&
       String(entry.number).includes(input.query),
   );
-  // Project rows go first so a linked pull request the listing also has keeps the fresher row.
+  // Prefer the project listing's current data over the linked snapshot of the same pull request.
   const uniqueEntries = new Map<string, Entry | Linked>();
   for (const entry of [...matchingEntries, ...linked]) {
-    if (!uniqueEntries.has(keyOf(entry))) {
-      uniqueEntries.set(keyOf(entry), entry);
+    const key = composerPullRequestKey(entry);
+    if (!uniqueEntries.has(key)) {
+      uniqueEntries.set(key, entry);
     }
   }
   const isExactMatch = (entry: ComposerPullRequestMatch) => String(entry.number) === input.query;
-  const isLinked = (entry: ComposerPullRequestMatch) => linkedKeys.has(keyOf(entry));
+  const isLinked = (entry: ComposerPullRequestMatch) =>
+    linkedKeys.has(composerPullRequestKey(entry));
   // `.sort()` on a copy, not `.toSorted()`: this runs on Hermes, which has no ES2023 array
   // methods, and reaching for one here crashed the composer as the suggestions loaded.
   return [...uniqueEntries.values()]
@@ -84,4 +91,15 @@ export function filterComposerPullRequestMatches<
         right.updatedAt.localeCompare(left.updatedAt),
     )
     .slice(0, input.limit);
+}
+
+/** One suggestion per pull request: its host, repository and number. */
+export function composerPullRequestKey(
+  entry: Pick<ComposerPullRequestMatch, "host" | "url" | "repository" | "number">,
+): string {
+  const key =
+    entry.host === undefined && entry.url !== undefined
+      ? legacyThreadPullRequestKey({ ...entry, url: entry.url })
+      : entry;
+  return `${key.host?.toLowerCase() ?? ""}/${key.repository.trim().toLowerCase()}#${key.number}`;
 }

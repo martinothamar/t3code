@@ -146,7 +146,10 @@ import {
   usageLimitRunPresentedAsLatest,
 } from "@t3tools/shared/orchestrationV2ThreadError";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
+import {
+  projectRepositorySelectors,
+  sourceControlRepositorySelector,
+} from "@t3tools/shared/sourceControl";
 import { truncate } from "@t3tools/shared/String";
 import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
 import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
@@ -623,6 +626,7 @@ import { recallableComposerPrompt } from "./chat/composerPromptHistory";
 import { observeResize } from "~/lib/observeResize";
 
 const EMPTY_PROVIDERS: ServerProvider[] = [];
+const EMPTY_REPOSITORIES: ReadonlyArray<string> = [];
 const EMPTY_PROVIDER_MODELS: ServerProvider["models"] = [];
 const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
 import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
@@ -5550,6 +5554,10 @@ export default function ChatView(props: ChatViewProps) {
     : (activeThread?.linkedPullRequest ?? null);
   const activeProjectRepository = sourceControlRepositorySelector(
     activeProject?.repositoryIdentity,
+  );
+  const activeProjectRepositories = useMemo(
+    () => (activeProject ? projectRepositorySelectors(activeProject) : []),
+    [activeProject],
   );
   const persistedLinkedThreadPullRequestStatus = useLinkedThreadPullRequest(
     activeThreadRef?.environmentId ?? null,
@@ -11011,6 +11019,7 @@ export default function ChatView(props: ChatViewProps) {
     threadId: activeThread.id,
     ...(draftId ? { draftId } : {}),
     activeProjectName: activeProject?.title,
+    projectHoldsRepositories: (activeProject?.workspaceRepositories?.length ?? 0) > 0,
     activeProjectScripts: activeProject ? activeProjectScripts : undefined,
     preferredScriptId: activeProject
       ? (lastInvokedScriptByProjectId[activeProject.id] ?? null)
@@ -11604,8 +11613,10 @@ export default function ChatView(props: ChatViewProps) {
                               pullRequestProjectId={
                                 supportsPullRequests ? (activeProject?.id ?? null) : null
                               }
-                              pullRequestRepository={
-                                supportsPullRequests ? activeProjectRepository : null
+                              pullRequestRepositories={
+                                supportsPullRequests
+                                  ? activeProjectRepositories
+                                  : EMPTY_REPOSITORIES
                               }
                               threadPullRequests={(activeThreadShell ?? activeThread)?.pullRequests}
                               restingControlsHost={restingComposerControlsHost}
