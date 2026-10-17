@@ -84,8 +84,8 @@ RUN case "${TARGETARCH}" in \
 # Route GitHub credentials through gh, so plain git authenticates with the mediated token.
 RUN git config --system credential.https://github.com.helper '!/usr/local/bin/gh auth git-credential'
 
-ARG CLAUDE_CODE_VERSION=2.1.296
-ARG CODEX_VERSION=0.162.1
+ARG CLAUDE_CODE_VERSION=2.1.302
+ARG CODEX_VERSION=0.163.0
 # Matches the repository's playwright-core, so tests and the desktop share one browser build.
 ARG PLAYWRIGHT_VERSION=1.60.0
 ARG AGENTCTL_VERSION=v0.1.0-preview.11
