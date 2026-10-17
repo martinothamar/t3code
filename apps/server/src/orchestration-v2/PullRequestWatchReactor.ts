@@ -212,8 +212,8 @@ function watchesEqual(left: ThreadPullRequestWatch, right: ThreadPullRequestWatc
 
 /**
  * Wakes a thread's agent when a pull request it watches (`watch_pull_request`) needs a look:
- * checks finished on the head commit, someone else commented, or the branch started to
- * conflict. A pass every two minutes looks at each watched pull request once for all the threads
+ * checks finished on the head commit, someone other than the agent itself commented, or the
+ * branch started to conflict. A pass every two minutes looks at each watched pull request once for all the threads
  * of a project that watch it. Where the host has a fingerprint, one batched read of those tells
  * the pass which pull requests moved, and only those are read; elsewhere a pull request is read
  * unless its sync snapshot has not moved while nothing is in flight.
@@ -356,7 +356,8 @@ export const make = Effect.gen(function* () {
         if (cursor === null) continue;
         const count = thread.commentCount ?? 0;
         let tail = tails.get(thread.id);
-        if (tail?.count !== count) {
+        // Submitting a draft reply leaves the count as it was, so a cached draft is read again.
+        if (tail?.count !== count || tail.comments.some((comment) => comment.pending === true)) {
           const comments = new Map<string, PullRequestComment>();
           const cursors = new Set<string>();
           while (cursor !== null) {
