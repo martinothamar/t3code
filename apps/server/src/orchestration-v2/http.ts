@@ -23,6 +23,7 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { traceLocalHandlerWork } from "../cloud/traceRelayRequest.ts";
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
+import { enrichProjectShell } from "../project/folderRepositories.ts";
 import {
   buildBoundedThreadProjection,
   decodeThreadHistoryCursor,
@@ -73,11 +74,12 @@ export const layer = HttpApiBuilder.group(
           projects,
           (project) =>
             // Use available enrichment only; git probes can take a minute and exceed shell-snapshot budgets.
-            projectEnrichment.getAvailable(project.workspaceRoot).pipe(
-              Effect.map((enrichment) => ({
-                ...project,
-                repositoryIdentity: enrichment.repositoryIdentity,
-              })),
+            enrichProjectShell(project).pipe(
+              Effect.map((enriched) => enriched.project),
+              Effect.provideService(
+                ProjectEnrichmentService.ProjectEnrichmentService,
+                projectEnrichment,
+              ),
             ),
           { concurrency: 16 },
         ),

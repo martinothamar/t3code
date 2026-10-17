@@ -44,6 +44,7 @@ import { deletedProjectOverridePatch } from "../provider/ProjectSettingsOverride
 import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
+import { enrichProjectShell } from "./folderRepositories.ts";
 import { makeIsWorktreeContainer } from "./worktreeContainer.ts";
 import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
 import {
@@ -238,7 +239,7 @@ export const make = Effect.gen(function* () {
   // with the disk when a project is read, at most this often. Server work reads the disk itself.
   const folderSyncDue = new Map<ProjectId, number>();
   const syncFolders = Effect.fn("ProjectService.syncFolders")(function* (
-    row: ProjectStore.ProjectRow,
+    row: Pick<ProjectStore.ProjectRow, "projectId" | "workspaceRoot" | "trackedFolders">,
   ) {
     const now = yield* Clock.currentTimeMillis;
     if ((folderSyncDue.get(row.projectId) ?? 0) > now) return;
@@ -835,11 +836,19 @@ export const make = Effect.gen(function* () {
   );
 
   const enrichShell = (shell: OrchestrationProjectShell) =>
-    projectEnrichment.getAvailable(shell.workspaceRoot).pipe(
-      Effect.map((enrichment) => ({
-        ...shell,
-        repositoryIdentity: enrichment.repositoryIdentity,
-      })),
+    enrichProjectShell(shell).pipe(
+      Effect.map(({ project }) => project),
+      // Pull requests and issues read a folder's repositories from these reads, not hydrate.
+      Effect.tap((project) =>
+        project.repositoryIdentity === null
+          ? syncFolders({
+              projectId: shell.id,
+              workspaceRoot: shell.workspaceRoot,
+              trackedFolders: shell.trackedFolders ?? [],
+            }).pipe(Effect.ignoreCause({ log: true }), Effect.forkIn(scope))
+          : Effect.void,
+      ),
+      Effect.provideService(ProjectEnrichmentService.ProjectEnrichmentService, projectEnrichment),
     );
 
   const getShell: ProjectService["Service"]["getShell"] = Effect.fn("ProjectService.getShell")(

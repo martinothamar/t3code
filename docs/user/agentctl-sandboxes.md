@@ -49,9 +49,11 @@ the provider credentials agentctl gives it.
 
 - Stopping keeps the Sandbox's disk. Its threads stay listed and reconnect when it starts again.
   Deleting removes the disk, and with it the Sandbox's project and threads in T3 Code.
-- The working directory is usually not a Git repository itself, so T3 Code's turn diffs, restore
-  and worktree mode are not available there, and **Pull Requests** lists nothing for a Sandbox.
-  Agents still use Git in each repository, and a pull request linked to a thread still shows on it.
+- The working directory is usually not a Git repository itself but holds the repositories cloned
+  into it, which T3 Code treats as a [project with several repositories](./multi-repo-projects.md).
+  **Pull Requests** and **Issues** list those of its repositories, and threads show the status of
+  the pull requests linked to them. See
+  [Create, review, and merge pull requests](./source-control.md#create-review-and-merge-pull-requests).
 - A new Sandbox starts with the preferences changed in Settings on the computer it runs on, such as
   auto-settle and branch naming. T3 Code copies them once, the first time it connects, and never
   overwrites a setting you changed in the Sandbox. If its manifest has the `pi` harness, Pi is turned

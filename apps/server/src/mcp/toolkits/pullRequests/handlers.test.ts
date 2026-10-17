@@ -17,6 +17,7 @@ import {
   type ThreadPullRequestLink,
   type RuntimeMode,
   SourceControlProviderKind,
+  type TaskFolder,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -30,6 +31,7 @@ import { McpSchema, type Tool } from "effect/ai";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 
 import * as GitManager from "../../../git/GitManager.ts";
+import * as TaskFolderStore from "../../../workspace/TaskFolderStore.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import {
   type PullRequestTestThread,
@@ -160,6 +162,8 @@ interface HarnessOptions {
   readonly pullRequests?: Partial<PullRequestService.PullRequestService["Service"]>;
   readonly git?: Partial<GitManager.GitManager["Service"]>;
   readonly managedPolicy?: Parameters<typeof ServerSettings.layerTest>[1];
+  /** The task folder a worktree thread works in, with each repository's worktree. */
+  readonly taskFolder?: TaskFolder;
 }
 
 const NO_GUIDE: PullRequestReviewGuideResult = { guide: null, run: null, currentHeadSha: "head-1" };
@@ -220,6 +224,11 @@ const makeHarness = Effect.fn("makePullRequestsToolkitHarness")(function* (
     Layer.succeed(SecureRandom.SecureRandom, testCrypto),
     ServerSettings.layerTest({}, options.managedPolicy),
     McpToolAccessTestkit.liveThreadsLayer,
+    options.taskFolder === undefined
+      ? Layer.empty
+      : Layer.mock(TaskFolderStore.TaskFolderStore)({
+          findContaining: () => Effect.succeed(options.taskFolder ?? null),
+        }),
   );
   const toolkit = yield* PullRequestsToolkit.pipe(
     Effect.provide(
@@ -353,6 +362,65 @@ describe("pull request toolkit handlers", () => {
           }
         }
       }
+    }),
+  );
+
+  it.effect("links by repository and number in a workspace folder, from that checkout's host", () =>
+    Effect.gen(function* () {
+      const checkout = (host: string, provider: string, repository: string) => ({
+        canonicalKey: `${host}/${repository}`,
+        locator: {
+          source: "git-remote" as const,
+          remoteName: "origin",
+          remoteUrl: `https://${host}/${repository}.git`,
+        },
+        provider: SourceControlProviderKind.make(provider),
+        displayName: repository,
+      });
+      const harness = yield* makeHarness({
+        project: {
+          ...makeProject(null),
+          workspaceRepositories: [
+            checkout("github.com", "github", "acme/app"),
+            checkout("gitlab.com", "gitlab", "acme/infra"),
+          ],
+        },
+      });
+      const result = yield* harness.call("link_pull_request", {
+        repository: "acme/infra",
+        number: 9,
+      });
+      expect(result.host).toBe("gitlab.com");
+      expect(result.url).toBe("https://gitlab.com/acme/infra/-/merge_requests/9");
+
+      // An Azure repository is named by its whole path, not the name its rows are keyed by.
+      const azure = yield* makeHarness({
+        project: {
+          ...makeProject(null),
+          workspaceRepositories: [
+            checkout("github.com", "github", "acme/app"),
+            { ...checkout("dev.azure.com", "azure-devops", "org/project/_git/web"), name: "web" },
+          ],
+        },
+      });
+      const azureResult = yield* azure.call("link_pull_request", {
+        repository: "org/project/_git/web",
+        number: 4,
+      });
+      expect(azureResult.host).toBe("dev.azure.com");
+
+      // A repository the folder doesn't hold has no host to borrow when its checkouts differ.
+      const error = yield* Effect.flip(
+        harness.call("link_pull_request", { repository: "acme/other", number: 1 }),
+      );
+      expect(error).toMatchObject({ _tag: "PullRequestHostRequiredError" });
+      // Naming the host picks it.
+      const named = yield* harness.call("link_pull_request", {
+        repository: "acme/other",
+        host: "gitlab.com",
+        number: 1,
+      });
+      expect(named.url).toBe("https://gitlab.com/acme/other/-/merge_requests/1");
     }),
   );
 
@@ -813,32 +881,67 @@ describe("pull request guide tools", () => {
       }),
   );
 
-  it.effect("finds an Azure DevOps checkout for a pull request named by its full path", () =>
-    Effect.gen(function* () {
-      const azure = {
-        ...makeProject({
-          canonicalKey: "dev.azure.com/org/project/_git/web",
-          locator: {
-            source: "git-remote",
-            remoteName: "origin",
-            remoteUrl: "https://dev.azure.com/org/project/_git/web",
-          },
-          provider: SourceControlProviderKind.make("azure-devops"),
-          displayName: "org/project/_git/web",
-          owner: "org",
-          name: "web",
-        }),
-        id: ProjectId.make("project-azure"),
-      };
-      const harness = yield* makeHarness({ projects: [makeProject(), azure] });
-      const result = yield* harness.call("write_pull_request_guides", {
-        pullRequests: [{ host: "dev.azure.com", repository: "org/project/_git/web", number: 9 }],
-      });
-      expect(result.guides.map((guide) => guide.outcome)).toEqual(["started"]);
-      expect((yield* Ref.get(harness.guideRequests)).map((ref) => ref.projectId)).toEqual([
-        "project-azure",
-      ]);
-    }),
+  it.effect(
+    "finds the checkout for a pull request by its full path, in a workspace folder too",
+    () =>
+      Effect.gen(function* () {
+        const azure = {
+          ...makeProject({
+            canonicalKey: "dev.azure.com/org/project/_git/web",
+            locator: {
+              source: "git-remote",
+              remoteName: "origin",
+              remoteUrl: "https://dev.azure.com/org/project/_git/web",
+            },
+            provider: SourceControlProviderKind.make("azure-devops"),
+            displayName: "org/project/_git/web",
+            owner: "org",
+            name: "web",
+          }),
+          id: ProjectId.make("project-azure"),
+        };
+        const folder = {
+          ...makeProject(null),
+          id: ProjectId.make("project-folder"),
+          workspaceRepositories: [
+            {
+              canonicalKey: "github.com/acme/infra",
+              locator: {
+                source: "git-remote" as const,
+                remoteName: "origin",
+                remoteUrl: "https://github.com/acme/infra.git",
+              },
+              provider: SourceControlProviderKind.make("github"),
+              displayName: "acme/infra",
+            },
+          ],
+        };
+        const harness = yield* makeHarness({ projects: [makeProject(), azure, folder] });
+        const result = yield* harness.call("write_pull_request_guides", {
+          pullRequests: [
+            { host: "dev.azure.com", repository: "org/project/_git/web", number: 9 },
+            { host: "github.com", repository: "acme/infra", number: 3 },
+          ],
+        });
+        expect(result.guides.map((guide) => guide.outcome)).toEqual(["started", "started"]);
+        expect((yield* Ref.get(harness.guideRequests)).map((ref) => ref.projectId)).toEqual([
+          "project-azure",
+          "project-folder",
+        ]);
+
+        // The repository's own project comes before a folder listed ahead of it.
+        const rooted = {
+          ...makeProject(folder.workspaceRepositories[0]!),
+          id: ProjectId.make("project-infra"),
+        };
+        const both = yield* makeHarness({ projects: [folder, rooted] });
+        yield* both.call("write_pull_request_guides", {
+          pullRequests: [{ host: "github.com", repository: "acme/infra", number: 3 }],
+        });
+        expect((yield* Ref.get(both.guideRequests)).map((ref) => ref.projectId)).toEqual([
+          "project-infra",
+        ]);
+      }),
   );
 });
 
@@ -2066,6 +2169,220 @@ describe("source control tools", () => {
       }),
     );
   });
+  it.effect(
+    "opens a PR from a workspace folder's checkout, and acts on its only one by number",
+    () =>
+      Effect.gen(function* () {
+        const checkout = (repository: string) => ({
+          canonicalKey: `github.com/${repository}`,
+          locator: {
+            source: "git-remote" as const,
+            remoteName: "origin",
+            remoteUrl: `https://github.com/${repository}.git`,
+          },
+          provider: SourceControlProviderKind.make("github"),
+          displayName: repository,
+          rootPath: `/workspace/${repository.split("/")[1]}`,
+        });
+        const opened: Array<string> = [];
+        const comments: Array<string> = [];
+        const folder = (...repositories: ReadonlyArray<string>) =>
+          makeHarness({
+            project: { ...makeProject(null), workspaceRepositories: repositories.map(checkout) },
+            git: {
+              createPullRequest: (input) =>
+                Effect.sync(() => opened.push(input.cwd)).pipe(
+                  Effect.as({
+                    status: "created" as const,
+                    url: "https://github.com/acme/infra/pull/7",
+                    number: 7,
+                    baseBranch: "main",
+                    headBranch: "tools",
+                    title: input.title,
+                  }),
+                ),
+            },
+            pullRequests: {
+              comment: (input) =>
+                Effect.sync(
+                  () => void comments.push(`${input.host}/${input.repository}#${input.number}`),
+                ),
+            },
+          });
+        const several = yield* folder("acme/app", "acme/infra");
+        const unnamed = yield* Effect.flip(
+          several.call("pull_request_create", { title: "Add tools", body: "Adds tools." }),
+        );
+        expect(unnamed.message).toContain("Pass repository");
+        yield* several.call("pull_request_create", {
+          title: "Add tools",
+          body: "Adds tools.",
+          repository: "acme/infra",
+        });
+        expect(opened).toEqual(["/workspace/infra"]);
+        // A worktree thread's folder is laid out like the project's, a worktree per checkout.
+        const inWorktree = yield* makeHarness({
+          thread: { ...makeThread([]), worktreePath: "/tasks/t1/project" },
+          project: {
+            ...makeProject(null),
+            workspaceRepositories: ["acme/app", "acme/infra"].map((repository) => ({
+              ...checkout(repository),
+              rootPath: `/workspace/project/${repository.split("/")[1]}`,
+            })),
+          },
+          git: {
+            createPullRequest: (input) =>
+              Effect.sync(() => opened.push(input.cwd)).pipe(
+                Effect.as({
+                  status: "created" as const,
+                  url: "https://github.com/acme/infra/pull/8",
+                  number: 8,
+                  baseBranch: "main",
+                  headBranch: "tools",
+                  title: input.title,
+                }),
+              ),
+          },
+        });
+        const unnamedInWorktree = yield* Effect.flip(
+          inWorktree.call("pull_request_create", { title: "Add tools", body: "Adds tools." }),
+        );
+        expect(unnamedInWorktree.message).toContain("Pass repository");
+        yield* inWorktree.call("pull_request_create", {
+          title: "Add tools",
+          body: "Adds tools.",
+          repository: "acme/infra",
+        });
+        expect(opened).toEqual(["/workspace/infra", "/tasks/t1/project/infra"]);
+        // A folder added from outside the project has its worktree where the task folder says.
+        const outside = yield* makeHarness({
+          thread: { ...makeThread([]), worktreePath: "/tasks/t2/project" },
+          project: {
+            ...makeProject(null),
+            workspaceRepositories: [{ ...checkout("acme/lib"), rootPath: "/home/user/lib" }],
+          },
+          taskFolder: {
+            repositories: [
+              {
+                name: "lib",
+                repositoryPath: "/home/user/lib",
+                worktreePath: "/tasks/t2/lib",
+              },
+            ],
+          } as unknown as TaskFolder,
+          git: {
+            createPullRequest: (input) =>
+              Effect.sync(() => opened.push(input.cwd)).pipe(
+                Effect.as({
+                  status: "created" as const,
+                  url: "https://github.com/acme/lib/pull/3",
+                  number: 3,
+                  baseBranch: "main",
+                  headBranch: "tools",
+                  title: input.title,
+                }),
+              ),
+          },
+        });
+        yield* outside.call("pull_request_create", { title: "Add tools", body: "Adds tools." });
+        expect(opened.at(-1)).toBe("/tasks/t2/lib");
+        // Two clones of one repository could each have the branch checked out.
+        const clones = yield* makeHarness({
+          project: {
+            ...makeProject(null),
+            workspaceRepositories: [
+              checkout("acme/infra"),
+              { ...checkout("acme/infra"), rootPath: "/workspace/infra-2" },
+            ],
+          },
+        });
+        const cloned = yield* Effect.flip(
+          clones.call("pull_request_create", {
+            title: "Add tools",
+            body: "Adds tools.",
+            repository: "acme/infra",
+          }),
+        );
+        expect(cloned.message).toContain("several clones");
+
+        const one = yield* folder("acme/infra");
+        yield* one.call("pull_request_respond", { number: 7, body: "Thanks." });
+        expect(comments).toEqual(["github.com/acme/infra#7"]);
+
+        // The branch's PR keeps its host when the folder holds the repository on two.
+        const twoHosts = yield* makeHarness({
+          thread: {
+            ...branchThread,
+            branchPullRequest: {
+              projectId: PROJECT_ID,
+              repository: "acme/infra",
+              number: 8,
+              url: "https://gitlab.com/acme/infra/-/merge_requests/8",
+            },
+          },
+          project: {
+            ...makeProject(null),
+            workspaceRepositories: [
+              checkout("acme/infra"),
+              {
+                ...checkout("acme/infra"),
+                canonicalKey: "gitlab.com/acme/infra",
+                locator: {
+                  source: "git-remote" as const,
+                  remoteName: "origin",
+                  remoteUrl: "https://gitlab.com/acme/infra.git",
+                },
+                provider: SourceControlProviderKind.make("gitlab"),
+              },
+            ],
+          },
+          pullRequests: {
+            comment: (input) =>
+              Effect.sync(
+                () => void comments.push(`${input.host}/${input.repository}#${input.number}`),
+              ),
+          },
+        });
+        yield* twoHosts.call("pull_request_respond", { body: "Thanks." });
+        expect(comments.at(-1)).toBe("gitlab.com/acme/infra#8");
+        // A pull request named by number alone could be on either host, so none is guessed.
+        const either = yield* Effect.flip(
+          twoHosts.call("pull_request_respond", {
+            repository: "acme/infra",
+            number: 9,
+            body: "Thanks.",
+          }),
+        );
+        expect(either.message).toContain("acme/infra on github.com and gitlab.com");
+        // Nor is a pull request opened from whichever checkout comes first.
+        const created = yield* Effect.flip(
+          twoHosts.call("pull_request_create", {
+            title: "Add tools",
+            body: "Adds tools.",
+            repository: "acme/infra",
+          }),
+        );
+        expect(created.message).toContain("acme/infra on github.com and gitlab.com");
+        expect(comments.at(-1)).toBe("gitlab.com/acme/infra#8");
+
+        // A URL no forge parses still leaves its repository and number.
+        const unreadable = yield* makeHarness({
+          thread: {
+            ...branchThread,
+            branchPullRequest: {
+              ...branchThread.branchPullRequest,
+              url: "https://code.internal/t3tools/t3code/changes/42",
+            },
+          },
+          pullRequests: {
+            comment: (input) =>
+              Effect.sync(() => void comments.push(`${input.repository}#${input.number}`)),
+          },
+        });
+        yield* unreadable.call("pull_request_respond", { body: "Thanks." });
+        expect(comments.at(-1)).toBe("t3tools/t3code#42");
+      }),
+  );
 
   it.effect("replies to and resolves a review thread, and refuses resolving without one", () =>
     Effect.gen(function* () {

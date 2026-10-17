@@ -39,12 +39,15 @@ export function filterComposerPullRequestMatches<
   readonly entries: ReadonlyArray<Entry>;
   readonly linked?: ReadonlyArray<Linked>;
   readonly projectId: string;
-  readonly repository: string;
+  /** A workspace folder's project lists the pull requests of every checkout in it. */
+  readonly repositories: ReadonlyArray<string>;
   readonly query: string;
   readonly limit: number;
   readonly keyOf: (entry: Entry | Linked) => string;
 }): ReadonlyArray<Entry | Linked> {
-  const repository = input.repository.trim().toLowerCase();
+  const repositories = new Set(
+    input.repositories.map((repository) => repository.trim().toLowerCase()),
+  );
   const { keyOf } = input;
   // Compare numerically so a zero-padded query like "0042" still finds #42.
   const queryNumber = /^\d+$/u.test(input.query) ? Number(input.query) : Number.NaN;
@@ -56,7 +59,7 @@ export function filterComposerPullRequestMatches<
   const matchingEntries = input.entries.filter(
     (entry) =>
       entry.projectId === input.projectId &&
-      entry.repository.trim().toLowerCase() === repository &&
+      repositories.has(entry.repository.trim().toLowerCase()) &&
       matchesQuery(entry),
   );
   const uniqueEntries = new Map<string, Entry | Linked>();

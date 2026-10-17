@@ -163,6 +163,8 @@ const makeLayer = (input: {
   readonly currentHead?: Ref.Ref<string>;
   readonly identity?: typeof ACME_APP & { readonly origin?: RepositoryOrigin };
   readonly locator?: typeof ACME_APP.locator;
+  /** The project is the checkout's parent folder, which is no repository itself. */
+  readonly folder?: boolean;
 }) =>
   PullRequestReviewGuideService.layer.pipe(
     Layer.provide(
@@ -190,19 +192,40 @@ const makeLayer = (input: {
         activity: () => Effect.succeed(activity),
         invalidate: () => Effect.void,
         stack: () => Effect.succeed(stack(input)),
+        // Resolves a folder's checkouts, which a shell read may not have yet.
+        addressedProject: () =>
+          Effect.succeed({
+            id: projectId,
+            workspaceRoot: input.root,
+            repositoryIdentity: null,
+            workspaceRepositories: [
+              {
+                ...(input.identity ?? ACME_APP),
+                locator: input.locator ?? { ...ACME_APP.locator, remoteUrl: input.remote },
+                rootPath: input.workspace,
+              },
+            ],
+          }),
       } as unknown as PullRequestService.PullRequestService["Service"]),
     ),
     Layer.provide(
       Layer.succeed(ProjectService.ProjectService, {
-        getShell: () =>
-          Effect.succeedSome({
-            id: projectId,
-            workspaceRoot: input.workspace,
-            repositoryIdentity: {
-              ...(input.identity ?? ACME_APP),
-              locator: input.locator ?? { ...ACME_APP.locator, remoteUrl: input.remote },
-            },
-          }),
+        getShell: () => {
+          const identity = {
+            ...(input.identity ?? ACME_APP),
+            locator: input.locator ?? { ...ACME_APP.locator, remoteUrl: input.remote },
+          };
+          return Effect.succeedSome(
+            input.folder === true
+              ? {
+                  id: projectId,
+                  workspaceRoot: input.root,
+                  // Read before the folder's checkouts resolved.
+                  repositoryIdentity: null,
+                }
+              : { id: projectId, workspaceRoot: input.workspace, repositoryIdentity: identity },
+          );
+        },
       } as unknown as ProjectService.ProjectService["Service"]),
     ),
     Layer.provide(
@@ -631,6 +654,30 @@ it.layer(layerBase, { excludeTestServices: true })("PullRequestReviewGuideServic
       assert.notStrictEqual(result.run?._tag, "Failed", JSON.stringify(result.run));
       assert.strictEqual(result.guide?.headSha, repositories.headSha);
     }),
+  );
+
+  it.effect(
+    "writes a guide from a workspace folder's checkout of the pull request's repository",
+    () =>
+      Effect.gen(function* () {
+        const repositories = yield* makeRepositories;
+        const stored = yield* Deferred.make<void>();
+        const context = yield* Layer.build(
+          makeLayer({
+            ...repositories,
+            folder: true,
+            stored,
+            generate: () => Effect.succeed({ stops: [] }),
+          }),
+        );
+        const service = Context.get(
+          context,
+          PullRequestReviewGuideService.PullRequestReviewGuideService,
+        );
+        yield* service.generate(reference);
+        yield* Deferred.await(stored);
+        assert.strictEqual((yield* service.get(reference)).guide?.headSha, repositories.headSha);
+      }),
   );
 
   it.effect("refuses a pull request from a repository the project is not a checkout of", () =>

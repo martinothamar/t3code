@@ -241,6 +241,7 @@ import { refreshPushedPullRequests } from "./git/refreshPushedPullRequests.ts";
 import { linkCreatedPullRequest } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
+import { enrichProjectShell, enrichmentRefresh } from "./project/folderRepositories.ts";
 import * as ProjectService from "./project/ProjectService.ts";
 import { threadWorkspaceRoot } from "./project/threadWorkspaceRoot.ts";
 import * as ManagedProjectFolders from "./project/ManagedProjectFolders.ts";
@@ -907,14 +908,11 @@ const enrichProjectShells = Effect.fn("ws.orchestrationV2.enrichProjectShells")(
       Effect.forEach(
         projects,
         (project) =>
-          projectEnrichment.getAvailable(project.workspaceRoot).pipe(
-            Effect.map((enrichment) => ({
-              project: {
-                ...project,
-                repositoryIdentity: enrichment.repositoryIdentity,
-              },
-              repositoryIdentityResolved: enrichment.repositoryIdentityResolved,
-            })),
+          enrichProjectShell(project).pipe(
+            Effect.provideService(
+              ProjectEnrichmentService.ProjectEnrichmentService,
+              projectEnrichment,
+            ),
           ),
         { concurrency: 16 },
       ).pipe(
@@ -1315,27 +1313,21 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       Stream.groupedWithin(64, Duration.millis(25)),
       Stream.mapEffect((changes) =>
         Effect.gen(function* () {
-          const identities = new Map(
-            Array.from(changes, (change) => [
-              change.workspaceRoot,
-              change.enrichment.repositoryIdentity,
-            ]),
-          );
           const snapshotSequence = yield* applicationEvents.latestApplicationSequence;
-          const changedProjects = (yield* projects.listShells()).flatMap((project) =>
-            identities.has(project.workspaceRoot)
-              ? [{ ...project, repositoryIdentity: identities.get(project.workspaceRoot) ?? null }]
-              : [],
+          // A tracked folder's identity changes the shell of the folder project that tracks it.
+          const refreshed = yield* enrichmentRefresh(
+            yield* projects.listShells(),
+            Array.from(changes, (change) => change.workspaceRoot),
           );
           return shellStreamItemFromEnrichmentRefresh({
             snapshot: {
               schemaVersion: ORCHESTRATION_V2_PROJECTION_SCHEMA_VERSION,
               snapshotSequence,
-              projects: changedProjects,
+              projects: refreshed.projects,
               threads: [],
               archivedThreads: [],
             } as OrchestrationV2ShellSnapshot,
-            changes: Array.from(changes),
+            changes: refreshed.resolvedRoots.map((workspaceRoot) => ({ workspaceRoot })),
           });
         }),
       ),

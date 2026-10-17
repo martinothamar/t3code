@@ -2,6 +2,7 @@ import {
   CommandId,
   NonNegativeInt,
   type ProviderApprovalPushHooks,
+  projectRepositoryIdentities,
   type PullRequestActivity,
   PullRequestListCursors,
   type PullRequestRef,
@@ -9,6 +10,7 @@ import {
   type PullRequestCheck,
   type PullRequestReviewThread,
   type OrchestrationProjectShell,
+  type RepositoryIdentity,
   type PullRequestState,
   type PullRequestWatchUntil,
   type OrchestrationV2ThreadShell,
@@ -24,10 +26,18 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as GitManager from "../../../git/GitManager.ts";
+import * as TaskFolderStore from "../../../workspace/TaskFolderStore.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as PullRequestWatchService from "../../../pullRequest/PullRequestWatchService.ts";
-import { resolveTarget, type ResolvedTarget } from "../../../pullRequest/pullRequestTarget.ts";
+import {
+  resolveTarget,
+  workspaceCheckout,
+  checkoutInWorktree,
+  hostsHolding,
+  PullRequestHostAmbiguousError,
+  type ResolvedTarget,
+} from "../../../pullRequest/pullRequestTarget.ts";
 import { withAgentMarker } from "../../../orchestration-v2/pullRequestWatch.ts";
 import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
 import * as PullRequestService from "../../../pullRequest/PullRequestService.ts";
@@ -251,20 +261,25 @@ function projectForPullRequest(
   preferred: OrchestrationProjectShell | undefined,
 ): OrchestrationProjectShell | undefined {
   // Match the guide service's host-level repository key, including Azure DevOps org/project/_git/repo.
-  const matches = (project: OrchestrationProjectShell) => {
-    const own = pullRequestSyncKey(
-      { projectId: project.id, host: target.host, repository: target.repository, number: 1 },
-      project.repositoryIdentity ?? undefined,
-    );
-    return (
-      own !== null &&
-      ownPullRequestRepositories(project.repositoryIdentity).some(
-        ({ key }) => own.host === key.host && own.repository === key.repository,
-      )
-    );
-  };
+  const matches = (project: OrchestrationProjectShell) =>
+    projectRepositoryIdentities(project).some((identity) => {
+      const own = pullRequestSyncKey(
+        { projectId: project.id, host: target.host, repository: target.repository, number: 1 },
+        identity,
+      );
+      return (
+        own !== null &&
+        ownPullRequestRepositories(identity).some(
+          ({ key }) => own.host === key.host && own.repository === key.repository,
+        )
+      );
+    });
   if (preferred !== undefined && matches(preferred)) return preferred;
-  return projects.find(matches);
+  // A project rooted in the repository comes before a folder that holds a checkout of it.
+  return (
+    projects.find((project) => project.repositoryIdentity != null && matches(project)) ??
+    projects.find(matches)
+  );
 }
 
 const isPushHooksUnapproved = Schema.is(GitManager.GitPushHooksUnapprovedError);
@@ -344,6 +359,24 @@ const make = Effect.gen(function* () {
   const watches = yield* PullRequestWatchService.PullRequestWatchService;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const git = yield* GitManager.GitManager;
+  // Absent where no task folders are kept, such as the CLI.
+  const taskFolderStore = yield* Effect.serviceOption(TaskFolderStore.TaskFolderStore);
+  const worktreeOfCheckout = Effect.fnUntraced(function* (
+    worktreePath: string,
+    checkout: RepositoryIdentity,
+    project: OrchestrationProjectShell,
+  ) {
+    if (Option.isSome(taskFolderStore)) {
+      const taskFolder = yield* taskFolderStore.value
+        .findContaining(worktreePath)
+        .pipe(Effect.orElseSucceed(() => null));
+      const repository = taskFolder?.repositories.find(
+        (candidate) => candidate.repositoryPath === checkout.rootPath,
+      );
+      if (repository !== undefined) return repository.worktreePath;
+    }
+    return checkoutInWorktree(project, checkout, worktreePath);
+  });
 
   const projects = yield* ProjectService.ProjectService;
   const random = yield* SecureRandom.SecureRandom;
@@ -613,16 +646,22 @@ const make = Effect.gen(function* () {
           )
         : undefined;
     const branchPullRequest = thread.branchPullRequest ?? opened ?? null;
+    // A workspace folder holding one repository names it as a repository-rooted project does.
+    const ownRepository = project.repositoryIdentity ?? workspaceCheckout(project, undefined);
     const branchRepository =
-      project.repositoryIdentity == null
+      ownRepository == null
         ? undefined
-        : (sourceControlDefinitions.repositorySelector(project.repositoryIdentity) ?? undefined);
+        : (sourceControlDefinitions.repositorySelector(ownRepository) ?? undefined);
     const named =
       input.number !== undefined
         ? { number: input.number, repository: input.repository ?? branchRepository }
         : branchPullRequest === null
           ? null
-          : { number: branchPullRequest.number, repository: branchPullRequest.repository };
+          : // Its URL keeps the host, which a folder with checkouts on two hosts can't infer.
+            sourceControlDefinitions.parseChangeRequestUrl(branchPullRequest.url)?.link !==
+              undefined
+            ? { url: branchPullRequest.url }
+            : { number: branchPullRequest.number, repository: branchPullRequest.repository };
     if (named === null) return yield* new PullRequestBranchHasNoneError();
     const target = yield* resolveTarget(named, project);
     const ref: PullRequestRef = {
@@ -1136,7 +1175,45 @@ const make = Effect.gen(function* () {
         if (project === undefined) {
           return yield* new PullRequestProjectNotFoundError({ repository: "" });
         }
-        const cwd = thread.worktreePath ?? project.workspaceRoot;
+        // A workspace folder is no repository; the branch is in one of its checkouts.
+        const hosts = input.repository === undefined ? [] : hostsHolding(project, input.repository);
+        if (input.repository !== undefined && hosts.length > 1) {
+          return yield* new PullRequestHostAmbiguousError({ repository: input.repository, hosts });
+        }
+        const checkout = workspaceCheckout(project, input.repository);
+        const clones = (project.workspaceRepositories ?? []).filter(
+          (identity) => identity.canonicalKey === checkout?.canonicalKey,
+        ).length;
+        if (
+          project.repositoryIdentity == null &&
+          (project.workspaceRepositories?.length ?? 0) > 0 &&
+          (checkout === undefined || clones > 1)
+        ) {
+          return yield* new PullRequestForgeError({
+            detail:
+              clones > 1
+                ? "This thread's folder holds several clones of that repository, and the branch could be in any. Open the PR with the host's CLI in its clone."
+                : input.repository === undefined
+                  ? "This thread's folder holds several repositories. Pass repository, such as owner/repo."
+                  : `This thread's folder holds no checkout of ${input.repository}.`,
+          });
+        }
+        // A worktree thread works in its task folder's worktree of the checkout, wherever the
+        // checkout is, including a folder added from outside the project.
+        const worktree =
+          checkout === undefined || thread.worktreePath == null
+            ? undefined
+            : yield* worktreeOfCheckout(thread.worktreePath, checkout, project);
+        if (checkout !== undefined && thread.worktreePath != null && worktree === undefined) {
+          return yield* new PullRequestForgeError({
+            detail: `This thread's worktree holds no checkout of ${checkout.displayName ?? input.repository}. Open the PR with the host's CLI where its branch is.`,
+          });
+        }
+        const cwd =
+          worktree ??
+          (checkout === undefined
+            ? (thread.worktreePath ?? project.workspaceRoot)
+            : (checkout.rootPath ?? project.workspaceRoot));
         const create = (
           pushHooks?: Parameters<
             GitManager.GitManager["Service"]["createPullRequest"]

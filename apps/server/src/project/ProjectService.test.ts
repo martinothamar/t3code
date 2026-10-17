@@ -1177,6 +1177,65 @@ it.effect("keeps a folder added while a scan of the project folder waited to com
   }).pipe(Effect.provide(layerProjectServiceDependencies)),
 );
 
+it.effect("brings a folder project's repositories in step when only its shell is read", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fileSystem.realPath(
+      yield* fileSystem.makeTempDirectoryScoped({ prefix: "project-shell-sync-" }),
+    );
+    const eventSink = yield* EventSink.EventSinkV2;
+    const synced = yield* Queue.unbounded<void>();
+    const service = yield* ProjectService.make.pipe(
+      Effect.provideService(
+        EventSink.EventSinkV2,
+        EventSink.EventSinkV2.of({
+          ...eventSink,
+          commitProjectCommand: (input) =>
+            input.commandId.startsWith("project-folders:")
+              ? eventSink
+                  .commitProjectCommand(input)
+                  .pipe(Effect.ensuring(Queue.offer(synced, undefined)))
+              : eventSink.commitProjectCommand(input),
+        }),
+      ),
+      // The project folder is no repository, as a Sandbox's working directory.
+      Effect.provideService(
+        ProjectEnrichmentService.ProjectEnrichmentService,
+        ProjectEnrichmentService.ProjectEnrichmentService.of({
+          ...(yield* ProjectEnrichmentService.ProjectEnrichmentService),
+          getAvailable: () =>
+            Effect.succeed({
+              repositoryIdentity: null,
+              faviconPath: null,
+              repositoryIdentityResolved: true,
+            }),
+        }),
+      ),
+    );
+    const projectId = ProjectId.make("project:shell-sync");
+    // Made by a service that is gone, so no sync of its own is left to find the clone below.
+    yield* Effect.scoped(
+      Effect.flatMap(ProjectService.make, (creator) =>
+        creator.create({
+          commandId: CommandId.make("command:shell-sync:create"),
+          projectId,
+          title: "Shell sync",
+          workspaceRoot: root,
+        }),
+      ),
+    );
+    // Cloned later; pull requests and issues read shells, never snapshots.
+    yield* fileSystem.makeDirectory(`${root}/api/.git`, { recursive: true });
+    yield* TestClock.adjust("31 seconds");
+    yield* service.getShell(projectId);
+    yield* Queue.take(synced);
+    assert.deepEqual(Option.getOrThrow(yield* service.getShell(projectId)).trackedFolders, [
+      { path: path.join(root, "api"), name: "api", discovered: true },
+    ]);
+  }).pipe(Effect.provide(layerProjectServiceDependencies)),
+);
+
 it.effect("rejects an update that waited on the lock while its project was deleted", () =>
   Effect.gen(function* () {
     const eventSink = yield* EventSink.EventSinkV2;

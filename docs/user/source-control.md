@@ -41,6 +41,9 @@ A turn's diff shows only that turn's own edits, commits, and conflict fixes—ex
 - **Review**: Open **Pull requests** to inspect diffs, comments, checks, commits, and request reviewers. Draft line comments stay local until submitted. If new commits are pushed while you review, click **Load new commits** before merging or submitting.
 - **Saved views**: Save and update filter/sort setups under **Views → Save current view** (stored per device).
 - **Mark files viewed**: Check off files in the **Code** tab to collapse them (reopens as **Changed** on new pushes). Syncs natively with GitHub; stored on your T3 Code server for other hosts.
+- **Project folders**: A project folder that is not a Git repository itself lists the pull requests and issues of the [repositories it covers](./multi-repo-projects.md#discovery-and-configuration), including folders added to it. Threads in it show the status of their linked pull requests and open those repositories' pull requests beside the thread. A new checkout shows up within a minute, and a guide for one of their pull requests is written from its checkout.
+- **One repository in several environments**: When several connected environments hold the same repository, such as Sandboxes that each clone it, **Pull requests** lists it from one of them, and a pull request's actions let you pick which environment's checkout to work in.
+- **Which repository**: A checkout's pull requests come from the repository `gh repo set-default` chose for it, else its `upstream` remote, then its `origin`. For a fork whose pull requests are opened on the fork itself, run `gh repo set-default` with the fork in that checkout.
 - **Mobile**: Open **Pull requests** across environments (cached lists, details, guides, and diffs stay readable offline). Tap **Work on PR** to start a worktree thread on the PR's branch.
 - **Quick actions & options**:
   - Enable **Remove agent credits when merging** in **Settings → Source control & issues** to strip recognized agent co-author/generated-by trailers on GitHub merge/squash commits (keeps human co-authors).
@@ -62,7 +65,7 @@ Disabled by default. In **Settings → Environments → Pull request sharing** (
 
 ## Linked pull requests and watching
 
-Threads can link multiple PRs (even across repos on the same host). Creating a PR via Git actions, `gh pr create`, `glab mr create`, or an agent's `link_pull_request` links it automatically; manage links from **Linked items** or the command palette.
+Threads can link multiple PRs (even across repos on the same host). Creating a PR via Git actions, `gh pr create`, `glab mr create`, or an agent's `link_pull_request` links it automatically; manage links from **Linked items** or the command palette. A number links the project's own pull request; in a project folder that holds several repositories, write `repo#123`.
 
 - **Agent PR tools**: Agents can read, open, update, comment on, and merge PRs in the thread's repo using your configured sign-in (refusing merges if the head moved since last read).
 - **Watch / babysit a PR**: Ask an agent to watch or babysit a PR (or toggle it in **Linked items** / click the eye icon in thread details). The server polls every 2 minutes and wakes the agent on failed checks, passed required checks, new comments/reviews, conflicts, merge-queue drops, or merge/close.

@@ -37,6 +37,7 @@ import {
   PullRequestUrlInvalidError,
   PullRequestTargetIncompleteError,
   PullRequestHostRequiredError,
+  PullRequestHostAmbiguousError,
   PullRequestUrlUnavailableError,
   PullRequestRepositoryInvalidError,
 } from "../../../pullRequest/pullRequestTarget.ts";
@@ -181,6 +182,7 @@ export const PullRequestToolError = Schema.Union([
   PullRequestUrlInvalidError,
   PullRequestTargetIncompleteError,
   PullRequestHostRequiredError,
+  PullRequestHostAmbiguousError,
   PullRequestUrlUnavailableError,
   PullRequestRepositoryInvalidError,
   PullRequestThreadRequiredError,
@@ -690,6 +692,11 @@ const CreatePullRequestTool = Tool.make("pull_request_create", {
       description:
         "Visible to writers only; the branch never reaches origin. Fails on a host without private PRs.",
     }),
+    repository: Schema.optional(
+      TrimmedNonEmptyString.annotate({
+        description: "owner/repo of the checkout, when the thread's folder holds several.",
+      }),
+    ),
   }),
   success: CreatePullRequestResult,
   failure: PullRequestToolError,

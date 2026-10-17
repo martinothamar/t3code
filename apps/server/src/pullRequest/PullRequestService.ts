@@ -20,6 +20,7 @@ import {
   PullRequestUnavailableError,
   resolvePullRequestAuthorFilter,
   type OrchestrationProjectShell,
+  type RepositoryIdentity,
   type ProjectId,
   type PullRequestAction,
   type PullRequestActionInput,
@@ -83,6 +84,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import { folderRepositories } from "../project/folderRepositories.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import type { SourceControlProviderContext } from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
@@ -368,6 +370,13 @@ export interface SupportedProject {
   /** Unlike Azure repository names, remotes are unique across an organization. */
   readonly remote: string;
   readonly repositoryKey: string | null;
+}
+
+/** A project with one repository it serves; a lower rank serves a repository first. */
+interface RankedProject {
+  /** 0: the repository the project is rooted in. 1: one a workspace folder holds. */
+  readonly rank: 0 | 1;
+  readonly project: OrchestrationProjectShell;
 }
 
 interface WorkspaceProjects {
@@ -784,6 +793,15 @@ export const make = Effect.gen(function* () {
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const projects = yield* ProjectService.ProjectService;
   const repositoryIdentities = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+  const readFolderRepositories = (
+    project: Pick<OrchestrationProjectShell, "workspaceRoot" | "trackedFolders">,
+  ) =>
+    folderRepositories(project).pipe(
+      Effect.provideService(
+        RepositoryIdentityResolver.RepositoryIdentityResolver,
+        repositoryIdentities,
+      ),
+    );
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   const rateLimits = yield* SourceControlRateLimit.SourceControlRateLimit;
   const filesViewedStore = yield* PullRequestFilesViewed.PullRequestFilesViewedRepository;
@@ -916,12 +934,46 @@ export const make = Effect.gen(function* () {
     ).pipe(Effect.map((resolved) => new Map(resolved)));
   });
 
+  /**
+   * A project with its repository identity resolved. A workspace folder, which is no repository
+   * itself, reads as one project per repository it holds, each run from its own checkout, so
+   * everything downstream serves them as it serves a project rooted in that repository.
+   */
+  const withRepositoryIdentities = Effect.fnUntraced(function* (
+    project: OrchestrationProjectShell,
+  ): Effect.fn.Return<ReadonlyArray<RankedProject>> {
+    if (project.repositoryIdentity != null) return [{ rank: 0, project }];
+    const repositoryIdentity = yield* repositoryIdentities.resolve(project.workspaceRoot);
+    if (repositoryIdentity !== null)
+      return [{ rank: 0, project: { ...project, repositoryIdentity } }];
+    const identities = yield* readFolderRepositories(project);
+    return identities.flatMap((identity) =>
+      identity.rootPath === undefined
+        ? []
+        : [
+            {
+              rank: 1,
+              project: {
+                ...project,
+                workspaceRoot: identity.rootPath,
+                repositoryIdentity: identity,
+              },
+            },
+          ],
+    );
+  });
+
   const listWorkspaceProjects = (
-    filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host">,
+    filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host" | "excludeRepositories">,
   ): Effect.Effect<WorkspaceProjects, PullRequestError> =>
     Effect.flatMap(sharedProjectReads, (shared) => {
       if (shared === null || !shared.open) return readWorkspaceProjects(filter);
-      const key = JSON.stringify([filter.projectId, filter.projectIds, filter.host]);
+      const key = JSON.stringify([
+        filter.projectId,
+        filter.projectIds,
+        filter.host,
+        filter.excludeRepositories,
+      ]);
       const existing = shared.reads.get(key);
       if (existing !== undefined) return existing;
       return Effect.cached(readWorkspaceProjects(filter)).pipe(
@@ -945,7 +997,7 @@ export const make = Effect.gen(function* () {
     });
 
   const readWorkspaceProjects = (
-    filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host">,
+    filter: Pick<PullRequestListInput, "projectId" | "projectIds" | "host" | "excludeRepositories">,
   ): Effect.Effect<WorkspaceProjects, PullRequestError> =>
     (filter.projectId === undefined
       ? projects.listShells(
@@ -962,15 +1014,17 @@ export const make = Effect.gen(function* () {
           }),
       ),
       Effect.flatMap((projects) =>
-        Effect.forEach(
-          projects,
-          (project) =>
-            project.repositoryIdentity != null
-              ? Effect.succeed(project)
-              : repositoryIdentities
-                  .resolve(project.workspaceRoot)
-                  .pipe(Effect.map((repositoryIdentity) => ({ ...project, repositoryIdentity }))),
-          { concurrency: REPOSITORY_CONCURRENCY },
+        Effect.forEach(projects, withRepositoryIdentities, {
+          concurrency: REPOSITORY_CONCURRENCY,
+        }).pipe(
+          // A repository is listed once, through the first project that holds it, so a project
+          // rooted in it comes before a workspace folder that also holds it.
+          Effect.map((expanded) =>
+            expanded
+              .flat()
+              .toSorted((left, right) => left.rank - right.rank)
+              .map(({ project }) => project),
+          ),
         ),
       ),
       Effect.flatMap((projects) =>
@@ -987,6 +1041,11 @@ export const make = Effect.gen(function* () {
         const viewerRoots = new Map<string, string[]>();
         const refinedProjectIdsByHost = new Map<string, ProjectId[]>();
         const seen = new Set<string>();
+        const excluded = new Set(
+          (filter.excludeRepositories ?? []).map((key) =>
+            sourceControlDefinitions.canonicalRepositoryKey(key.toLowerCase()),
+          ),
+        );
         for (const project of projects) {
           if (filter.projectId !== undefined && project.id !== filter.projectId) continue;
           if (filter.projectIds !== undefined && !filter.projectIds.includes(project.id)) continue;
@@ -1017,6 +1076,17 @@ export const make = Effect.gen(function* () {
             const roots = viewerRoots.get(host);
             if (roots === undefined) viewerRoots.set(host, [project.workspaceRoot]);
             else if (!roots.includes(project.workspaceRoot)) roots.push(project.workspaceRoot);
+          }
+          // Another connection lists it; the viewer lookup above still counts this checkout.
+          // Legacy identities can lack the key, and then nothing names them to leave out.
+          if (
+            excluded.size > 0 &&
+            identity.canonicalKey !== undefined &&
+            excluded.has(
+              sourceControlDefinitions.canonicalRepositoryKey(identity.canonicalKey.toLowerCase()),
+            )
+          ) {
+            continue;
           }
           const repositoryKey =
             api?.repositoryKey?.({ canonicalKey: identity.canonicalKey }) ?? null;
@@ -1053,9 +1123,15 @@ export const make = Effect.gen(function* () {
   const requireProject = (ref: PullRequestRef): Effect.Effect<SupportedProject, PullRequestError> =>
     listWorkspaceProjects({ projectId: ref.projectId }).pipe(
       Effect.flatMap(({ supported }): Effect.Effect<SupportedProject, PullRequestError> => {
-        const own = supported[0];
         const repository = ref.repository.trim();
         const host = ref.host?.trim().toLowerCase();
+        // A workspace project has one entry per repository it holds; any other has at most one.
+        const own =
+          supported.find(
+            (candidate) =>
+              candidate.repository.toLowerCase() === repository.toLowerCase() &&
+              (host === undefined || host === candidate.host),
+          ) ?? supported[0];
         if (own !== undefined && own.repository.toLowerCase() === repository.toLowerCase()) {
           if (host === undefined || host === own.host) return Effect.succeed(own);
         }
@@ -1176,14 +1252,47 @@ export const make = Effect.gen(function* () {
     );
 
   const addressedProject: PullRequestService["Service"]["addressedProject"] = (projectId) =>
-    listWorkspaceProjects({ projectId }).pipe(
-      Effect.map(({ projects, supported }) => {
+    Effect.all([
+      listWorkspaceProjects({ projectId }),
+      projects.getShell(projectId).pipe(
+        Effect.map(Option.getOrUndefined),
+        Effect.mapError(
+          (cause) =>
+            new PullRequestOperationError({
+              operation: "listProjects",
+              detail: "The project could not be read.",
+              cause,
+            }),
+        ),
+      ),
+    ]).pipe(
+      Effect.map(([{ projects: read, supported }, shell]) => {
+        const kinds = new Map(
+          supported.map(({ project, kind }) => [project.repositoryIdentity?.canonicalKey, kind]),
+        );
+        const refined = (identity: RepositoryIdentity) => {
+          const kind = kinds.get(identity.canonicalKey);
+          return kind === undefined || kind === identity.provider
+            ? identity
+            : { ...identity, provider: kind };
+        };
         const own = supported[0];
-        if (own === undefined) return projects.find((project) => project.id === projectId);
+        if (own === undefined) return read.find((project) => project.id === projectId);
+        // A workspace folder reads as one entry per checkout, every clone included; it is
+        // addressed as the folder that holds them, so tools can tell its repositories apart.
+        if (shell !== undefined && own.project.workspaceRoot !== shell.workspaceRoot) {
+          return {
+            ...shell,
+            repositoryIdentity: null,
+            workspaceRepositories: read.flatMap((project) =>
+              project.repositoryIdentity == null ? [] : [refined(project.repositoryIdentity)],
+            ),
+          };
+        }
         const identity = own.project.repositoryIdentity;
-        return identity == null || identity.provider === own.kind
+        return identity == null
           ? own.project
-          : { ...own.project, repositoryIdentity: { ...identity, provider: own.kind } };
+          : { ...own.project, repositoryIdentity: refined(identity) };
       }),
     );
 
@@ -2921,21 +3030,28 @@ export const make = Effect.gen(function* () {
   )(function* (input) {
     if (input.refs.length === 0) return { stats: [] };
     const { supported } = yield* listWorkspaceProjects({});
-    const byProject = new Map(supported.map((project) => [project.project.id, project]));
+    // By repository as well as project: a workspace project holds several.
+    const byRepository = new Map(
+      supported.map((project) => [
+        `${project.project.id} ${project.repository.toLowerCase()}`,
+        project,
+      ]),
+    );
     const wanted = new Map<
       string,
       { readonly project: SupportedProject; readonly number: number }
     >();
     for (const ref of input.refs) {
-      const project = byProject.get(ref.projectId);
-      if (
-        project === undefined ||
-        project.api.listChangeRequestStats === undefined ||
-        project.repository.toLowerCase() !== ref.repository.trim().toLowerCase()
-      ) {
+      // The repository travels through the client, so it is checked against the project's own
+      // remotes rather than being handed to a provider verbatim.
+      const project = byRepository.get(`${ref.projectId} ${ref.repository.trim().toLowerCase()}`);
+      if (project === undefined || project.api.listChangeRequestStats === undefined) {
         continue;
       }
-      wanted.set(`${project.project.id} ${ref.number}`, { project, number: ref.number });
+      wanted.set(`${project.project.id} ${project.repository.toLowerCase()} ${ref.number}`, {
+        project,
+        number: ref.number,
+      });
     }
     const byHost = new Map<string, Array<{ project: SupportedProject; number: number }>>();
     for (const entry of wanted.values()) {
@@ -3288,6 +3404,7 @@ export const make = Effect.gen(function* () {
         limit,
         query,
         cursorEntries,
+        excludeRepositories,
       ] = JSON.parse(key) as [
         number,
         string,
@@ -3299,6 +3416,7 @@ export const make = Effect.gen(function* () {
         number | null,
         string | null,
         ReadonlyArray<[string, string]> | null,
+        ReadonlyArray<string> | null,
       ];
       return listUncached({
         state,
@@ -3310,6 +3428,7 @@ export const make = Effect.gen(function* () {
         ...(limit === null ? {} : { limit }),
         ...(query === null ? {} : { query }),
         ...(cursorEntries === null ? {} : { cursors: Object.fromEntries(cursorEntries) }),
+        ...(excludeRepositories === null ? {} : { excludeRepositories }),
       } as PullRequestListInput);
     },
     {
@@ -3340,6 +3459,7 @@ export const make = Effect.gen(function* () {
       input.cursors === undefined
         ? null
         : Object.entries(input.cursors).toSorted(([left], [right]) => left.localeCompare(right)),
+      input.excludeRepositories === undefined ? null : [...input.excludeRepositories].sort(),
     ]);
     // A replacement reader can join a lookup still finishing its previous reader's cancellation.
     return Cache.get(listCache, key).pipe(

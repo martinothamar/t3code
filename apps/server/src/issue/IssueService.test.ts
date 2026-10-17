@@ -10,6 +10,7 @@ import {
   SourceControlProviderKind,
   type OrchestrationProjectShell,
   type ProjectId,
+  type RepositoryIdentity,
 } from "@t3tools/contracts";
 import {
   IssueTrackerError,
@@ -162,7 +163,22 @@ function makeService(input: {
   readonly readBindings?: ReturnType<
     IssueTrackerBindings.IssueTrackerBindingsRepository["Service"]["list"]
   >;
+  /** The repositories each workspace folder tracks, by its root. */
+  readonly workspaces?: Record<string, ReadonlyArray<RepositoryIdentity>>;
 }) {
+  const checkouts = Object.values(input.workspaces ?? {}).flat();
+  const projects = input.projects.map((each) => {
+    const tracked = input.workspaces?.[each.workspaceRoot];
+    return tracked === undefined
+      ? each
+      : {
+          ...each,
+          trackedFolders: tracked.map((checkout) => ({
+            path: checkout.rootPath!,
+            name: checkout.rootPath!.split("/").at(-1)!,
+          })),
+        };
+  });
   return IssueService.IssueService.pipe(
     Effect.provide(
       IssueService.layer.pipe(
@@ -185,14 +201,13 @@ function makeService(input: {
               IssueTrackerRegistry.fromTrackers(input.trackers),
             ),
             Layer.mock(ProjectService.ProjectService)({
-              listShells: () => Effect.succeed(input.projects),
+              listShells: () => Effect.succeed(projects),
               getShell: (projectId) =>
-                Effect.succeed(
-                  Option.fromNullishOr(input.projects.find((p) => p.id === projectId)),
-                ),
+                Effect.succeed(Option.fromNullishOr(projects.find((p) => p.id === projectId))),
             }),
             Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
-              resolve: () => Effect.succeed(null),
+              resolve: (cwd) =>
+                Effect.succeed(checkouts.find((checkout) => checkout.rootPath === cwd) ?? null),
             }),
           ),
         ),
@@ -222,6 +237,79 @@ describe("IssueService", () => {
         host: "dev.azure.com",
         scope: "acme/Web App",
       });
+    }),
+  );
+
+  it.effect("reads the issues of each repository in a workspace folder, from its checkout", () =>
+    Effect.gen(function* () {
+      const checkout = (repository: string, rootPath: string) => ({
+        ...project({ id: "x", repository }).repositoryIdentity!,
+        rootPath,
+      });
+      const read: string[] = [];
+      const service = yield* makeService({
+        projects: [project({ id: "folder" })],
+        workspaces: {
+          "/w/folder": [
+            checkout("acme/web", "/w/folder/web"),
+            checkout("acme/api", "/w/folder/api"),
+            // A second clone of one repository is read once.
+            checkout("acme/web", "/w/folder/web-2"),
+          ],
+        },
+        trackers: [
+          fakeTracker({
+            listIssues: (input) =>
+              Effect.sync(() => {
+                read.push(`${input.scope} in ${input.cwd}`);
+                return { items: [], nextCursor: null };
+              }),
+          }),
+        ],
+      });
+      yield* service.list({ state: "open" });
+      expect(read.sort()).toEqual(["acme/api in /w/folder/api", "acme/web in /w/folder/web"]);
+      const own = { projectId: "folder" as ProjectId, tracker: GITHUB, key: "1" };
+      expect((yield* service.detail({ ...own, scope: "acme/api" })).writable).toBe(true);
+      // A bare key names no repository of the folder's several.
+      const scope = yield* Effect.flip(service.projectScope("folder" as ProjectId));
+      expect(scope.message).toContain("Pass scope, one of: acme/web, acme/api");
+      expect(
+        yield* service.projectScope("folder" as ProjectId, { scope: "acme/web" }),
+      ).toMatchObject({ scope: "acme/web" });
+      // A scope the folder holds on two hosts names no tracker.
+      const twoHosts = yield* makeService({
+        projects: [project({ id: "hosts" })],
+        workspaces: {
+          "/w/hosts": [
+            checkout("acme/web", "/w/hosts/web"),
+            {
+              ...project({ id: "x", repository: "acme/web", host: "ghe.example.test" })
+                .repositoryIdentity!,
+              rootPath: "/w/hosts/web-ghe",
+            },
+          ],
+        },
+        trackers: [fakeTracker({})],
+      });
+      const ambiguous = yield* Effect.flip(
+        twoHosts.projectScope("hosts" as ProjectId, { scope: "acme/web" }),
+      );
+      expect(ambiguous.message).toContain("on several hosts");
+
+      // A fork's upstream and origin are one checkout's, and a tracker bound in Settings leads.
+      const fork = {
+        ...checkout("acme/web", "/w/fork/web"),
+        origin: { canonicalKey: "github.com/me/web" },
+      };
+      const scoped = yield* makeService({
+        projects: [project({ id: "fork" }), project({ id: "bound" })],
+        workspaces: { "/w/fork": [fork], "/w/bound": [fork, checkout("acme/api", "/w/bound/api")] },
+        bindings: { bound: { tracker: LINEAR, scope: "ENG" } },
+        trackers: [fakeTracker(), fakeStandaloneTracker()],
+      });
+      expect(yield* scoped.projectScope("fork" as ProjectId)).toMatchObject({ scope: "acme/web" });
+      expect(yield* scoped.projectScope("bound" as ProjectId)).toMatchObject({ scope: "ENG" });
     }),
   );
 

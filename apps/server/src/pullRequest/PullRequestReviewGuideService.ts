@@ -18,6 +18,7 @@ import {
   type PullRequestReviewGuideResult,
   type PullRequestReviewGuideRun,
   type PullRequestStack,
+  projectRepositoryIdentities,
   type RepositoryIdentity,
   type ThreadPullRequestKey,
 } from "@t3tools/contracts";
@@ -62,6 +63,13 @@ const nowIso = Clock.currentTimeMillis.pipe(
   Effect.map((millis) => DateTime.formatIso(DateTime.makeUnsafe(millis))),
 );
 
+/** Whether a pull request's key names the repository `identity` is a checkout of, or its fork's. */
+function isOwnRepository(key: ThreadPullRequestKey, identity: RepositoryIdentity): boolean {
+  return ownPullRequestRepositories(identity).some(
+    (candidate) => candidate.key.host === key.host && candidate.key.repository === key.repository,
+  );
+}
+
 const make = Effect.gen(function* () {
   const pullRequests = yield* PullRequestService.PullRequestService;
   const guides = yield* PullRequestReviewGuides.PullRequestReviewGuideRepository;
@@ -81,17 +89,37 @@ const make = Effect.gen(function* () {
   const keyFor = Effect.fn("PullRequestReviewGuideService.keyFor")(function* (
     input: PullRequestRef,
   ) {
-    const project = Option.getOrUndefined(
+    const shell = Option.getOrUndefined(
       yield* projects.getShell(input.projectId).pipe(Effect.orElseSucceed(() => Option.none())),
     );
-    const key = pullRequestSyncKey(input, project?.repositoryIdentity ?? undefined);
+    // A shell carries only the folder checkouts already resolved; the PR service resolves them all.
+    const project =
+      shell?.repositoryIdentity == null && shell !== undefined
+        ? ((yield* pullRequests
+            .addressedProject(input.projectId)
+            .pipe(Effect.orElseSucceed(() => undefined))) ?? shell)
+        : shell;
+    // A workspace folder writes the guide from its checkout of the pull request's repository.
+    const checkout =
+      project?.repositoryIdentity == null && project !== undefined
+        ? projectRepositoryIdentities(project).find((identity) => {
+            const key = pullRequestSyncKey(input, identity);
+            return key !== null && isOwnRepository(key, identity);
+          })
+        : undefined;
+    const identity = checkout ?? project?.repositoryIdentity;
+    const key = pullRequestSyncKey(input, identity ?? undefined);
     if (key === null || project === undefined) {
       return yield* new PullRequestOperationError({
         operation: "reviewGuide",
         detail: "Could not identify this pull request's host.",
       });
     }
-    return { key, workspaceRoot: project.workspaceRoot, identity: project.repositoryIdentity };
+    return {
+      key,
+      workspaceRoot: checkout?.rootPath ?? project.workspaceRoot,
+      identity,
+    };
   });
 
   const requireOwnRepository = Effect.fn("PullRequestReviewGuideService.requireOwnRepository")(

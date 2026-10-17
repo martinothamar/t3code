@@ -7,7 +7,10 @@ import {
   draftSupportedRuntimeModes,
 } from "./chat/runtimeModeConfig";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
-import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
+import {
+  projectRepositorySelectors,
+  sourceControlClients,
+} from "@t3tools/client-runtime/source-control-clients";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { queuedRunEditBlockedReason } from "@t3tools/client-runtime/queued-run-edit";
 import { ScrollToEndButton, WorkspaceFileDropOverlay } from "./chat/TimelineOverlays";
@@ -433,6 +436,7 @@ const ACTIVE_RUN_STATUSES: ReadonlySet<string> = new Set([
   "running",
   "waiting",
 ]);
+const EMPTY_REPOSITORIES: ReadonlyArray<string> = [];
 const EMPTY_PROVIDER_MODELS: ServerProvider["models"] = [];
 const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
 import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
@@ -2144,6 +2148,7 @@ export default function ChatView(props: ChatViewProps) {
   const activeProjectRepository = sourceControlClients.repositorySelector(
     activeProject?.repositoryIdentity,
   );
+  const activeProjectRepositories = activeProject ? projectRepositorySelectors(activeProject) : [];
   const {
     linked: linkedThreadPullRequest,
     linkedKey: linkedThreadPullRequestKey,
@@ -3965,8 +3970,10 @@ export default function ChatView(props: ChatViewProps) {
                                 pullRequestProjectId={
                                   supportsPullRequests ? (activeProject?.id ?? null) : null
                                 }
-                                pullRequestRepository={
-                                  supportsPullRequests ? activeProjectRepository : null
+                                pullRequestRepositories={
+                                  supportsPullRequests
+                                    ? activeProjectRepositories
+                                    : EMPTY_REPOSITORIES
                                 }
                                 threadPullRequests={
                                   (activeThreadShell ?? activeThread)?.pullRequests
