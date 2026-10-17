@@ -16,7 +16,7 @@ it("keeps an older exact PR in the mobile menu ahead of twenty newer substring m
   const matches = filterComposerPullRequestMatches({
     entries: [exact, ...recent, exact],
     projectId: exact.projectId,
-    repository: exact.repository,
+    repositories: [exact.repository],
     query: "42",
     limit: 20,
   });

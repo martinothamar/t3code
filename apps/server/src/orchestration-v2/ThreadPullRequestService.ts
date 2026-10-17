@@ -68,7 +68,10 @@ const resolveProjectForPullRequestDiscovery = Effect.fn(
   "ThreadPullRequestServiceV2.resolveProject",
 )(function* (
   project: OrchestrationProjectShell,
-  repositoryIdentities: RepositoryIdentityResolver.RepositoryIdentityResolver["Service"],
+  repositoryIdentities: Pick<
+    RepositoryIdentityResolver.RepositoryIdentityResolver["Service"],
+    "resolve"
+  >,
   options?: { readonly refresh?: boolean },
 ) {
   // Identities stay cached for 15 minutes. A finished turn may have added the
