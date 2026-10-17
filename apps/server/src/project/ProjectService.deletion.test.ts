@@ -55,6 +55,7 @@ const layerServices = Layer.mergeAll(
       Layer.provide(
         Layer.merge(
           Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+            resolveWorkspace: () => Effect.succeed([]),
             resolve: () => Effect.succeed(null),
           }),
           Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {

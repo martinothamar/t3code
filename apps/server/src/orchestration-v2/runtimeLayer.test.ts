@@ -360,12 +360,14 @@ const layerProjectDeletionTest = Layer.mergeAll(
       peek: () =>
         Effect.succeed({
           repositoryIdentity: null,
+          workspaceRepositories: [],
           faviconPath: null,
           repositoryIdentityResolved: false,
         }),
       getAvailable: () =>
         Effect.succeed({
           repositoryIdentity: null,
+          workspaceRepositories: [],
           faviconPath: null,
           repositoryIdentityResolved: false,
         }),
@@ -847,6 +849,7 @@ const layerSharedApplicationDataPlaneTest = Layer.mergeAll(
       peek: () =>
         Effect.succeed({
           repositoryIdentity: null,
+          workspaceRepositories: [],
           faviconPath: null,
           repositoryIdentityResolved: false,
         }),
@@ -855,6 +858,7 @@ const layerSharedApplicationDataPlaneTest = Layer.mergeAll(
       getAvailable: () =>
         Effect.succeed({
           repositoryIdentity: null,
+          workspaceRepositories: [],
           faviconPath: null,
           repositoryIdentityResolved: false,
         }),
