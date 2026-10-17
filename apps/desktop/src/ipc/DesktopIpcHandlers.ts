@@ -1,5 +1,7 @@
 import * as Effect from "effect/Effect";
 
+import { installAgentctlIpcHandlers } from "../agentctl/ipc.ts";
+
 import { receiveProviderAuthCallback, cancelProviderAuthCallback } from "./methods/providerAuth.ts";
 import * as DesktopIpc from "./DesktopIpc.ts";
 import { installNotificationBadge } from "./methods/notificationBadge.ts";
@@ -131,6 +133,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(fetchSshSessionState);
   yield* ipc.handle(issueSshWebSocketTicket);
   yield* ipc.handle(resolveSshPasswordPrompt);
+  yield* installAgentctlIpcHandlers();
 
   yield* ipc.handle(getServerExposureState);
   yield* ipc.handle(setServerExposureMode);

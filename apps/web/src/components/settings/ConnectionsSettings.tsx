@@ -75,6 +75,7 @@ import {
   type ServerClientSessionRecord,
 } from "~/environments/primary";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
+import { sandboxNameForTarget } from "~/sandboxes/sandboxConnections";
 import { useUiStateStore } from "~/uiStateStore";
 import {
   resolveServerConfigVersionMismatch,
@@ -171,7 +172,10 @@ export function ConnectionsSettings() {
     (environment) => environment.entry.target._tag !== "PrimaryConnectionTarget",
   );
   const listedEnvironments = savedEnvironments.filter(
-    (environment) => !isDesktopLocalConnectionTarget(environment.entry.target),
+    (environment) =>
+      !isDesktopLocalConnectionTarget(environment.entry.target) &&
+      // agentctl Sandboxes are managed from their own page.
+      sandboxNameForTarget(environment.entry.target) === null,
   );
   const savedUpdateStates = useAtomValue(
     environmentUpdateStatesAtom(

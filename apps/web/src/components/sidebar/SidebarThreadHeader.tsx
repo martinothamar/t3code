@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import { cn } from "~/lib/utils";
+import { NewSandboxHeaderButton } from "~/sandboxes/SandboxSidebarButtons";
 import { Button } from "../ui/button";
 import { SidebarInput, SidebarMenuButton } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -110,6 +111,7 @@ export function SidebarThreadHeader({
             <SidebarHeaderIconButton label="Add project" onClick={onNewProject}>
               <FolderPlusIcon />
             </SidebarHeaderIconButton>
+            <NewSandboxHeaderButton />
           </>
         ) : null}
         <SidebarHeaderIconButton

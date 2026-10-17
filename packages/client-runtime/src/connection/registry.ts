@@ -759,6 +759,26 @@ export const make = Effect.gen(function* () {
               ),
             );
           }
+          // The SSH broker records the resolved target and its pairing token as it connects.
+          if (entry !== undefined && entry.target._tag === "SshConnectionTarget") {
+            const connectionId = entry.target.connectionId;
+            yield* profiles.remove(connectionId).pipe(
+              Effect.catch((error) =>
+                Effect.logWarning("Could not clear the platform SSH profile.", {
+                  environmentId,
+                  error,
+                }),
+              ),
+            );
+            yield* credentials.remove(connectionId).pipe(
+              Effect.catch((error) =>
+                Effect.logWarning("Could not clear the platform SSH credential.", {
+                  environmentId,
+                  error,
+                }),
+              ),
+            );
+          }
           yield* Effect.all(
             [
               cache.clear(environmentId).pipe(

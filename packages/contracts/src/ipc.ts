@@ -15,6 +15,7 @@ import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import { type ClientSettings, type QuitConfirmationMode, SnapShotShortcut } from "./settings.ts";
 import type { EditorId } from "./editor.ts";
 import type { PreviewForwardedShortcut } from "./keybindings.ts";
+import type { DesktopAgentctlBridge } from "./agentctl.ts";
 
 import type {
   DesktopAppActivationRequest,
@@ -1153,6 +1154,8 @@ export interface DesktopBridge {
     onRequest: (listener: (request: DesktopAppActivationRequest) => void) => () => void;
   };
   preview?: DesktopPreviewBridge;
+  /** agentctl Sandboxes; present on desktop builds of the fork. */
+  agentctl?: DesktopAgentctlBridge;
 }
 
 /** Renderer callback invoked by Electron with a fresh user gesture before display-media capture. */
