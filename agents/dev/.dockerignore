@@ -1,0 +1,5 @@
+*
+!Dockerfile
+!rootfs/
+!rootfs/**
+!claude-state.json

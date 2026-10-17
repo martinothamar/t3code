@@ -25,7 +25,8 @@ import {
 const driver = ProviderDriverKind.make("codex");
 const policy: ProviderCompatibilityPolicy = {
   driver,
-  t3CodeRange: ">=0.0.42 <0.1.0",
+  // General fixtures must remain applicable when the package version advances.
+  t3CodeRange: ">=0.0.42",
   recommendedVersion: "2.0.0",
   recommendedRange: ">=2.0.0 <3.0.0",
   ranges: [
@@ -222,7 +223,9 @@ describe("provider compatibility", () => {
     ] as const) {
       assert.strictEqual(resolveProviderCompatibility([policy], driver, version)?.status, expected);
     }
-    assert.isUndefined(resolveProviderCompatibility([policy], driver, "0.9.0", "0.1.0"));
+    const boundedPolicy = { ...policy, t3CodeRange: ">=0.0.42 <0.1.0" };
+    assert.isUndefined(resolveProviderCompatibility([boundedPolicy], driver, "0.9.0", "0.1.0"));
+    assert.isUndefined(resolveProviderCompatibility([boundedPolicy], driver, "0.9.0", "0.0.41"));
   });
 
   it("supports every driver without inventing policies for uncovered adapters", () => {
@@ -280,11 +283,11 @@ describe("provider compatibility", () => {
       ranges: [{ range: ">=v2.0 <v3", status: "supported" }],
     });
     assert.strictEqual(
-      resolveProviderCompatibility([prefixed], driver, "2.0.0")?.status,
+      resolveProviderCompatibility([prefixed], driver, "2.0.0", "0.0.45")?.status,
       "supported",
     );
     assert.strictEqual(
-      resolveProviderCompatibility([prefixed], driver, "3.0.0")?.status,
+      resolveProviderCompatibility([prefixed], driver, "3.0.0", "0.0.45")?.status,
       "unknown",
     );
     for (const invalid of [
