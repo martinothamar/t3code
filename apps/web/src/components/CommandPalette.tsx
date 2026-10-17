@@ -183,6 +183,7 @@ import {
   reduceCommandPaletteSearchState,
   type SearchOverlayMode,
 } from "./CommandPalette.logic";
+import { useSandboxPaletteItems } from "../sandboxes/sandboxPaletteItems";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent } from "./CommandPaletteContent";
 import {
@@ -472,6 +473,7 @@ function OpenCommandPaletteDialog(props: {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
   const { clearOpenIntent, openIntent, openChildSearch, setOpen } = props;
+  const sandboxPaletteItems = useSandboxPaletteItems();
   const initialSearch = props.initialContext ?? {
     query: openIntent?.kind === "search" ? openIntent.query : "",
     linkedThreadSearch: openIntent?.kind === "search" ? openIntent : null,
@@ -1449,6 +1451,8 @@ function OpenCommandPaletteDialog(props: {
       openAddProjectFlow();
     },
   });
+
+  actionItems.push(...sandboxPaletteItems);
 
   if (wslAddProjectEnvironmentOption) {
     actionItems.push({

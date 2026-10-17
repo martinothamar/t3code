@@ -10,6 +10,7 @@ import type {
 import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 
+import { makeAgentctlBridge } from "./agentctl/preloadBridge.ts";
 import * as IpcChannels from "./ipc/channels.ts";
 import { mergeLegacyLocalStorage } from "./legacyLocalStorageMerge.ts";
 
@@ -318,6 +319,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       };
     },
   },
+  agentctl: makeAgentctlBridge(ipcRenderer),
   preview: {
     setForwardedShortcuts: (shortcuts) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_SET_FORWARDED_SHORTCUTS_CHANNEL, shortcuts),
