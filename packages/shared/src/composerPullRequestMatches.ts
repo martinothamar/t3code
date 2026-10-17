@@ -3,6 +3,10 @@ import type { ThreadPullRequestLink } from "@t3tools/contracts";
 import { visibleThreadPullRequests } from "./threadPullRequests.ts";
 
 export interface ComposerPullRequestMatch {
+  /** Keeps the same repository on two hosts apart; entries without one share a key. */
+  readonly host?: string;
+  /** Exact-number detail reads omit the host; recover it from their URL. */
+  readonly url?: string;
   readonly number: number;
   readonly projectId: string;
   readonly repository: string;
@@ -19,6 +23,7 @@ export function composerPullRequestsFromLinks(
       : [
           {
             projectId,
+            host: link.host,
             repository: link.repository,
             number: link.number,
             url: link.url,
@@ -40,29 +45,32 @@ export function filterComposerPullRequestMatches<
   readonly entries: ReadonlyArray<Entry>;
   readonly linked?: ReadonlyArray<Linked>;
   readonly projectId: string;
-  readonly repository: string;
+  readonly repositories: ReadonlyArray<string>;
   readonly query: string;
   readonly limit: number;
 }): ReadonlyArray<Entry | Linked> {
-  const repository = input.repository.trim().toLowerCase();
-  const keyOf = (entry: ComposerPullRequestMatch) =>
-    `${entry.repository.trim().toLowerCase()}#${entry.number}`;
+  const repositories = new Set(
+    input.repositories.map((repository) => repository.trim().toLowerCase()),
+  );
   const linked = (input.linked ?? []).filter((entry) => String(entry.number).includes(input.query));
-  const linkedKeys = new Set(linked.map(keyOf));
+  const linkedKeys = new Set(linked.map(composerPullRequestKey));
   const matchingEntries = input.entries.filter(
     (entry) =>
       entry.projectId === input.projectId &&
-      entry.repository.trim().toLowerCase() === repository &&
+      repositories.has(entry.repository.trim().toLowerCase()) &&
       String(entry.number).includes(input.query),
   );
+  // Prefer the project listing's current data over the linked snapshot of the same pull request.
   const uniqueEntries = new Map<string, Entry | Linked>();
   for (const entry of [...matchingEntries, ...linked]) {
-    if (!uniqueEntries.has(keyOf(entry))) {
-      uniqueEntries.set(keyOf(entry), entry);
+    const key = composerPullRequestKey(entry);
+    if (!uniqueEntries.has(key)) {
+      uniqueEntries.set(key, entry);
     }
   }
   const isExactMatch = (entry: ComposerPullRequestMatch) => String(entry.number) === input.query;
-  const isLinked = (entry: ComposerPullRequestMatch) => linkedKeys.has(keyOf(entry));
+  const isLinked = (entry: ComposerPullRequestMatch) =>
+    linkedKeys.has(composerPullRequestKey(entry));
   // Hermes has no ES2023 array methods, so sort a fresh array.
   return [...uniqueEntries.values()]
     .sort(
@@ -87,20 +95,36 @@ export function withLinkedComposerPullRequestsFirst<
   readonly query: string;
   readonly limit: number;
 }): ReadonlyArray<Entry | Linked> {
-  const keyOf = (entry: ComposerPullRequestMatch) =>
-    `${entry.repository.trim().toLowerCase()}#${entry.number}`;
-  const matchesByKey = new Map(input.matches.map((entry) => [keyOf(entry), entry]));
+  const matchesByKey = new Map(
+    input.matches.map((entry) => [composerPullRequestKey(entry), entry]),
+  );
   const words = input.query.toLowerCase().split(/\s+/u).filter(Boolean);
   const linked = input.linked.flatMap((entry): Array<Entry | Linked> => {
-    const match = matchesByKey.get(keyOf(entry));
+    const match = matchesByKey.get(composerPullRequestKey(entry));
     if (match !== undefined) return [match];
     const text =
       `#${entry.number} ${entry.title} ${entry.repository} ${entry.headBranch}`.toLowerCase();
     return words.every((word) => text.includes(word)) ? [entry] : [];
   });
-  const linkedKeys = new Set(linked.map(keyOf));
-  return [...linked, ...input.matches.filter((entry) => !linkedKeys.has(keyOf(entry)))].slice(
-    0,
-    input.limit,
-  );
+  const linkedKeys = new Set(linked.map(composerPullRequestKey));
+  return [
+    ...linked,
+    ...input.matches.filter((entry) => !linkedKeys.has(composerPullRequestKey(entry))),
+  ].slice(0, input.limit);
+}
+
+/** One suggestion per pull request: its host, repository and number. */
+export function composerPullRequestKey(
+  entry: Pick<ComposerPullRequestMatch, "host" | "url" | "repository" | "number">,
+): string {
+  const host = entry.host ?? (entry.url === undefined ? undefined : urlHost(entry.url));
+  return `${host?.toLowerCase() ?? ""}/${entry.repository.trim().toLowerCase()}#${entry.number}`;
+}
+
+function urlHost(url: string): string | undefined {
+  try {
+    return new URL(url).host;
+  } catch {
+    return undefined;
+  }
 }

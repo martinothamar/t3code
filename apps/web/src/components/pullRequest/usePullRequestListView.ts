@@ -11,7 +11,7 @@ import {
 import { useEffect, useState } from "react";
 
 import { useAllEnvironmentShellsBootstrapped, useProjects } from "~/state/entities";
-import { useEnvironments } from "~/state/environments";
+import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import {
   applyPullRequestOverrides,
   findProjectForRepository,
@@ -35,9 +35,9 @@ import {
 } from "./pullRequestList.logic";
 import type { PullRequestExpectedHost } from "./PullRequestListFilters";
 import type { PullRequestListPreferences, PullRequestListSort } from "./pullRequestListPreferences";
-import { assignProjectsToEnvironments } from "./pullRequestProjectAssignment.logic";
 import { pullRequestFilterProjects } from "./pullRequestProjectFilter.logic";
 import { pullRequestListEntryId } from "./pullRequestListGroups.logic";
+import { assignRepositoriesToEnvironments } from "./workspaceRepositoryAssignment.logic";
 
 export interface PullRequestsSearch extends PullRequestListPreferences {
   readonly environmentId?: EnvironmentId;
@@ -114,30 +114,57 @@ export function usePullRequestScope(search: PullRequestsSearch) {
     scopedProjectId,
     projectsKnown,
   );
+  // Fork: a shared repository is listed by a server that is connected where one holds it, so a
+  // stopped Sandbox doesn't keep a repository the running ones then skip. The primary serves
+  // this page, so it is always connected.
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const connectedEnvironmentIds = new Set(
+    capableEnvironments
+      .filter(
+        (environment) =>
+          environment.environmentId === primaryEnvironmentId ||
+          environment.connection.phase === "connected",
+      )
+      .map((environment) => environment.environmentId),
+  );
   const environmentQueries = ((): ReadonlyArray<{
     readonly environmentId: EnvironmentId;
     readonly projectIds?: ReadonlyArray<ProjectId>;
+    readonly excludeRepositories?: ReadonlyArray<string>;
   }> => {
     const plain = queryEnvironmentIds.map((environmentId) => ({ environmentId }));
     if (!projectsKnown || scopedProjectId !== undefined) return plain;
-    const assignment = assignProjectsToEnvironments(
+    const assignment = assignRepositoriesToEnvironments(
       projects,
       queryEnvironmentIds,
       queryEnvironmentIds[0],
+      connectedEnvironmentIds,
     );
     const totals = new Map<EnvironmentId, number>();
     for (const project of projects) {
       totals.set(project.environmentId, (totals.get(project.environmentId) ?? 0) + 1);
     }
     return queryEnvironmentIds.flatMap((environmentId) => {
-      const projectIds = assignment.get(environmentId);
-      if (projectIds === undefined) return [];
-      if (projectIds.length === (totals.get(environmentId) ?? 0)) return [{ environmentId }];
-      return [{ environmentId, projectIds }];
+      const listed = assignment.get(environmentId);
+      if (listed === undefined) return [];
+      const { projectIds, excludeRepositories } = listed;
+      // It lists everything it holds anyway, so the filter is left off and a one-server workspace
+      // asks exactly the question it asked before.
+      const everything = projectIds.length === (totals.get(environmentId) ?? 0);
+      return [
+        {
+          environmentId,
+          ...(everything ? {} : { projectIds }),
+          ...(excludeRepositories.length > 0 ? { excludeRepositories } : {}),
+        },
+      ];
     });
   })();
   const assignmentKey = environmentQueries
-    .map(({ environmentId, projectIds }) => `${environmentId}#${projectIds?.join("+") ?? "*"}`)
+    .map(
+      ({ environmentId, projectIds, excludeRepositories }) =>
+        `${environmentId}#${projectIds?.join("+") ?? "*"}-${excludeRepositories?.join("+") ?? ""}`,
+    )
     .join("|");
   const linkedSelection =
     search.repository && search.number && selectedProject

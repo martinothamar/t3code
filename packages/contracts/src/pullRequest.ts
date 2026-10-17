@@ -358,6 +358,14 @@ export const PullRequestListInput = Schema.Struct({
   filters: Schema.optional(PullRequestListFilters),
   projectId: Schema.optional(ProjectId),
   projectIds: Schema.optional(Schema.Array(ProjectId).check(Schema.isMaxLength(100))),
+  /**
+   * Repositories, by canonical key, that another connection lists. A folder holding checkouts
+   * cannot be left out whole the way a project rooted in one repository can, so its shared
+   * checkouts are.
+   */
+  excludeRepositories: Schema.optional(
+    Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(500)),
+  ),
   host: Schema.optional(TrimmedNonEmptyString),
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))),
   cursors: Schema.optional(PullRequestListCursors),
@@ -525,6 +533,7 @@ export const PullRequestFilterOptionsInput = Schema.Struct({
   kind: PullRequestFilterOptionKind,
   projectId: Schema.optional(ProjectId),
   projectIds: Schema.optional(Schema.Array(ProjectId).check(Schema.isMaxLength(100))),
+  excludeRepositories: PullRequestListInput.fields.excludeRepositories,
   host: Schema.optional(TrimmedNonEmptyString),
   query: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(100))),
 });

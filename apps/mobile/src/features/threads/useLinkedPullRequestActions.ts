@@ -1,5 +1,5 @@
 import {
-  pullRequestLinkProject,
+  pullRequestLinkRepositories,
   resolveLinkPullRequestInput,
 } from "@t3tools/client-runtime/pull-request-link-input";
 import type {
@@ -89,20 +89,30 @@ export function useLinkedPullRequestActions(input: {
 
   const promptLink = () => {
     const { singular } = terminology;
+    const repositories = pullRequestLinkRepositories(project);
+    // A folder holding several repositories names one with repo#123 instead of a bare number.
+    const severalRepositories = repositories.length > 1;
     Dialog.prompt({
       title: `Link ${singular}`,
-      message: `Paste a ${singular} URL, or enter 123 / #123 for this thread's repository.`,
+      message: severalRepositories
+        ? `Paste a ${singular} URL, or enter repo#123 for one of the repositories in this thread's folder.`
+        : `Paste a ${singular} URL, or enter 123 / #123 for this thread's repository.`,
       placeholder: `${capitalizeTerm(singular)} URL or #42`,
       initialValue: "",
       confirmText: "Link",
       onConfirm: (reference) => {
         const resolved = resolveLinkPullRequestInput({
           reference,
-          project: pullRequestLinkProject(project?.repositoryIdentity),
+          repositories,
           hasProject: () => true,
         });
         if (resolved === null) {
-          Dialog.alert(`Couldn't link this ${singular}`, `Use a ${singular} URL, 123, or #123.`);
+          Dialog.alert(
+            `Couldn't link this ${singular}`,
+            severalRepositories
+              ? `Use a ${singular} URL or repo#123.`
+              : `Use a ${singular} URL, 123, or #123.`,
+          );
           return;
         }
         if ("error" in resolved) {

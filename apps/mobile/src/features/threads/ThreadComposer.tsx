@@ -1,6 +1,7 @@
 import { useSidebarWorkspaceTabs } from "../workspace/useSystemWorkspaceTabBar";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
+import { projectRepositorySelectors } from "@t3tools/client-runtime/source-control-clients";
 import type { ComposerTextPaste } from "../../native/T3ComposerEditor.types";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import {
@@ -118,6 +119,8 @@ import {
   useThreadSettingsSheetPresentation,
   type NavigationWithFinishTransitioning,
 } from "./use-thread-settings-sheet-presentation";
+
+const EMPTY_REPOSITORY_SELECTORS: ReadonlyArray<string> = [];
 
 export const COMPOSER_COLLAPSED_CHROME = 60;
 
@@ -527,6 +530,9 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   };
 
   const mentionableEnvironments = useMentionableEnvironments();
+  const pullRequestRepositories = project
+    ? projectRepositorySelectors(project)
+    : EMPTY_REPOSITORY_SELECTORS;
   const composerMenu = useComposerCommandMenu({
     draftMessage: draftMessage,
     ownerKey: composerDraftKey,
@@ -539,7 +545,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     currentThreadId: props.selectedThread.id,
     projectCwd: props.projectCwd,
     pullRequestProjectId: props.serverConfig ? (project?.id ?? null) : null,
-    pullRequestRepository: project?.repositoryIdentity?.displayName ?? null,
+    pullRequestRepositories,
     threadPullRequests: props.selectedThread.pullRequests,
     selectedProviderStatus,
     hasThread: !props.isDraft,
