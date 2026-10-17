@@ -13,7 +13,7 @@ import {
   PlusIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { SettingsRow, SettingsSection } from "../components/settings/settingsLayout";
 import { Badge } from "../components/ui/badge";
@@ -257,20 +257,36 @@ function ManifestFolders({ homeDirectory }: { homeDirectory: string }) {
   const [roots, setRoots] = useState<ReadonlyArray<AgentctlManifestRoot> | null>(null);
   // The folders being pulled, so their rows show it and nothing pulls twice.
   const [pulling, setPulling] = useState<ReadonlyArray<string>>([]);
+  // Bumped by every read, so a slow fetch cannot overwrite a newer add or remove.
+  const generation = useRef(0);
+  const load = (read: Promise<ReadonlyArray<AgentctlManifestRoot>>) => {
+    const current = ++generation.current;
+    return read.then(
+      (next) => {
+        if (generation.current === current) setRoots(next);
+      },
+      () => undefined,
+    );
+  };
 
   useEffect(() => {
     const bridge = readAgentctlBridge();
     if (bridge === null) return;
-    let active = true;
-    // Local state first, then again once each repository has fetched.
-    void bridge.listManifestRoots().then((next) => {
-      if (active) setRoots(next);
-    });
-    void bridge.refreshManifestRoots().then((next) => {
-      if (active) setRoots(next);
-    });
+    // Local state first, then again once each repository has fetched; the fetch
+    // is ignored if the list changed meanwhile or the page closed.
+    void bridge
+      .listManifestRoots()
+      .then((next) => setRoots((current) => current ?? next))
+      .catch(() => undefined);
+    const current = ++generation.current;
+    void bridge.refreshManifestRoots().then(
+      (next) => {
+        if (generation.current === current) setRoots(next);
+      },
+      () => undefined,
+    );
     return () => {
-      active = false;
+      generation.current += 1;
     };
   }, []);
 
@@ -281,13 +297,13 @@ function ManifestFolders({ homeDirectory }: { homeDirectory: string }) {
     const bridge = readAgentctlBridge();
     if (bridge === null) return;
     await bridge.addManifestRoot(folder);
-    setRoots(await bridge.listManifestRoots());
+    await load(bridge.listManifestRoots());
   };
   const removeRoot = async (folder: string) => {
     const bridge = readAgentctlBridge();
     if (bridge === null) return;
     await bridge.removeManifestRoot(folder);
-    setRoots(await bridge.listManifestRoots());
+    await load(bridge.listManifestRoots());
   };
   const pullRoots = async (folders: ReadonlyArray<string>) => {
     const bridge = readAgentctlBridge();
@@ -298,7 +314,7 @@ function ManifestFolders({ homeDirectory }: { homeDirectory: string }) {
     } catch {
       toastManager.add(stackedThreadToast({ type: "error", title: "Could not pull repositories" }));
     } finally {
-      setRoots(await bridge.listManifestRoots().catch(() => roots));
+      await load(bridge.listManifestRoots());
       setPulling([]);
     }
   };

@@ -217,7 +217,24 @@ describe("parseRepositoryStatus", () => {
   it("reads a detached HEAD without an upstream", () => {
     assert.deepStrictEqual(
       parseRepositoryStatus("/repo", "# branch.oid abc\n# branch.head (detached)\n? new.txt"),
-      { path: "/repo", branch: null, upstream: null, changes: 1, ahead: 0, behind: 0 },
+      { path: "/repo", branch: null, upstream: null, changes: 1, ahead: null, behind: null },
+    );
+  });
+
+  it("does not invent a comparison with an upstream git could not find", () => {
+    assert.deepStrictEqual(
+      parseRepositoryStatus(
+        "/repo",
+        "# branch.oid abc\n# branch.head main\n# branch.upstream origin/gone",
+      ),
+      {
+        path: "/repo",
+        branch: "main",
+        upstream: "origin/gone",
+        changes: 0,
+        ahead: null,
+        behind: null,
+      },
     );
   });
 });

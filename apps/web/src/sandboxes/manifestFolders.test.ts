@@ -48,6 +48,8 @@ describe("repositoryBadges", () => {
     expect(labels({ upstream: null })).toEqual(["No upstream"]);
     expect(labels({ branch: null, upstream: null })).toEqual(["Detached"]);
     expect(labels({ fetchError: "Could not resolve host" })).toEqual(["Fetch failed"]);
+    // A deleted upstream or an unborn HEAD leaves nothing to compare.
+    expect(labels({ ahead: null, behind: null })).toEqual(["Upstream missing"]);
   });
 });
 

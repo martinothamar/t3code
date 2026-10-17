@@ -412,17 +412,29 @@ describe("DesktopAgentctlSandboxes", () => {
   );
 
   it.effect("merges manifest folder changes instead of replacing the list", () =>
-    withSandboxes((sandboxes) =>
+    withSandboxes((sandboxes, _harness, stateDir) =>
       Effect.gen(function* () {
-        yield* sandboxes.addManifestRoot("/a");
-        yield* sandboxes.addManifestRoot("/b/");
-        yield* sandboxes.addManifestRoot("/a/");
-        const settings = yield* sandboxes.removeManifestRoot("/a");
-        assert.deepStrictEqual(settings.manifestRoots, ["/b"]);
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const [a, b, file] = ["a", "b", "file"].map((name) => path.join(stateDir, name));
+        yield* fileSystem.makeDirectory(a!, { recursive: true });
+        yield* fileSystem.makeDirectory(b!, { recursive: true });
+        yield* fileSystem.writeFileString(file!, "not a folder\n");
+        yield* sandboxes.addManifestRoot(a!);
+        yield* sandboxes.addManifestRoot(`${b}/`);
+        yield* sandboxes.addManifestRoot(`${a}/`);
+        // A file would be opened, and on Windows run, by Open folder.
+        yield* sandboxes.addManifestRoot(file!);
+        const settings = yield* sandboxes.removeManifestRoot(a!);
+        assert.deepStrictEqual(settings.manifestRoots, [b!]);
         assert.deepStrictEqual(yield* sandboxes.listManifestRoots, [
-          { directory: "/b", exists: false, manifests: 0, repositories: [] },
+          { directory: b!, exists: true, manifests: 0, repositories: [] },
         ]);
-      }),
+        assert.isTrue(yield* sandboxes.isManifestRootDirectory(b!));
+        assert.isFalse(yield* sandboxes.isManifestRootDirectory(file!));
+        yield* fileSystem.remove(b!, { recursive: true });
+        assert.isFalse(yield* sandboxes.isManifestRootDirectory(b!));
+      }).pipe(Effect.provide(NodeServices.layer)),
     ),
   );
 
@@ -431,7 +443,7 @@ describe("DesktopAgentctlSandboxes", () => {
       Effect.gen(function* () {
         const result = yield* sandboxes.pullManifestRoots(["/not-configured"]);
         assert.strictEqual(result.error, "This manifest folder is no longer configured.");
-        assert.isFalse(yield* sandboxes.isManifestRoot("/not-configured"));
+        assert.isFalse(yield* sandboxes.isManifestRootDirectory("/not-configured"));
       }),
     ),
   );

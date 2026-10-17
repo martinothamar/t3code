@@ -32,13 +32,21 @@ export function repositoryBadges(status: AgentctlRepositoryStatus): RepositoryBa
     badges.push({ label: "Detached", tone: "warning", title: "HEAD is not on a branch." });
   } else if (status.upstream === null) {
     badges.push({ label: "No upstream", tone: "muted", title: "The branch tracks nothing." });
-  }
-  if (status.behind > 0) badges.push({ label: `${status.behind} behind`, tone: "info" });
-  if (status.ahead > 0) {
+  } else if (status.behind === null || status.ahead === null) {
     badges.push({
-      label: `${status.ahead} ahead`,
-      tone: status.behind > 0 ? "warning" : "muted",
-      ...(status.behind > 0 ? { title: "Diverged, so Pull cannot fast-forward." } : {}),
+      label: "Upstream missing",
+      tone: "warning",
+      title: `Git cannot compare with ${status.upstream}.`,
+    });
+  }
+  const behind = status.behind ?? 0;
+  const ahead = status.ahead ?? 0;
+  if (behind > 0) badges.push({ label: `${behind} behind`, tone: "info" });
+  if (ahead > 0) {
+    badges.push({
+      label: `${ahead} ahead`,
+      tone: behind > 0 ? "warning" : "muted",
+      ...(behind > 0 ? { title: "Diverged, so Pull cannot fast-forward." } : {}),
     });
   }
   if (status.changes > 0) {

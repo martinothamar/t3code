@@ -121,8 +121,9 @@ export function parseRepositoryStatus(
 ): Omit<AgentctlRepositoryStatus, "fetchError"> {
   let branch: string | null = null;
   let upstream: string | null = null;
-  let ahead = 0;
-  let behind = 0;
+  // Git omits branch.ab when it cannot compare, such as for a deleted upstream or an unborn HEAD.
+  let ahead: number | null = null;
+  let behind: number | null = null;
   let changes = 0;
   for (const line of porcelain.split("\n")) {
     if (line.startsWith("# branch.head ")) {
@@ -132,8 +133,10 @@ export function parseRepositoryStatus(
       upstream = line.slice("# branch.upstream ".length);
     } else if (line.startsWith("# branch.ab ")) {
       const match = /^# branch\.ab \+(\d+) -(\d+)$/.exec(line);
-      ahead = Number(match?.[1] ?? 0);
-      behind = Number(match?.[2] ?? 0);
+      if (match !== null) {
+        ahead = Number(match[1]);
+        behind = Number(match[2]);
+      }
     } else if (line !== "" && !line.startsWith("#")) {
       changes += 1;
     }

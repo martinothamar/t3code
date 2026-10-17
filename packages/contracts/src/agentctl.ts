@@ -100,8 +100,9 @@ export const AgentctlRepositoryStatus = Schema.Struct({
   upstream: Schema.NullOr(Schema.String),
   /** Changed and untracked files. */
   changes: Schema.Int,
-  ahead: Schema.Int,
-  behind: Schema.Int,
+  /** Null when Git cannot compare with the upstream, such as one deleted on the remote. */
+  ahead: Schema.NullOr(Schema.Int),
+  behind: Schema.NullOr(Schema.Int),
   /** Why the last fetch failed, when `behind` may be out of date. */
   fetchError: Schema.NullOr(Schema.String),
 });

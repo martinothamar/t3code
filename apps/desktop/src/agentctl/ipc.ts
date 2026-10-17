@@ -52,8 +52,8 @@ const openManifestRoot = DesktopIpc.makeIpcMethod({
   result: Schema.Boolean,
   handler: Effect.fn("desktop.ipc.agentctl.openManifestRoot")(function* (folder) {
     const sandboxes = yield* DesktopAgentctlSandboxes;
-    // Only configured folders, so the renderer cannot open arbitrary paths.
-    if (!(yield* sandboxes.isManifestRoot(folder))) return false;
+    // Only configured directories, so the renderer cannot open, and so run, an arbitrary file.
+    if (!(yield* sandboxes.isManifestRootDirectory(folder))) return false;
     const shell = yield* ElectronShell.ElectronShell;
     return yield* shell.openPath(folder);
   }),
