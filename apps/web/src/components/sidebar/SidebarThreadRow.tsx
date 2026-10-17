@@ -102,6 +102,7 @@ import {
 import { pickSnoozePreset, resolveSnoozePresets, type SnoozePreset } from "../Sidebar.snooze";
 import { useThreadShell } from "../../state/entities";
 import { ProjectFavicon, type ProjectFaviconProject } from "../ProjectFavicon";
+import { SandboxHostSuffix } from "../../sandboxes/SandboxHostSuffix";
 import { ThreadSearchMatchExcerpt } from "../ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "../chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
@@ -1440,6 +1441,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   className={cn("min-w-0 flex-1 truncate font-normal text-secondary-label text-xs")}
                 >
                   {props.projectDisplayName}
+                  <SandboxHostSuffix environmentId={props.thread.environmentId} />
                 </span>
               ) : (
                 <span className="flex-1" />
