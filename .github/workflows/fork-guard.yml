@@ -29,7 +29,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          ALLOWED: .github/workflows/fork-ci.yml .github/workflows/fork-guard.yml .github/workflows/fork-release.yml
+          ALLOWED: .github/workflows/fork-ci.yml .github/workflows/fork-guard.yml .github/workflows/fork-release.yml .github/workflows/fork-dev-image.yml
         run: |
           gh api --paginate "repos/$REPO/actions/workflows" \
             --jq '.workflows[] | select(.path | startswith(".github/workflows/")) | "\(.id) \(.state) \(.path)"' |
