@@ -355,6 +355,7 @@ describe("ssh tunnel scripts", () => {
           assert.equal(tunnels, 2);
           assert.isTrue(remoteRunning);
           assert.equal(first.httpBaseUrl, second.httpBaseUrl);
+          assert.equal(first.remoteServerVersion, ARCHIVE.archiveVersion);
         }).pipe(
           Effect.ensuring(Deferred.succeed(finishShutdown, undefined)),
           Effect.provide(layer),

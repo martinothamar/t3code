@@ -2,7 +2,7 @@
 
 ## First checkout
 
-Install `vp` using the [root README](../../README.md#install-vp). It provides the Node version
+Install `vp` with its [getting started guide](https://viteplus.dev/guide/). It provides the Node version
 pinned in `package.json` (Node 26), so no separate Node install is needed. From the repository root:
 
 ```sh

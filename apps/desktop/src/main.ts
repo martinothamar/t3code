@@ -61,6 +61,7 @@ import * as DesktopPreReadyPlatform from "./app/DesktopPreReadyPlatform.ts";
 import * as DesktopShellEnvironment from "./shell/DesktopShellEnvironment.ts";
 import * as DesktopSshEnvironment from "./ssh/DesktopSshEnvironment.ts";
 import * as DesktopSshPasswordPrompts from "./ssh/DesktopSshPasswordPrompts.ts";
+import { remoteServerOverrides, withRemoteServerOverrides } from "./ssh/remoteServerOverrides.ts";
 import * as DesktopState from "./app/DesktopState.ts";
 import * as DesktopLegacyLocalStorage from "./app/DesktopLegacyLocalStorage.ts";
 import * as DesktopTelemetryPublisher from "./telemetry/DesktopTelemetryPublisher.ts";
@@ -119,8 +120,11 @@ const resolveDesktopSshCliRunner = (
 const layerDesktopSshEnvironment = Layer.unwrap(
   Effect.gen(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
+    const overrides = yield* remoteServerOverrides;
     return DesktopSshEnvironment.layer({
-      resolveCliRunner: Effect.succeed(resolveDesktopSshCliRunner(environment)),
+      resolveCliRunner: Effect.succeed(
+        withRemoteServerOverrides(resolveDesktopSshCliRunner(environment), overrides),
+      ),
     });
   }),
 );

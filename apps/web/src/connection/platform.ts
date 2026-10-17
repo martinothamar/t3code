@@ -236,6 +236,8 @@ export const provisionDesktopSshEnvironment = Effect.fn(
       detail: `That host reaches ${descriptor.label}, a different machine. Add it as its own environment instead.`,
     });
   }
+  // A build can choose another server release for SSH hosts than its own version.
+  const expectedVersion = bootstrap.remoteServerVersion ?? APP_VERSION;
   const access = yield* Effect.tryPromise({
     try: () => bridge.bootstrapSshBearerSession(bootstrap.httpBaseUrl, pairingToken),
     catch: (cause) => {
@@ -244,14 +246,14 @@ export const provisionDesktopSshEnvironment = Effect.fn(
       // the desktop's runner just minted, and answers 500 on every retry.
       if (
         error._tag === "ConnectionBlockedError" ||
-        descriptor.serverVersion === APP_VERSION ||
+        descriptor.serverVersion === expectedVersion ||
         !error.detail.includes("[ssh_http:500]")
       ) {
         return error;
       }
       return new ConnectionBlockedError({
         reason: "configuration",
-        detail: `${descriptor.label} runs T3 Code ${descriptor.serverVersion}, but this desktop is ${APP_VERSION}, and that server could not accept its pairing. Restart the T3 server on ${descriptor.label} so it runs ${APP_VERSION}, then retry.`,
+        detail: `${descriptor.label} runs T3 Code ${descriptor.serverVersion}, but this desktop pairs with ${expectedVersion}, and that server could not accept its pairing. Restart the T3 server on ${descriptor.label} so it runs ${expectedVersion}, then retry.`,
       });
     },
   });

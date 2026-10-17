@@ -1740,6 +1740,9 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
           pairingToken,
           remotePort: entry.remotePort,
           ...(entry.remoteServerKind ? { remoteServerKind: entry.remoteServerKind } : {}),
+          ...(runner?.archiveVersion?.trim()
+            ? { remoteServerVersion: runner.archiveVersion.trim() }
+            : {}),
         };
       }),
     );
