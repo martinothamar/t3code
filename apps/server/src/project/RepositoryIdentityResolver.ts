@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
 import * as ProcessRunner from "../processRunner.ts";
+import { discoverFolders } from "../workspace/WorkspaceFolders.ts";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 import { explicitBareRepositoryEnv, unsetInheritedRepositoryEnv } from "../vcs/VcsProcess.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -23,6 +24,9 @@ const DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY = 512;
 // Minute-by-minute sweeps need cached hits; clone, publish and PR discovery force refresh.
 const DEFAULT_POSITIVE_CACHE_TTL = Duration.minutes(15);
 const DEFAULT_NEGATIVE_CACHE_TTL = Duration.minutes(1);
+// Each repository costs three git probes per positive TTL, so a folder of hundreds of
+// clones is read as its first 64 rather than spawning git for every one.
+const MAX_WORKSPACE_REPOSITORIES = 64;
 
 export interface RepositoryIdentityResolverOptions {
   readonly cacheCapacity?: number;
@@ -38,6 +42,15 @@ export class RepositoryIdentityResolver extends Context.Service<
       cwd: string,
       options?: { readonly refresh?: boolean },
     ) => Effect.Effect<RepositoryIdentity | null>;
+    /**
+     * The checkouts in a folder's immediate children, such as an agentctl Sandbox's working
+     * directory, skipping dot-folders like `.worktrees` and symlinks. Empty for a folder inside a
+     * repository, so repository-rooted projects keep one identity.
+     */
+    readonly resolveWorkspace: (
+      cwd: string,
+      options?: { readonly refresh?: boolean },
+    ) => Effect.Effect<ReadonlyArray<RepositoryIdentity>>;
   }
 >()("t3/project/RepositoryIdentityResolver") {}
 
@@ -440,7 +453,44 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
     },
   );
 
-  return RepositoryIdentityResolver.of({ resolve });
+  // Read on the negative TTL: the answer changes when a checkout is cloned or removed. The
+  // folder holds the repositories upstream's project discovery finds, so pull requests and
+  // issues cover what its Git actions do, `ignoreRepositories` included.
+  const workspaceCheckoutCache = yield* Cache.makeWith<string, ReadonlyArray<string>>(
+    (cwd) =>
+      discoverFolders(cwd).pipe(
+        Effect.map((folders) =>
+          folders
+            .map((folder) => folder.path)
+            .toSorted()
+            .slice(0, MAX_WORKSPACE_REPOSITORIES),
+        ),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      ),
+    {
+      capacity: cacheCapacity,
+      timeToLive: () => DEFAULT_NEGATIVE_CACHE_TTL,
+    },
+  );
+
+  const resolveWorkspace: RepositoryIdentityResolver["Service"]["resolveWorkspace"] =
+    Effect.fnUntraced(function* (cwd, options) {
+      if (options?.refresh) {
+        yield* Cache.invalidate(repositoryRootCache, cwd);
+        yield* Cache.invalidate(workspaceCheckoutCache, cwd);
+      }
+      if ((yield* Cache.get(repositoryRootCache, cwd)) !== null) return [];
+      const checkouts = yield* Cache.get(workspaceCheckoutCache, cwd);
+      const identities = yield* Effect.forEach(
+        checkouts,
+        (checkout) => resolve(checkout, options),
+        { concurrency: 4 },
+      );
+      return identities.filter((identity) => identity !== null);
+    });
+
+  return RepositoryIdentityResolver.of({ resolve, resolveWorkspace });
 });
 
 export const layer = Layer.effect(RepositoryIdentityResolver, make()).pipe(

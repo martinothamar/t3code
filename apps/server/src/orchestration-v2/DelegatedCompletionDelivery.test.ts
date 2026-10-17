@@ -140,6 +140,7 @@ const layerTest = Layer.mergeAll(
       peek: () =>
         Effect.succeed({
           repositoryIdentity: null,
+          workspaceRepositories: [],
           faviconPath: null,
           repositoryIdentityResolved: false,
         }),
@@ -148,6 +149,7 @@ const layerTest = Layer.mergeAll(
       getAvailable: () =>
         Effect.succeed({
           repositoryIdentity: null,
+          workspaceRepositories: [],
           faviconPath: null,
           repositoryIdentityResolved: false,
         }),

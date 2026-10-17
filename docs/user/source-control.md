@@ -258,6 +258,21 @@ Previously loaded lists, review details, guides, and diff pages remain readable 
 without a connection, including after restarting the app. Saved content refreshes when the
 environment reconnects; submitting changes requires a connection.
 
+A project folder that is not a Git repository itself lists the pull requests and issues of the
+repositories inside it, found as for [projects with several repositories](./multi-repo-projects.md#which-repositories-a-project-covers),
+`ignoreRepositories` included. Folders added from outside the project are not listed. Threads in it
+show the status of the pull requests linked to them, and open links to those repositories' pull
+requests beside the thread. A new checkout shows up within two minutes. A guide for one of their
+pull requests is written from its checkout.
+
+When several connected environments hold the same repository, such as Sandboxes that each
+clone it, Pull requests lists it from one of them, and a pull request's actions let you pick
+which environment's checkout to work in.
+
+A checkout's pull requests come from the repository `gh repo set-default` chose for it. Without
+one, they come from its `upstream` remote, then its `origin`. For a fork whose pull requests are
+opened on the fork itself, run `gh repo set-default` with the fork in that checkout.
+
 Enable **Remove agent credits when merging** in Settings → Source control & issues to remove recognized
 agent co-author and generated-by lines from GitHub merge and squash commit messages. Human
 co-authors stay credited. The setting is off by default and projects can override it. It also
@@ -356,7 +371,8 @@ and their marks follow the same rules as on web and desktop.
 
 A thread can hold several pull requests, including reviews from another repository on the same host.
 Use **Link pull request** in the command palette or **Linked items** panel, or right-click a
-pull request link in the conversation. Creating a pull request from Git actions links it automatically,
+pull request link in the conversation. A number links the project's own pull request; in a project
+folder that holds several repositories, write `repo#123`. Creating a pull request from Git actions links it automatically,
 and so does an agent creating one with `gh pr create` or `glab mr create`. Agents can link other
 pull requests with the `link_pull_request` tool.
 

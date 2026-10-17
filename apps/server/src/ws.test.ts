@@ -2592,6 +2592,7 @@ it.effect.each([
           getAvailable: () =>
             Effect.succeed({
               repositoryIdentity: identity,
+              workspaceRepositories: [],
               faviconPath: null,
               repositoryIdentityResolved: true,
             }),

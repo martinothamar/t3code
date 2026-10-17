@@ -1,6 +1,7 @@
 import {
   CommandId,
   NonNegativeInt,
+  projectRepositoryIdentities,
   type PullRequestActivity,
   PullRequestListCursors,
   type PullRequestRef,
@@ -26,7 +27,12 @@ import * as GitManager from "../../../git/GitManager.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as PullRequestWatchService from "../../../pullRequest/PullRequestWatchService.ts";
-import { resolveTarget, type ResolvedTarget } from "../../../pullRequest/pullRequestTarget.ts";
+import {
+  resolveTarget,
+  workspaceCheckout,
+  checkoutInWorktree,
+  type ResolvedTarget,
+} from "../../../pullRequest/pullRequestTarget.ts";
 import { withAgentMarker } from "../../../orchestration-v2/pullRequestWatch.ts";
 import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
 import * as PullRequestService from "../../../pullRequest/PullRequestService.ts";
@@ -247,20 +253,25 @@ function projectForPullRequest(
   preferred: OrchestrationProjectShell | undefined,
 ): OrchestrationProjectShell | undefined {
   // Match the guide service's host-level repository key, including Azure DevOps org/project/_git/repo.
-  const matches = (project: OrchestrationProjectShell) => {
-    const own = pullRequestSyncKey(
-      { projectId: project.id, host: target.host, repository: target.repository, number: 1 },
-      project.repositoryIdentity ?? undefined,
-    );
-    return (
-      own !== null &&
-      ownPullRequestRepositories(project.repositoryIdentity).some(
-        ({ key }) => own.host === key.host && own.repository === key.repository,
-      )
-    );
-  };
+  const matches = (project: OrchestrationProjectShell) =>
+    projectRepositoryIdentities(project).some((identity) => {
+      const own = pullRequestSyncKey(
+        { projectId: project.id, host: target.host, repository: target.repository, number: 1 },
+        identity,
+      );
+      return (
+        own !== null &&
+        ownPullRequestRepositories(identity).some(
+          ({ key }) => own.host === key.host && own.repository === key.repository,
+        )
+      );
+    });
   if (preferred !== undefined && matches(preferred)) return preferred;
-  return projects.find(matches);
+  // A project rooted in the repository comes before a folder that holds a checkout of it.
+  return (
+    projects.find((project) => project.repositoryIdentity != null && matches(project)) ??
+    projects.find(matches)
+  );
 }
 
 const make = Effect.gen(function* () {
@@ -535,16 +546,22 @@ const make = Effect.gen(function* () {
           )
         : undefined;
     const branchPullRequest = thread.branchPullRequest ?? opened ?? null;
+    // A workspace folder holding one repository names it as a repository-rooted project does.
+    const ownRepository = project.repositoryIdentity ?? workspaceCheckout(project, undefined);
     const branchRepository =
-      project.repositoryIdentity == null
+      ownRepository == null
         ? undefined
-        : (sourceControlDefinitions.repositorySelector(project.repositoryIdentity) ?? undefined);
+        : (sourceControlDefinitions.repositorySelector(ownRepository) ?? undefined);
     const named =
       input.number !== undefined
         ? { number: input.number, repository: input.repository ?? branchRepository }
         : branchPullRequest === null
           ? null
-          : { number: branchPullRequest.number, repository: branchPullRequest.repository };
+          : // Its URL keeps the host, which a folder with checkouts on two hosts can't infer.
+            sourceControlDefinitions.parseChangeRequestUrl(branchPullRequest.url)?.link !==
+              undefined
+            ? { url: branchPullRequest.url }
+            : { number: branchPullRequest.number, repository: branchPullRequest.repository };
     if (named === null) return yield* new PullRequestBranchHasNoneError();
     const target = yield* resolveTarget(named, project);
     const ref: PullRequestRef = {
@@ -1058,9 +1075,34 @@ const make = Effect.gen(function* () {
         if (project === undefined) {
           return yield* new PullRequestProjectNotFoundError({ repository: "" });
         }
+        // A workspace folder is no repository; the branch is in one of its checkouts.
+        const checkout = workspaceCheckout(project, input.repository);
+        const clones = (project.workspaceRepositories ?? []).filter(
+          (identity) => identity.canonicalKey === checkout?.canonicalKey,
+        ).length;
+        if (
+          project.repositoryIdentity == null &&
+          (project.workspaceRepositories?.length ?? 0) > 0 &&
+          (checkout === undefined || clones > 1)
+        ) {
+          return yield* new PullRequestForgeError({
+            detail:
+              clones > 1
+                ? "This thread's folder holds several clones of that repository, and the branch could be in any. Open the PR with the host's CLI in its clone."
+                : input.repository === undefined
+                  ? "This thread's folder holds several repositories. Pass repository, such as owner/repo."
+                  : `This thread's folder holds no checkout of ${input.repository}.`,
+          });
+        }
         const created = yield* git
           .createPullRequest({
-            cwd: thread.worktreePath ?? project.workspaceRoot,
+            cwd:
+              checkout === undefined
+                ? (thread.worktreePath ?? project.workspaceRoot)
+                : thread.worktreePath == null
+                  ? (checkout.rootPath ?? project.workspaceRoot)
+                  : (checkoutInWorktree(project, checkout, thread.worktreePath) ??
+                    thread.worktreePath),
             projectId: project.id,
             title: input.title,
             body: input.body,

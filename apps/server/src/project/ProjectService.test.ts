@@ -56,6 +56,7 @@ const layerWorkspacePaths = Layer.succeed(WorkspacePaths.WorkspacePaths, {
 
 const layerMetadata = Layer.merge(
   Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+    resolveWorkspace: () => Effect.succeed([]),
     resolve: (workspaceRoot) =>
       Effect.succeed({
         canonicalKey: `github.com/t3tools/${workspaceRoot.split("/").at(-1)}`,
@@ -140,6 +141,7 @@ it.effect("resolves only the requested active project page in creation order", (
               rootPath: workspaceRoot,
             }),
           ),
+        resolveWorkspace: () => Effect.succeed([]),
       }),
       Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
         invalidate: () => Effect.void,
@@ -866,6 +868,7 @@ it.effect("keeps project snapshots available when optional metadata enrichment f
   Effect.gen(function* () {
     const layerFailingMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolveWorkspace: () => Effect.succeed([]),
         resolve: () => Effect.succeed(null),
       }),
       Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
@@ -906,6 +909,7 @@ it.effect("invalidates workspace-derived metadata when a project moves", () =>
     const metadataVersion = yield* Ref.make(1);
     const layerVersionedMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) =>
           Ref.get(metadataVersion).pipe(
             Effect.map((version) => ({
@@ -979,6 +983,7 @@ it.effect("resolves a restored icon immediately after reselecting its saved path
     const iconPath = `${cwd}/icon.svg`;
     const metadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolveWorkspace: () => Effect.succeed([]),
         resolve: () => Effect.succeed(null),
       }),
       ProjectFaviconResolver.layer.pipe(
