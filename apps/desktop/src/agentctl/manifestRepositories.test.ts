@@ -7,7 +7,13 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-import { pullManifestRepositories, resolveManifestRepository } from "./pullManifestRepositories.ts";
+import {
+  describeManifestRoots,
+  gitFailureReason,
+  parseRepositoryStatus,
+  pullManifestRepositories,
+  resolveManifestRepository,
+} from "./manifestRepositories.ts";
 
 const git = (directory: string, ...args: string[]) =>
   NodeChildProcess.execFileSync(
@@ -54,7 +60,7 @@ const fixture = Effect.gen(function* () {
   return { fs, path, home, upstream, root, checkout, advance };
 });
 
-describe("pullManifestRepositories", () => {
+describe("manifestRepositories", () => {
   it.effect(
     "identifies actual checkouts, nested folders, and worktrees without treating parent folders as repositories",
     () =>
@@ -84,7 +90,14 @@ describe("pullManifestRepositories", () => {
       const other = path.join(root, "other");
       git(root, "clone", upstream, other);
       yield* advance;
-      yield* pullManifestRepositories(root);
+      const pulled = yield* pullManifestRepositories([root]);
+      assert.deepStrictEqual(
+        pulled.map(({ outcome, commits, error }) => ({ outcome, commits, error })),
+        [
+          { outcome: "updated", commits: 1, error: null },
+          { outcome: "updated", commits: 1, error: null },
+        ],
+      );
       for (const repo of [checkout, other]) {
         assert.strictEqual(git(repo, "rev-parse", "HEAD"), git(upstream, "rev-parse", "HEAD"));
         assert.isTrue(yield* fs.exists(path.join(repo, "agents", "agent.nested.yaml")));
@@ -96,10 +109,10 @@ describe("pullManifestRepositories", () => {
     Effect.gen(function* () {
       const { checkout, upstream, advance, path } = yield* fixture;
       yield* advance;
-      yield* pullManifestRepositories(path.join(checkout, "agents"));
+      yield* pullManifestRepositories([path.join(checkout, "agents")]);
       assert.strictEqual(git(checkout, "rev-parse", "HEAD"), git(upstream, "rev-parse", "HEAD"));
-      // Pulling again when up to date also succeeds.
-      yield* pullManifestRepositories(checkout);
+      const again = yield* pullManifestRepositories([checkout]);
+      assert.strictEqual(again[0]?.outcome, "up-to-date");
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 
@@ -114,8 +127,9 @@ describe("pullManifestRepositories", () => {
         const head = git(checkout, "rev-parse", "HEAD");
         yield* fs.writeFileString(manifest, "local changes\n");
         yield* advance;
-        const result = yield* Effect.result(pullManifestRepositories(checkout));
-        assert.strictEqual(result._tag, "Failure");
+        const [result] = yield* pullManifestRepositories([checkout]);
+        assert.strictEqual(result?.outcome, "failed");
+        assert.match(result?.error ?? "", /local changes/);
         assert.strictEqual(git(checkout, "rev-parse", "HEAD"), head);
         assert.strictEqual(yield* fs.readFileString(manifest), "local changes\n");
         assert.strictEqual(git(checkout, "stash", "list"), "");
@@ -130,8 +144,8 @@ describe("pullManifestRepositories", () => {
       git(checkout, "commit", "-m", "local work");
       const head = git(checkout, "rev-parse", "HEAD");
       yield* advance;
-      const result = yield* Effect.result(pullManifestRepositories(checkout));
-      assert.strictEqual(result._tag, "Failure");
+      const [result] = yield* pullManifestRepositories([checkout]);
+      assert.strictEqual(result?.outcome, "failed");
       assert.strictEqual(git(checkout, "rev-parse", "HEAD"), head);
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
@@ -142,11 +156,88 @@ describe("pullManifestRepositories", () => {
       const loose = path.join(home, "loose");
       yield* fs.makeDirectory(loose);
       yield* fs.writeFileString(path.join(loose, "agent.yaml"), "metadata:\n  name: loose\n");
-      const result = yield* Effect.result(pullManifestRepositories(loose));
+      const result = yield* Effect.result(pullManifestRepositories([loose]));
       assert.strictEqual(result._tag, "Failure");
       if (result._tag === "Failure") {
         assert.strictEqual(result.failure.message, `No Git repositories found in ${loose}.`);
       }
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
+
+  it.effect("keeps pulling the other repositories when one fails", () =>
+    Effect.gen(function* () {
+      const { root, checkout, upstream, advance, fs, path } = yield* fixture;
+      const other = path.join(root, "other");
+      git(root, "clone", upstream, other);
+      yield* fs.writeFileString(path.join(checkout, "agents", "agent.yaml"), "local\n");
+      yield* advance;
+      const pulled = yield* pullManifestRepositories([root]);
+      assert.deepStrictEqual(
+        pulled.map((result) => result.outcome),
+        ["failed", "updated"],
+      );
+      assert.strictEqual(git(other, "rev-parse", "HEAD"), git(upstream, "rev-parse", "HEAD"));
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it.effect("describes manifests, local changes, and commits behind after a fetch", () =>
+    Effect.gen(function* () {
+      const { root, checkout, advance, fs, path, home } = yield* fixture;
+      yield* fs.writeFileString(path.join(checkout, "scratch.txt"), "scratch\n");
+      yield* advance;
+      const missing = path.join(home, "missing");
+      const [local, fetched, gone] = [
+        ...(yield* describeManifestRoots([root], { fetch: false })),
+        ...(yield* describeManifestRoots([root, missing], { fetch: true })),
+      ];
+      assert.strictEqual(local?.manifests, 1);
+      assert.deepStrictEqual(
+        local?.repositories.map(({ branch, upstream, changes, ahead, behind }) => ({
+          branch,
+          upstream,
+          changes,
+          ahead,
+          behind,
+        })),
+        [{ branch: "main", upstream: "origin/main", changes: 1, ahead: 0, behind: 0 }],
+      );
+      assert.strictEqual(fetched?.repositories[0]?.behind, 1);
+      assert.strictEqual(fetched?.repositories[0]?.fetchError, null);
+      assert.deepStrictEqual(gone, {
+        directory: missing,
+        exists: false,
+        manifests: 0,
+        repositories: [],
+      });
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+});
+
+describe("parseRepositoryStatus", () => {
+  it("reads a detached HEAD without an upstream", () => {
+    assert.deepStrictEqual(
+      parseRepositoryStatus("/repo", "# branch.oid abc\n# branch.head (detached)\n? new.txt"),
+      { path: "/repo", branch: null, upstream: null, changes: 1, ahead: 0, behind: 0 },
+    );
+  });
+});
+
+describe("gitFailureReason", () => {
+  it("prefers git's fatal or error line over hints", () => {
+    assert.strictEqual(
+      gitFailureReason(
+        "hint: Diverging branches can't be fast-forwarded\nfatal: Not possible to fast-forward, aborting.",
+      ),
+      "Not possible to fast-forward, aborting.",
+    );
+  });
+
+  it("uses the first line of an unprefixed message", () => {
+    assert.strictEqual(
+      gitFailureReason(
+        "There is no tracking information for the current branch.\nPlease specify which branch.",
+      ),
+      "There is no tracking information for the current branch.",
+    );
+  });
 });

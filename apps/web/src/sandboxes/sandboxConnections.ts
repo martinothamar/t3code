@@ -39,6 +39,7 @@ export const EMPTY_SANDBOX_SNAPSHOT: AgentctlSandboxesSnapshot = {
   status: "unavailable",
   error: null,
   sandboxes: [],
+  homeDirectory: "",
 };
 
 /** A Sandbox on its way out, whose environment T3 lets go of right away. */

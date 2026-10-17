@@ -26,7 +26,9 @@ gives it.
   `worker-3`. The sidebar follows the Sandbox while agentctl sets it up.
 - **Manage them.** **Sandboxes** at the bottom of the sidebar lists each Sandbox with its state,
   resources and threads, and where to start, stop or delete it. Manifest folders are managed there
-  too. **Open Sandboxes** in the command palette goes there.
+  too: each shows whether its Git repositories are behind or have local changes, and **Pull**
+  fast-forwards them so a Sandbox you create next uses the latest manifests. **Open Sandboxes** in
+  the command palette goes there.
 
 ## Good to know
 

@@ -4,6 +4,7 @@ import {
   type AgentctlActionResult,
   type AgentctlCreateSandboxInput,
   type AgentctlManifestRoot,
+  type AgentctlPullResult,
   type AgentctlSandboxAction,
   type AgentctlSandboxManifest,
   type AgentctlSandboxesSnapshot,
@@ -30,7 +31,7 @@ import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as AgentctlCli from "./AgentctlCli.ts";
 import { isConnectable, shouldCloseTunnel, sshAliasFor, type AgentResource } from "./agentState.ts";
 import { discoverManifests } from "./manifests.ts";
-import { pullManifestRepositories, resolveManifestRepository } from "./pullManifestRepositories.ts";
+import { describeManifestRoots, pullManifestRepositories } from "./manifestRepositories.ts";
 import {
   DEFAULT_SANDBOX_SETTINGS,
   IDLE_RUNTIME,
@@ -59,11 +60,17 @@ export class DesktopAgentctlSandboxes extends Context.Service<
     readonly create: (input: AgentctlCreateSandboxInput) => Effect.Effect<AgentctlActionResult>;
     readonly listManifests: Effect.Effect<ReadonlyArray<AgentctlSandboxManifest>>;
     readonly listManifestRoots: Effect.Effect<ReadonlyArray<AgentctlManifestRoot>>;
+    /** Fetches each manifest repository before describing it. */
+    readonly refreshManifestRoots: Effect.Effect<ReadonlyArray<AgentctlManifestRoot>>;
     readonly getSettings: Effect.Effect<AgentctlSandboxSettings>;
     /** Folders are merged here, so two views never overwrite each other's changes. */
     readonly addManifestRoot: (folder: string) => Effect.Effect<AgentctlSandboxSettings>;
     readonly removeManifestRoot: (folder: string) => Effect.Effect<AgentctlSandboxSettings>;
-    readonly pullManifestRoot: (folder: string) => Effect.Effect<AgentctlActionResult>;
+    readonly pullManifestRoots: (
+      folders: ReadonlyArray<string>,
+    ) => Effect.Effect<AgentctlPullResult>;
+    /** Whether a folder is still configured, before acting on one the renderer names. */
+    readonly isManifestRoot: (folder: string) => Effect.Effect<boolean>;
     /**
      * Starts watching agentctl. Call it once the app has loaded its shell
      * environment, so a macOS app opened from Finder finds agentctl on PATH.
@@ -106,8 +113,9 @@ export const make = Effect.gen(function* () {
   const context = yield* Effect.context<
     FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
   >();
-  // Overlapping manifest folders can refer to the same repository.
-  const pullLock = yield* Semaphore.make(1);
+  // Overlapping manifest folders can refer to the same repository, and a fetch
+  // should not race a pull of it.
+  const gitLock = yield* Semaphore.make(1);
 
   const storePath = path.join(environment.stateDir, "agentctl-sandboxes.json");
   // A file T3 cannot read is kept aside rather than overwritten by the next save.
@@ -162,6 +170,7 @@ export const make = Effect.gen(function* () {
     status: "loading",
     error: null,
     sandboxes: [],
+    homeDirectory: environment.homeDirectory,
   });
   const refreshLock = yield* Semaphore.make(1);
 
@@ -261,7 +270,7 @@ export const make = Effect.gen(function* () {
       const error = listed.failure.message;
       yield* SubscriptionRef.update(snapshotRef, (snapshot): AgentctlSandboxesSnapshot =>
         snapshot.status === "loading"
-          ? { status: "unavailable", error, sandboxes: [] }
+          ? { ...snapshot, status: "unavailable", error, sandboxes: [] }
           : { ...snapshot, error },
       );
       return;
@@ -417,34 +426,46 @@ export const make = Effect.gen(function* () {
     ),
     getSettings,
     listManifestRoots: getSettings.pipe(
-      Effect.flatMap((settings) =>
-        Effect.forEach(settings.manifestRoots, (directory) =>
-          resolveManifestRepository(directory).pipe(
-            Effect.orElseSucceed(() => null),
-            Effect.map((repository) => ({ directory, repository })),
-          ),
-        ),
-      ),
+      Effect.flatMap((settings) => describeManifestRoots(settings.manifestRoots, { fetch: false })),
       Effect.provide(context),
     ),
+    refreshManifestRoots: gitLock.withPermits(1)(
+      getSettings.pipe(
+        Effect.flatMap((settings) =>
+          describeManifestRoots(settings.manifestRoots, { fetch: true }),
+        ),
+        Effect.provide(context),
+      ),
+    ),
     addManifestRoot: (folder) =>
-      updateManifestRoots((roots) => (roots.includes(folder) ? roots : [...roots, folder])),
+      Effect.suspend(() => {
+        // "/a/" and "/a" are one folder.
+        const resolved = path.resolve(folder);
+        return updateManifestRoots((roots) =>
+          roots.some((root) => path.resolve(root) === resolved) ? roots : [...roots, resolved],
+        );
+      }),
     removeManifestRoot: (folder) =>
       updateManifestRoots((roots) => roots.filter((root) => root !== folder)),
-    pullManifestRoot: (folder) =>
-      pullLock.withPermits(1)(
+    pullManifestRoots: (folders) =>
+      gitLock.withPermits(1)(
         Effect.gen(function* () {
           const settings = yield* getSettings;
-          if (!settings.manifestRoots.includes(folder)) {
-            return { error: "This manifest folder is no longer configured." };
+          if (folders.some((folder) => !settings.manifestRoots.includes(folder))) {
+            return {
+              error: "This manifest folder is no longer configured.",
+              repositories: [],
+            } satisfies AgentctlPullResult;
           }
-          return yield* pullManifestRepositories(folder).pipe(
+          return yield* pullManifestRepositories(folders).pipe(
             Effect.provide(context),
-            Effect.as<AgentctlActionResult>({ error: null }),
-            Effect.catch((error) => Effect.succeed({ error: error.message })),
+            Effect.map((repositories): AgentctlPullResult => ({ error: null, repositories })),
+            Effect.catch((error) => Effect.succeed({ error: error.message, repositories: [] })),
           );
         }),
       ),
+    isManifestRoot: (folder) =>
+      getSettings.pipe(Effect.map((settings) => settings.manifestRoots.includes(folder))),
     startPolling: Ref.getAndSet(polling, true).pipe(
       Effect.flatMap((started) =>
         started ? Effect.void : Effect.forever(pollOnce).pipe(Effect.forkIn(scope), Effect.asVoid),

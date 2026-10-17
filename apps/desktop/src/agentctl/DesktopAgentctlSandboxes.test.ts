@@ -415,12 +415,12 @@ describe("DesktopAgentctlSandboxes", () => {
     withSandboxes((sandboxes) =>
       Effect.gen(function* () {
         yield* sandboxes.addManifestRoot("/a");
-        yield* sandboxes.addManifestRoot("/b");
-        yield* sandboxes.addManifestRoot("/a");
+        yield* sandboxes.addManifestRoot("/b/");
+        yield* sandboxes.addManifestRoot("/a/");
         const settings = yield* sandboxes.removeManifestRoot("/a");
         assert.deepStrictEqual(settings.manifestRoots, ["/b"]);
         assert.deepStrictEqual(yield* sandboxes.listManifestRoots, [
-          { directory: "/b", repository: null },
+          { directory: "/b", exists: false, manifests: 0, repositories: [] },
         ]);
       }),
     ),
@@ -429,8 +429,9 @@ describe("DesktopAgentctlSandboxes", () => {
   it.effect("refuses to pull a folder that is not configured", () =>
     withSandboxes((sandboxes) =>
       Effect.gen(function* () {
-        const result = yield* sandboxes.pullManifestRoot("/not-configured");
+        const result = yield* sandboxes.pullManifestRoots(["/not-configured"]);
         assert.strictEqual(result.error, "This manifest folder is no longer configured.");
+        assert.isFalse(yield* sandboxes.isManifestRoot("/not-configured"));
       }),
     ),
   );

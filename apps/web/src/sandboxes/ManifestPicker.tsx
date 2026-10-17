@@ -23,6 +23,8 @@ import {
   manifestRelativePath,
   pickAgentManifest,
 } from "./manifestAgents";
+import { tildePath } from "./manifestFolders";
+import { useSandboxSnapshot } from "./useSandboxes";
 
 /**
  * Picks a manifest in two steps: the agent, a folder found in one of the user's repositories,
@@ -40,6 +42,7 @@ export function ManifestPicker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const highlighted = useRef<string | null>(null);
+  const { homeDirectory } = useSandboxSnapshot();
   const repositories = useMemo(() => groupManifests(manifests), [manifests]);
   const filtered = filterManifestRepositories(repositories, query);
   const keys = filtered.flatMap((repository) => repository.agents.map((agent) => agent.directory));
@@ -126,7 +129,7 @@ export function ManifestPicker({
                           {group.name}
                         </span>
                         <span className="ms-auto min-w-0 font-mono font-normal text-3xs">
-                          <MiddleTruncate value={group.path} />
+                          <MiddleTruncate value={tildePath(group.path, homeDirectory)} />
                         </span>
                       </span>
                     </ComboboxGroupLabel>
