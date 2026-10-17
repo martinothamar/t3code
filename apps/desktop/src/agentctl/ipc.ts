@@ -2,6 +2,7 @@ import {
   AgentctlActionResult,
   AgentctlCreateSandboxInput,
   AgentctlManifestRoot,
+  AgentctlPullResult,
   AgentctlSandboxManifest,
   AgentctlSandboxSettings,
   AgentctlSandboxesSnapshot,
@@ -9,6 +10,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as DesktopIpc from "../ipc/DesktopIpc.ts";
 import { AGENTCTL_CHANNELS } from "./channels.ts";
 import { DesktopAgentctlSandboxes } from "./DesktopAgentctlSandboxes.ts";
@@ -36,12 +38,25 @@ const create = DesktopIpc.makeIpcMethod({
     Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.create(input)),
 });
 
-const pullManifestRoot = DesktopIpc.makeIpcMethod({
-  channel: AGENTCTL_CHANNELS.pullManifestRoot,
+const pullManifestRoots = DesktopIpc.makeIpcMethod({
+  channel: AGENTCTL_CHANNELS.pullManifestRoots,
+  payload: Schema.Array(Schema.String),
+  result: AgentctlPullResult,
+  handler: (folders) =>
+    Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.pullManifestRoots(folders)),
+});
+
+const openManifestRoot = DesktopIpc.makeIpcMethod({
+  channel: AGENTCTL_CHANNELS.openManifestRoot,
   payload: Schema.String,
-  result: AgentctlActionResult,
-  handler: (folder) =>
-    Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.pullManifestRoot(folder)),
+  result: Schema.Boolean,
+  handler: Effect.fn("desktop.ipc.agentctl.openManifestRoot")(function* (folder) {
+    const sandboxes = yield* DesktopAgentctlSandboxes;
+    // Only configured directories, so the renderer cannot open, and so run, an arbitrary file.
+    if (!(yield* sandboxes.isManifestRootDirectory(folder))) return false;
+    const shell = yield* ElectronShell.ElectronShell;
+    return yield* shell.openPath(folder);
+  }),
 });
 
 const listManifests = DesktopIpc.makeIpcMethod({
@@ -66,6 +81,14 @@ const listManifestRoots = DesktopIpc.makeIpcMethod({
     Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.listManifestRoots),
 });
 
+const refreshManifestRoots = DesktopIpc.makeIpcMethod({
+  channel: AGENTCTL_CHANNELS.refreshManifestRoots,
+  payload: Schema.Void,
+  result: Schema.Array(AgentctlManifestRoot),
+  handler: () =>
+    Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.refreshManifestRoots),
+});
+
 const manifestRoot = (channel: string, run: "addManifestRoot" | "removeManifestRoot") =>
   DesktopIpc.makeIpcMethod({
     channel,
@@ -83,7 +106,9 @@ export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctl
     yield* ipc.handle(lifecycle(AGENTCTL_CHANNELS.stop, "stop"));
     yield* ipc.handle(lifecycle(AGENTCTL_CHANNELS.remove, "remove"));
     yield* ipc.handle(create);
-    yield* ipc.handle(pullManifestRoot);
+    yield* ipc.handle(pullManifestRoots);
+    yield* ipc.handle(openManifestRoot);
+    yield* ipc.handle(refreshManifestRoots);
     yield* ipc.handle(listManifests);
     yield* ipc.handle(listManifestRoots);
     yield* ipc.handle(getSettings);

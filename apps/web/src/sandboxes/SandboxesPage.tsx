@@ -7,11 +7,13 @@ import {
   DownloadIcon,
   FolderGit2Icon,
   FolderIcon,
+  FolderOpenIcon,
   FolderPlusIcon,
+  GitBranchIcon,
   PlusIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { SettingsRow, SettingsSection } from "../components/settings/settingsLayout";
 import { Badge } from "../components/ui/badge";
@@ -40,6 +42,7 @@ import {
   stopSandbox,
   type SandboxTone,
 } from "./sandboxActions";
+import { folderName, pullToast, repositoryBadges, tildePath } from "./manifestFolders";
 import { readAgentctlBridge } from "./sandboxConnections";
 import { useSandboxSnapshot } from "./useSandboxes";
 
@@ -107,11 +110,15 @@ export function SandboxesPage() {
                     />
                   ) : (
                     snapshot.sandboxes.map((sandbox) => (
-                      <SandboxRow key={sandbox.name} sandbox={sandbox} />
+                      <SandboxRow
+                        key={sandbox.name}
+                        sandbox={sandbox}
+                        homeDirectory={snapshot.homeDirectory}
+                      />
                     ))
                   )}
                 </SettingsSection>
-                <ManifestFolders />
+                <ManifestFolders homeDirectory={snapshot.homeDirectory} />
               </>
             )}
           </WorkspacePageContainer>
@@ -132,7 +139,13 @@ function specLine(sandbox: AgentctlSandbox): string | null {
   return parts.length === 0 ? null : parts.join(" · ");
 }
 
-function SandboxRow({ sandbox }: { readonly sandbox: AgentctlSandbox }) {
+function SandboxRow({
+  sandbox,
+  homeDirectory,
+}: {
+  readonly sandbox: AgentctlSandbox;
+  readonly homeDirectory: string;
+}) {
   const environmentId =
     sandbox.environmentId === null ? null : EnvironmentId.make(sandbox.environmentId);
   const { presentation } = useEnvironmentPresentation(environmentId);
@@ -186,7 +199,9 @@ function SandboxRow({ sandbox }: { readonly sandbox: AgentctlSandbox }) {
             .join(" · ") || null}
           {specLine(sandbox) ? <span>{specLine(sandbox)}</span> : null}
           {sandbox.manifestPath ? (
-            <span className="truncate font-mono text-xs">{sandbox.manifestPath}</span>
+            <span className="truncate font-mono text-xs">
+              {tildePath(sandbox.manifestPath, homeDirectory)}
+            </span>
           ) : null}
           <span>{threadSummary}</span>
           {threads.slice(0, RECENT_THREADS).map((thread) => (
@@ -237,17 +252,42 @@ function SandboxRow({ sandbox }: { readonly sandbox: AgentctlSandbox }) {
   );
 }
 
-/** Where "New Sandbox" looks for manifests. */
-function ManifestFolders() {
+/** Where "New Sandbox" looks for manifests, and whether their repositories are current. */
+function ManifestFolders({ homeDirectory }: { homeDirectory: string }) {
   const [roots, setRoots] = useState<ReadonlyArray<AgentctlManifestRoot> | null>(null);
-  const [pulling, setPulling] = useState<string | null>(null);
+  // The folders being pulled, so their rows show it and nothing pulls twice.
+  const [pulling, setPulling] = useState<ReadonlyArray<string>>([]);
+  // Bumped by every read, so a slow fetch cannot overwrite a newer add or remove.
+  const generation = useRef(0);
+  const load = (read: Promise<ReadonlyArray<AgentctlManifestRoot>>) => {
+    const current = ++generation.current;
+    return read.then(
+      (next) => {
+        if (generation.current === current) setRoots(next);
+      },
+      () => undefined,
+    );
+  };
 
   useEffect(() => {
-    void readAgentctlBridge()
-      ?.listManifestRoots()
-      .then((next) => {
-        setRoots(next);
-      });
+    const bridge = readAgentctlBridge();
+    if (bridge === null) return;
+    // Local state first, then again once each repository has fetched; the fetch
+    // is ignored if the list changed meanwhile or the page closed.
+    void bridge
+      .listManifestRoots()
+      .then((next) => setRoots((current) => current ?? next))
+      .catch(() => undefined);
+    const current = ++generation.current;
+    void bridge.refreshManifestRoots().then(
+      (next) => {
+        if (generation.current === current) setRoots(next);
+      },
+      () => undefined,
+    );
+    return () => {
+      generation.current += 1;
+    };
   }, []);
 
   if (roots === null) return null;
@@ -257,42 +297,62 @@ function ManifestFolders() {
     const bridge = readAgentctlBridge();
     if (bridge === null) return;
     await bridge.addManifestRoot(folder);
-    setRoots(await bridge.listManifestRoots());
+    await load(bridge.listManifestRoots());
   };
   const removeRoot = async (folder: string) => {
     const bridge = readAgentctlBridge();
     if (bridge === null) return;
     await bridge.removeManifestRoot(folder);
-    setRoots(await bridge.listManifestRoots());
+    await load(bridge.listManifestRoots());
   };
-  const pullRoot = async (folder: string) => {
+  const pullRoots = async (folders: ReadonlyArray<string>) => {
     const bridge = readAgentctlBridge();
-    if (bridge === null || pulling !== null) return;
-    setPulling(folder);
+    if (bridge === null || pulling.length > 0) return;
+    setPulling(folders);
     try {
-      const result = await bridge.pullManifestRoot(folder);
-      toastManager.add(
-        stackedThreadToast({
-          type: result.error === null ? "success" : "error",
-          title: result.error === null ? "Repositories pulled" : "Could not pull repositories",
-          description: result.error ?? folder,
-        }),
-      );
+      toastManager.add(stackedThreadToast(pullToast(await bridge.pullManifestRoots(folders))));
     } catch {
       toastManager.add(stackedThreadToast({ type: "error", title: "Could not pull repositories" }));
     } finally {
-      setPulling(null);
+      await load(bridge.listManifestRoots());
+      setPulling([]);
     }
   };
+  const openRoot = async (folder: string) => {
+    const opened = await readAgentctlBridge()
+      ?.openManifestRoot(folder)
+      .catch(() => false);
+    if (!opened) {
+      toastManager.add(
+        stackedThreadToast({ type: "error", title: "Could not open folder", description: folder }),
+      );
+    }
+  };
+  const pullable = roots
+    .filter((root) => root.repositories.length > 0)
+    .map((root) => root.directory);
 
   return (
     <SettingsSection
       title="Manifest folders"
       headerAction={
-        <Button size="xs" variant="ghost-muted" onClick={() => void addRoot()}>
-          <FolderPlusIcon className="size-3" />
-          Add folder
-        </Button>
+        <span className="flex items-center gap-1">
+          {pullable.length > 1 ? (
+            <Button
+              size="xs"
+              variant="ghost-muted"
+              disabled={pulling.length > 0}
+              onClick={() => void pullRoots(pullable)}
+            >
+              <DownloadIcon className="size-3" />
+              {pulling.length > 1 ? "Pulling…" : "Pull all"}
+            </Button>
+          ) : null}
+          <Button size="xs" variant="ghost-muted" onClick={() => void addRoot()}>
+            <FolderPlusIcon className="size-3" />
+            Add folder
+          </Button>
+        </span>
       }
     >
       {roots.length === 0 ? (
@@ -301,50 +361,127 @@ function ManifestFolders() {
           description="New Sandbox finds every agent.yaml and agent.<variant>.yaml in these folders."
         />
       ) : (
-        roots.map(({ directory, repository }) => (
-          <SettingsRow
-            key={directory}
-            title={
-              <span className="inline-flex min-w-0 items-center gap-2">
-                {repository === null ? (
-                  <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
-                ) : (
-                  <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
-                )}
-                <span className="truncate">
-                  {directory.split(/[\\/]/).findLast(Boolean) ?? directory}
-                </span>
-              </span>
-            }
-            description={<span className="break-all font-mono text-xs">{directory}</span>}
-            control={
-              <div className="flex shrink-0 items-center gap-1">
-                {repository !== null ? (
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    aria-label={`Pull repositories in ${directory}`}
-                    disabled={pulling !== null}
-                    onClick={() => void pullRoot(directory)}
-                  >
-                    <DownloadIcon className="size-3" />
-                    {pulling === directory ? "Pulling…" : "Pull"}
-                  </Button>
-                ) : null}
-                <Button
-                  size="icon-xs"
-                  variant="ghost-muted"
-                  aria-label={`Remove ${directory}`}
-                  disabled={pulling === directory}
-                  onClick={() => void removeRoot(directory)}
-                >
-                  <XIcon className="size-3" />
-                </Button>
-              </div>
-            }
+        roots.map((root) => (
+          <ManifestFolderRow
+            key={root.directory}
+            root={root}
+            homeDirectory={homeDirectory}
+            pulling={pulling.includes(root.directory)}
+            busy={pulling.length > 0}
+            onPull={() => void pullRoots([root.directory])}
+            onOpen={() => void openRoot(root.directory)}
+            onRemove={() => void removeRoot(root.directory)}
           />
         ))
       )}
     </SettingsSection>
+  );
+}
+
+function ManifestFolderRow({
+  root,
+  homeDirectory,
+  pulling,
+  busy,
+  onPull,
+  onOpen,
+  onRemove,
+}: {
+  root: AgentctlManifestRoot;
+  homeDirectory: string;
+  pulling: boolean;
+  busy: boolean;
+  onPull: () => void;
+  onOpen: () => void;
+  onRemove: () => void;
+}) {
+  const path = tildePath(root.directory, homeDirectory);
+  const Icon = root.repositories.length > 0 ? FolderGit2Icon : FolderIcon;
+  return (
+    <SettingsRow
+      title={
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <Icon className="size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate">{folderName(root.directory)}</span>
+          {!root.exists ? (
+            <Badge variant="error" size="sm">
+              Not found
+            </Badge>
+          ) : root.manifests === 0 ? (
+            <Badge variant="warning" size="sm">
+              No manifests
+            </Badge>
+          ) : (
+            <span className="shrink-0 text-muted-foreground text-xs">
+              {root.manifests} {root.manifests === 1 ? "manifest" : "manifests"}
+            </span>
+          )}
+        </span>
+      }
+      description={
+        <span className="flex min-w-0 flex-col gap-1">
+          <span className="break-all font-mono text-xs">{path}</span>
+          {root.repositories.map((repository) => (
+            <span key={repository.path} className="flex flex-wrap items-center gap-1.5 text-xs">
+              {/* Name the checkout when it is not the folder itself. */}
+              {repository.path !== root.directory && root.repositories.length > 1 ? (
+                <span className="font-medium text-foreground">{folderName(repository.path)}</span>
+              ) : null}
+              <span className="inline-flex items-center gap-1">
+                <GitBranchIcon className="size-3" />
+                {repository.branch ?? "detached"}
+              </span>
+              {repositoryBadges(repository).map((badge) => (
+                <Badge
+                  key={badge.label}
+                  variant={TONE_VARIANT[badge.tone]}
+                  size="sm"
+                  title={badge.title}
+                >
+                  {badge.label}
+                </Badge>
+              ))}
+            </span>
+          ))}
+        </span>
+      }
+      control={
+        <div className="flex shrink-0 items-center gap-1">
+          {root.repositories.length > 0 ? (
+            <Button
+              size="xs"
+              variant="outline"
+              aria-label={`Pull repositories in ${path}`}
+              disabled={busy}
+              onClick={onPull}
+            >
+              <DownloadIcon className="size-3" />
+              {pulling ? "Pulling…" : "Pull"}
+            </Button>
+          ) : null}
+          {root.exists ? (
+            <Button
+              size="icon-xs"
+              variant="ghost-muted"
+              aria-label={`Open ${path}`}
+              title="Open folder"
+              onClick={onOpen}
+            >
+              <FolderOpenIcon className="size-3" />
+            </Button>
+          ) : null}
+          <Button
+            size="icon-xs"
+            variant="ghost-muted"
+            aria-label={`Remove ${path}`}
+            title="Remove folder"
+            disabled={pulling}
+            onClick={onRemove}
+          >
+            <XIcon className="size-3" />
+          </Button>
+        </div>
+      }
+    />
   );
 }

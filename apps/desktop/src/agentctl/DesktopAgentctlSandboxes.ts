@@ -4,6 +4,7 @@ import {
   type AgentctlActionResult,
   type AgentctlCreateSandboxInput,
   type AgentctlManifestRoot,
+  type AgentctlPullResult,
   type AgentctlSandboxAction,
   type AgentctlSandboxManifest,
   type AgentctlSandboxesSnapshot,
@@ -12,6 +13,7 @@ import {
 import { resolveLoopbackSshHttpBaseUrl } from "@t3tools/ssh/tunnel";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -30,7 +32,7 @@ import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as AgentctlCli from "./AgentctlCli.ts";
 import { isConnectable, shouldCloseTunnel, sshAliasFor, type AgentResource } from "./agentState.ts";
 import { discoverManifests } from "./manifests.ts";
-import { pullManifestRepositories, resolveManifestRepository } from "./pullManifestRepositories.ts";
+import { describeManifestRoots, pullManifestRepositories } from "./manifestRepositories.ts";
 import {
   DEFAULT_SANDBOX_SETTINGS,
   IDLE_RUNTIME,
@@ -59,11 +61,17 @@ export class DesktopAgentctlSandboxes extends Context.Service<
     readonly create: (input: AgentctlCreateSandboxInput) => Effect.Effect<AgentctlActionResult>;
     readonly listManifests: Effect.Effect<ReadonlyArray<AgentctlSandboxManifest>>;
     readonly listManifestRoots: Effect.Effect<ReadonlyArray<AgentctlManifestRoot>>;
+    /** Fetches each manifest repository before describing it. */
+    readonly refreshManifestRoots: Effect.Effect<ReadonlyArray<AgentctlManifestRoot>>;
     readonly getSettings: Effect.Effect<AgentctlSandboxSettings>;
     /** Folders are merged here, so two views never overwrite each other's changes. */
     readonly addManifestRoot: (folder: string) => Effect.Effect<AgentctlSandboxSettings>;
     readonly removeManifestRoot: (folder: string) => Effect.Effect<AgentctlSandboxSettings>;
-    readonly pullManifestRoot: (folder: string) => Effect.Effect<AgentctlActionResult>;
+    readonly pullManifestRoots: (
+      folders: ReadonlyArray<string>,
+    ) => Effect.Effect<AgentctlPullResult>;
+    /** Whether a folder is configured and still a directory, before opening one the renderer names. */
+    readonly isManifestRootDirectory: (folder: string) => Effect.Effect<boolean>;
     /**
      * Starts watching agentctl. Call it once the app has loaded its shell
      * environment, so a macOS app opened from Finder finds agentctl on PATH.
@@ -108,6 +116,10 @@ export const make = Effect.gen(function* () {
   >();
   // Overlapping manifest folders can refer to the same repository.
   const pullLock = yield* Semaphore.make(1);
+  // Each Sandboxes page asks for a refresh when it opens; they share the one in flight.
+  const refreshing = yield* Ref.make<Deferred.Deferred<ReadonlyArray<AgentctlManifestRoot>> | null>(
+    null,
+  );
 
   const storePath = path.join(environment.stateDir, "agentctl-sandboxes.json");
   // A file T3 cannot read is kept aside rather than overwritten by the next save.
@@ -162,6 +174,7 @@ export const make = Effect.gen(function* () {
     status: "loading",
     error: null,
     sandboxes: [],
+    homeDirectory: environment.homeDirectory,
   });
   const refreshLock = yield* Semaphore.make(1);
 
@@ -261,7 +274,7 @@ export const make = Effect.gen(function* () {
       const error = listed.failure.message;
       yield* SubscriptionRef.update(snapshotRef, (snapshot): AgentctlSandboxesSnapshot =>
         snapshot.status === "loading"
-          ? { status: "unavailable", error, sandboxes: [] }
+          ? { ...snapshot, status: "unavailable", error, sandboxes: [] }
           : { ...snapshot, error },
       );
       return;
@@ -356,6 +369,11 @@ export const make = Effect.gen(function* () {
   const getSettings = Ref.get(store).pipe(
     Effect.map((document) => document.settings ?? DEFAULT_SANDBOX_SETTINGS),
   );
+  const isDirectory = (directory: string) =>
+    fileSystem.stat(directory).pipe(
+      Effect.map((info) => info.type === "Directory"),
+      Effect.orElseSucceed(() => false),
+    );
   const updateManifestRoots = (update: (roots: ReadonlyArray<string>) => ReadonlyArray<string>) =>
     updateStore((document) => {
       const settings = document.settings ?? DEFAULT_SANDBOX_SETTINGS;
@@ -417,33 +435,62 @@ export const make = Effect.gen(function* () {
     ),
     getSettings,
     listManifestRoots: getSettings.pipe(
-      Effect.flatMap((settings) =>
-        Effect.forEach(settings.manifestRoots, (directory) =>
-          resolveManifestRepository(directory).pipe(
-            Effect.orElseSucceed(() => null),
-            Effect.map((repository) => ({ directory, repository })),
-          ),
-        ),
-      ),
+      Effect.flatMap((settings) => describeManifestRoots(settings.manifestRoots, { fetch: false })),
       Effect.provide(context),
     ),
+    // Fetching takes no lock: Git guards its refs, and a slow remote must not hold up a pull.
+    refreshManifestRoots: Effect.gen(function* () {
+      const next = yield* Deferred.make<ReadonlyArray<AgentctlManifestRoot>>();
+      const running = yield* Ref.modify(refreshing, (current) =>
+        current === null ? [null, next] : [current, current],
+      );
+      if (running !== null) return yield* Deferred.await(running);
+      yield* getSettings.pipe(
+        Effect.flatMap((settings) =>
+          describeManifestRoots(settings.manifestRoots, { fetch: true }),
+        ),
+        Effect.provide(context),
+        Effect.exit,
+        Effect.flatMap((exit) => Deferred.done(next, exit)),
+        Effect.ensuring(Ref.set(refreshing, null)),
+        Effect.forkIn(scope),
+      );
+      return yield* Deferred.await(next);
+    }),
     addManifestRoot: (folder) =>
-      updateManifestRoots((roots) => (roots.includes(folder) ? roots : [...roots, folder])),
+      Effect.gen(function* () {
+        // "/a/" and "/a" are one folder.
+        const resolved = path.resolve(folder);
+        // Only directories, since a configured folder can be opened with the system handler.
+        if (!(yield* isDirectory(resolved))) return yield* getSettings;
+        return yield* updateManifestRoots((roots) =>
+          roots.some((root) => path.resolve(root) === resolved) ? roots : [...roots, resolved],
+        );
+      }),
     removeManifestRoot: (folder) =>
       updateManifestRoots((roots) => roots.filter((root) => root !== folder)),
-    pullManifestRoot: (folder) =>
+    pullManifestRoots: (folders) =>
       pullLock.withPermits(1)(
         Effect.gen(function* () {
           const settings = yield* getSettings;
-          if (!settings.manifestRoots.includes(folder)) {
-            return { error: "This manifest folder is no longer configured." };
+          if (folders.some((folder) => !settings.manifestRoots.includes(folder))) {
+            return {
+              error: "This manifest folder is no longer configured.",
+              repositories: [],
+            } satisfies AgentctlPullResult;
           }
-          return yield* pullManifestRepositories(folder).pipe(
+          return yield* pullManifestRepositories(folders).pipe(
             Effect.provide(context),
-            Effect.as<AgentctlActionResult>({ error: null }),
-            Effect.catch((error) => Effect.succeed({ error: error.message })),
+            Effect.map((repositories): AgentctlPullResult => ({ error: null, repositories })),
+            Effect.catch((error) => Effect.succeed({ error: error.message, repositories: [] })),
           );
         }),
+      ),
+    isManifestRootDirectory: (folder) =>
+      getSettings.pipe(
+        Effect.flatMap((settings) =>
+          settings.manifestRoots.includes(folder) ? isDirectory(folder) : Effect.succeed(false),
+        ),
       ),
     startPolling: Ref.getAndSet(polling, true).pipe(
       Effect.flatMap((started) =>

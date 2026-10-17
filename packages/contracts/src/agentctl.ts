@@ -66,6 +66,8 @@ export const AgentctlSandboxesSnapshot = Schema.Struct({
   status: Schema.Literals(["loading", "available", "unavailable"]),
   error: Schema.NullOr(Schema.String),
   sandboxes: Schema.Array(AgentctlSandbox),
+  /** The desktop user's home, so paths can be shown as `~/…`. */
+  homeDirectory: Schema.String,
 });
 export type AgentctlSandboxesSnapshot = typeof AgentctlSandboxesSnapshot.Type;
 
@@ -89,12 +91,48 @@ export const AgentctlSandboxSettings = Schema.Struct({
 });
 export type AgentctlSandboxSettings = typeof AgentctlSandboxSettings.Type;
 
+/** A checkout holding a manifest folder's manifests, as of its last fetch. */
+export const AgentctlRepositoryStatus = Schema.Struct({
+  path: Schema.String,
+  /** Null on a detached HEAD. */
+  branch: Schema.NullOr(Schema.String),
+  /** Null when the branch tracks nothing, so there is nothing to pull. */
+  upstream: Schema.NullOr(Schema.String),
+  /** Changed and untracked files. */
+  changes: Schema.Int,
+  /** Null when Git cannot compare with the upstream, such as one deleted on the remote. */
+  ahead: Schema.NullOr(Schema.Int),
+  behind: Schema.NullOr(Schema.Int),
+  /** Why the last fetch failed, when `behind` may be out of date. */
+  fetchError: Schema.NullOr(Schema.String),
+});
+export type AgentctlRepositoryStatus = typeof AgentctlRepositoryStatus.Type;
+
 export const AgentctlManifestRoot = Schema.Struct({
   directory: Schema.String,
-  /** The owning Git checkout, or null for a folder outside a repository. */
-  repository: Schema.NullOr(Schema.String),
+  exists: Schema.Boolean,
+  manifests: Schema.Int,
+  /** The folder's own checkout and those inside it; empty outside Git. */
+  repositories: Schema.Array(AgentctlRepositoryStatus),
 });
 export type AgentctlManifestRoot = typeof AgentctlManifestRoot.Type;
+
+export const AgentctlRepositoryPull = Schema.Struct({
+  repository: Schema.String,
+  outcome: Schema.Literals(["updated", "up-to-date", "failed"]),
+  /** Commits the pull brought in. */
+  commits: Schema.Int,
+  /** Git's own reason, when the pull failed. */
+  error: Schema.NullOr(Schema.String),
+});
+export type AgentctlRepositoryPull = typeof AgentctlRepositoryPull.Type;
+
+/** `error` is set when nothing could be pulled; each repository reports its own failure. */
+export const AgentctlPullResult = Schema.Struct({
+  error: Schema.NullOr(Schema.String),
+  repositories: Schema.Array(AgentctlRepositoryPull),
+});
+export type AgentctlPullResult = typeof AgentctlPullResult.Type;
 
 export const AgentctlCreateSandboxInput = Schema.Struct({
   manifestPath: Schema.String,
@@ -117,8 +155,13 @@ export interface DesktopAgentctlBridge {
   create: (input: AgentctlCreateSandboxInput) => Promise<AgentctlActionResult>;
   listManifests: () => Promise<readonly AgentctlSandboxManifest[]>;
   listManifestRoots: () => Promise<readonly AgentctlManifestRoot[]>;
+  /** Fetches each manifest repository first, so `behind` is current. */
+  refreshManifestRoots: () => Promise<readonly AgentctlManifestRoot[]>;
   getSettings: () => Promise<AgentctlSandboxSettings>;
   addManifestRoot: (folder: string) => Promise<AgentctlSandboxSettings>;
   removeManifestRoot: (folder: string) => Promise<AgentctlSandboxSettings>;
-  pullManifestRoot: (folder: string) => Promise<AgentctlActionResult>;
+  /** Fast-forwards every repository in these folders, each once. */
+  pullManifestRoots: (folders: readonly string[]) => Promise<AgentctlPullResult>;
+  /** Opens a configured folder in the system file manager. */
+  openManifestRoot: (folder: string) => Promise<boolean>;
 }
