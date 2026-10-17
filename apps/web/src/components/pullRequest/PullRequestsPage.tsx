@@ -286,28 +286,31 @@ export function PullRequestsPage() {
     setPage({ key: filterKey, size: PAGE_SIZE, cursors: null, regrown: [] });
   }
 
-  const listTargets = environmentQueries.flatMap(({ environmentId, projectIds }) => {
-    const cursors = sentCursors?.[environmentId];
-    if (sentCursors !== null && cursors === undefined && !sentRegrown.includes(environmentId)) {
-      return [];
-    }
-    return [
-      {
-        environmentId,
-        input: {
-          state: search.state,
-          involvement: search.involvement,
-          limit: pageSize,
-          ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
-          ...(projectIds ? { projectIds } : {}),
-          ...(search.host ? { host: search.host } : {}),
-          ...(hasFilters ? { filters } : {}),
-          ...(sentParsed.text ? { query: sentParsed.text } : {}),
-          ...(cursors === undefined ? {} : { cursors }),
-        } satisfies PullRequestListInput,
-      },
-    ];
-  });
+  const listTargets = environmentQueries.flatMap(
+    ({ environmentId, projectIds, excludeRepositories }) => {
+      const cursors = sentCursors?.[environmentId];
+      if (sentCursors !== null && cursors === undefined && !sentRegrown.includes(environmentId)) {
+        return [];
+      }
+      return [
+        {
+          environmentId,
+          input: {
+            state: search.state,
+            involvement: search.involvement,
+            limit: pageSize,
+            ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
+            ...(projectIds ? { projectIds } : {}),
+            ...(excludeRepositories ? { excludeRepositories } : {}),
+            ...(search.host ? { host: search.host } : {}),
+            ...(hasFilters ? { filters } : {}),
+            ...(sentParsed.text ? { query: sentParsed.text } : {}),
+            ...(cursors === undefined ? {} : { cursors }),
+          } satisfies PullRequestListInput,
+        },
+      ];
+    },
+  );
   const listQuery = usePullRequestList(listTargets);
 
   /**
@@ -315,18 +318,21 @@ export function PullRequestsPage() {
    * say which question it belongs to: mid-switch the text has already changed and the data has
    * not, and a search's answer would file itself under the workspace.
    */
-  const baselineTargets = environmentQueries.map(({ environmentId, projectIds }) => ({
-    environmentId,
-    input: {
-      state: search.state,
-      involvement: search.involvement,
-      limit: PAGE_SIZE,
-      ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
-      ...(projectIds ? { projectIds } : {}),
-      ...(search.host ? { host: search.host } : {}),
-      ...(menuFiltered ? { filters: menuFilters } : {}),
-    } satisfies PullRequestListInput,
-  }));
+  const baselineTargets = environmentQueries.map(
+    ({ environmentId, projectIds, excludeRepositories }) => ({
+      environmentId,
+      input: {
+        state: search.state,
+        involvement: search.involvement,
+        limit: PAGE_SIZE,
+        ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
+        ...(projectIds ? { projectIds } : {}),
+        ...(excludeRepositories ? { excludeRepositories } : {}),
+        ...(search.host ? { host: search.host } : {}),
+        ...(menuFiltered ? { filters: menuFilters } : {}),
+      } satisfies PullRequestListInput,
+    }),
+  );
   const baselineQuery = usePullRequestList(baselineTargets);
   const baselineEmpty =
     baselineQuery.data?.entries.length === 0 &&
@@ -335,7 +341,7 @@ export function PullRequestsPage() {
     baselineQuery.error === null;
   const facetTargets = (() => {
     if (!filtersOpen) return NO_LIST_TARGETS;
-    return environmentQueries.map(({ environmentId, projectIds }) => ({
+    return environmentQueries.map(({ environmentId, projectIds, excludeRepositories }) => ({
       environmentId,
       input: {
         state: "all",
@@ -343,19 +349,23 @@ export function PullRequestsPage() {
         limit: PAGE_SIZE,
         ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
         ...(projectIds ? { projectIds } : {}),
+        ...(excludeRepositories ? { excludeRepositories } : {}),
         ...(search.host ? { host: search.host } : {}),
       } satisfies PullRequestListInput,
     }));
   })();
   const facetQuery = usePullRequestList(facetTargets);
-  const filterOptionScope = environmentQueries.map(({ environmentId, projectIds }) => ({
-    environmentId,
-    input: {
-      ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
-      ...(projectIds ? { projectIds } : {}),
-      ...(search.host ? { host: search.host } : {}),
-    },
-  }));
+  const filterOptionScope = environmentQueries.map(
+    ({ environmentId, projectIds, excludeRepositories }) => ({
+      environmentId,
+      input: {
+        ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
+        ...(projectIds ? { projectIds } : {}),
+        ...(excludeRepositories ? { excludeRepositories } : {}),
+        ...(search.host ? { host: search.host } : {}),
+      },
+    }),
+  );
   const partitionsWanted = search.involvement === "all" && typedQuery.length === 0;
   const partitionTargets = (() => {
     // The main list goes first. Besides putting the visible rows on screen sooner, it proves
@@ -369,7 +379,7 @@ export function PullRequestsPage() {
       return { authored: NO_LIST_TARGETS, reviewing: NO_LIST_TARGETS };
     }
     const targetsFor = (involvement: PullRequestInvolvement) =>
-      environmentQueries.map(({ environmentId, projectIds }) => ({
+      environmentQueries.map(({ environmentId, projectIds, excludeRepositories }) => ({
         environmentId,
         input: {
           state: search.state,
@@ -377,6 +387,7 @@ export function PullRequestsPage() {
           limit: PAGE_SIZE,
           ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
           ...(projectIds ? { projectIds } : {}),
+          ...(excludeRepositories ? { excludeRepositories } : {}),
           ...(search.host ? { host: search.host } : {}),
           ...(menuFiltered ? { filters: menuFilters } : {}),
         } satisfies PullRequestListInput,

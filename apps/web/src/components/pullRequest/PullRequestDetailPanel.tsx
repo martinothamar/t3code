@@ -138,7 +138,7 @@ import {
   shouldRefreshPullRequestActivity,
   stripPullRequestHandoffReferences,
 } from "./pullRequestDetail.logic";
-import { resolvePickableEnvironments } from "./pullRequestProjectAssignment.logic";
+import { resolveRepositoryCopies } from "./workspaceRepositoryAssignment.logic";
 import { PullRequestChecksPopover } from "./PullRequestChecksPopover";
 import {
   PullRequestActorLabel,
@@ -586,8 +586,13 @@ export function PullRequestDetailPanel({
   const { environments } = useEnvironments();
   const pickableEnvironments =
     context === "page"
-      ? resolvePickableEnvironments(
-          { environmentId, projectId: reference.projectId },
+      ? resolveRepositoryCopies(
+          {
+            environmentId,
+            projectId: reference.projectId,
+            host: reference.host,
+            repository: reference.repository,
+          },
           projects,
           environments.map((environment) => ({
             environmentId: environment.environmentId,

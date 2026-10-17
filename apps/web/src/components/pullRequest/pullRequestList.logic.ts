@@ -495,6 +495,7 @@ export function mergePullRequestDiffStats(
   stats: ReadonlyArray<{
     readonly environmentId: string;
     readonly projectId: string;
+    readonly repository: string;
     readonly number: number;
     readonly additions: number;
     readonly deletions: number;
@@ -514,8 +515,9 @@ export function mergePullRequestDiffStats(
 export const pullRequestDiffStatKey = (row: {
   readonly environmentId: string;
   readonly projectId: string;
+  readonly repository: string;
   readonly number: number;
-}) => `${row.environmentId} ${row.projectId} ${row.number}`;
+}) => `${row.environmentId} ${row.projectId} ${row.repository} ${row.number}`;
 
 export interface MergedPullRequestList {
   readonly viewers: PullRequestViewers;
