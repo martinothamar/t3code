@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
+  EnvironmentId,
   type AgentctlSandboxesSnapshot,
   type DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
@@ -444,6 +445,32 @@ describe("DesktopAgentctlSandboxes", () => {
         const result = yield* sandboxes.pullManifestRoots(["/not-configured"]);
         assert.strictEqual(result.error, "This manifest folder is no longer configured.");
         assert.isFalse(yield* sandboxes.isManifestRootDirectory("/not-configured"));
+      }),
+    ),
+  );
+
+  it.effect("remembers a seeded environment until the Sandbox gets a new one", () =>
+    withSandboxes((sandboxes, harness) =>
+      Effect.gen(function* () {
+        yield* until(sandboxes, discovered("env-1"));
+        // Another environment's marker is ignored.
+        yield* sandboxes.markSettingsSeeded(NAME, EnvironmentId.make("env-other"));
+        assert.isFalse((yield* sandboxes.snapshot).sandboxes[0]?.settingsSeeded);
+        yield* sandboxes.markSettingsSeeded(NAME, EnvironmentId.make("env-1"));
+        assert.isTrue((yield* sandboxes.snapshot).sandboxes[0]?.settingsSeeded);
+        // Reaching the same environment again keeps the marker.
+        yield* sandboxes.stop(NAME);
+        yield* sandboxes.refresh;
+        yield* sandboxes.start(NAME);
+        yield* sandboxes.refresh;
+        assert.isTrue((yield* sandboxes.snapshot).sandboxes[0]?.settingsSeeded);
+        // A reset T3 home is a new environment, which is seeded again.
+        yield* sandboxes.stop(NAME);
+        yield* sandboxes.refresh;
+        harness.environment.id = "env-2";
+        yield* sandboxes.start(NAME);
+        const snapshot = yield* until(sandboxes, discovered("env-2"));
+        assert.isFalse(snapshot.sandboxes[0]?.settingsSeeded);
       }),
     ),
   );

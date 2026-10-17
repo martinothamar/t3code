@@ -9,6 +9,7 @@ import {
   type AgentctlSandboxManifest,
   type AgentctlSandboxesSnapshot,
   type DesktopSshEnvironmentTarget,
+  type EnvironmentId,
 } from "@t3tools/contracts";
 import { resolveLoopbackSshHttpBaseUrl } from "@t3tools/ssh/tunnel";
 import * as Clock from "effect/Clock";
@@ -70,6 +71,11 @@ export class DesktopAgentctlSandboxes extends Context.Service<
     readonly pullManifestRoots: (
       folders: ReadonlyArray<string>,
     ) => Effect.Effect<AgentctlPullResult>;
+    /** Remembers that this environment of the Sandbox got its preference settings. */
+    readonly markSettingsSeeded: (
+      name: string,
+      environmentId: EnvironmentId,
+    ) => Effect.Effect<void>;
     /** Whether a folder is configured and still a directory, before opening one the renderer names. */
     readonly isManifestRootDirectory: (folder: string) => Effect.Effect<boolean>;
     /**
@@ -250,8 +256,16 @@ export const make = Effect.gen(function* () {
           sandboxes: {
             ...document.sandboxes,
             // Registering the resolved target keeps the SSH connection from
-            // recording a changed profile on every connect.
-            [name]: { environmentId: descriptor.environmentId, sshTarget },
+            // recording a changed profile on every connect. A recreated
+            // Sandbox has a new environment, which is seeded again.
+            [name]: {
+              environmentId: descriptor.environmentId,
+              sshTarget,
+              ...(document.sandboxes?.[name]?.environmentId === descriptor.environmentId &&
+              document.sandboxes[name].settingsSeeded === true
+                ? { settingsSeeded: true }
+                : {}),
+            },
           },
         }));
         yield* updateRuntime(name, (runtime) => ({
@@ -486,6 +500,16 @@ export const make = Effect.gen(function* () {
           );
         }),
       ),
+    markSettingsSeeded: (name, environmentId) =>
+      updateStore((document) => {
+        const record = document.sandboxes?.[name];
+        return record?.environmentId === environmentId
+          ? {
+              ...document,
+              sandboxes: { ...document.sandboxes, [name]: { ...record, settingsSeeded: true } },
+            }
+          : document;
+      }).pipe(Effect.andThen(publish)),
     isManifestRootDirectory: (folder) =>
       getSettings.pipe(
         Effect.flatMap((settings) =>

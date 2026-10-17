@@ -38,6 +38,7 @@ gives it.
   and worktree mode are not available there. **Pull Requests** lists the pull requests of the
   repositories checked out in it, and threads show the status of the pull requests linked to them.
   See [Review and merge](./source-control.md#review-and-merge).
+- A new Sandbox starts with the preferences you changed in Settings on this computer, such as auto-settle and branch naming. T3 Code copies them once, the first time it connects, and never overwrites a setting you changed in the Sandbox.
 - A Sandbox always has its project: if you remove it, it comes back the next time T3 Code connects.
 - Threads started from T3 Code run outside agentctl Sessions. They do not appear in `agentctl turns`
   or the agentctl TUI, and the manifest's default model does not apply: choose the model in T3 Code.

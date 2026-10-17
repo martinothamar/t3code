@@ -49,6 +49,8 @@ export const AgentctlSandbox = Schema.Struct({
   sshTarget: Schema.NullOr(DesktopSshEnvironmentTargetSchema),
   /** Known once T3 has reached the Sandbox's server; null before that. */
   environmentId: Schema.NullOr(EnvironmentId),
+  /** Whether this environment already got the user's preference settings from this computer. */
+  settingsSeeded: Schema.Boolean,
   /** Where its agents work, and so its project's root; known once T3 has reached it. */
   workingDirectory: Schema.NullOr(Schema.String),
   /** Why T3 could not reach a Ready Sandbox, such as a missing SSH config include. */
@@ -162,6 +164,8 @@ export interface DesktopAgentctlBridge {
   removeManifestRoot: (folder: string) => Promise<AgentctlSandboxSettings>;
   /** Fast-forwards every repository in these folders, each once. */
   pullManifestRoots: (folders: readonly string[]) => Promise<AgentctlPullResult>;
+  /** Records that the Sandbox's environment got its preference settings, so they are not copied again. */
+  markSettingsSeeded: (name: string, environmentId: EnvironmentId) => Promise<void>;
   /** Opens a configured folder in the system file manager. */
   openManifestRoot: (folder: string) => Promise<boolean>;
 }

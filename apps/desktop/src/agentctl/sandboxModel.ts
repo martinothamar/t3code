@@ -22,6 +22,8 @@ import {
 export const SandboxRecord = Schema.Struct({
   environmentId: EnvironmentId,
   sshTarget: DesktopSshEnvironmentTargetSchema,
+  /** The user's preference settings were copied into this environment once; see the web coordinator. */
+  settingsSeeded: Schema.optionalKey(Schema.Boolean),
 });
 export type SandboxRecord = typeof SandboxRecord.Type;
 
@@ -100,6 +102,7 @@ export function buildSandbox(
     sshAccess: hasSshAccess(agent),
     sshTarget: record?.sshTarget ?? null,
     environmentId: record?.environmentId ?? null,
+    settingsSeeded: record?.settingsSeeded ?? false,
     workingDirectory: runtime.workingDirectory,
     connectError: state.phase === "ready" ? runtime.connectError : null,
     action: runtime.action,

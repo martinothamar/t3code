@@ -6,6 +6,7 @@ import {
   AgentctlSandboxManifest,
   AgentctlSandboxSettings,
   AgentctlSandboxesSnapshot,
+  EnvironmentId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -44,6 +45,16 @@ const pullManifestRoots = DesktopIpc.makeIpcMethod({
   result: AgentctlPullResult,
   handler: (folders) =>
     Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) => sandboxes.pullManifestRoots(folders)),
+});
+
+const markSettingsSeeded = DesktopIpc.makeIpcMethod({
+  channel: AGENTCTL_CHANNELS.markSettingsSeeded,
+  payload: Schema.Struct({ name: Schema.String, environmentId: EnvironmentId }),
+  result: Schema.Void,
+  handler: ({ name, environmentId }) =>
+    Effect.flatMap(DesktopAgentctlSandboxes, (sandboxes) =>
+      sandboxes.markSettingsSeeded(name, environmentId),
+    ),
 });
 
 const openManifestRoot = DesktopIpc.makeIpcMethod({
@@ -107,6 +118,7 @@ export const installAgentctlIpcHandlers = Effect.fn("desktop.ipc.installAgentctl
     yield* ipc.handle(lifecycle(AGENTCTL_CHANNELS.remove, "remove"));
     yield* ipc.handle(create);
     yield* ipc.handle(pullManifestRoots);
+    yield* ipc.handle(markSettingsSeeded);
     yield* ipc.handle(openManifestRoot);
     yield* ipc.handle(refreshManifestRoots);
     yield* ipc.handle(listManifests);

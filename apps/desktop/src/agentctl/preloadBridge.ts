@@ -19,6 +19,8 @@ export function makeAgentctlBridge(ipcRenderer: IpcRenderer): DesktopAgentctlBri
     refreshManifestRoots: () => ipcRenderer.invoke(AGENTCTL_CHANNELS.refreshManifestRoots),
     pullManifestRoots: (folders) =>
       ipcRenderer.invoke(AGENTCTL_CHANNELS.pullManifestRoots, folders),
+    markSettingsSeeded: (name, environmentId) =>
+      ipcRenderer.invoke(AGENTCTL_CHANNELS.markSettingsSeeded, { name, environmentId }),
     openManifestRoot: (folder) => ipcRenderer.invoke(AGENTCTL_CHANNELS.openManifestRoot, folder),
   };
 }
