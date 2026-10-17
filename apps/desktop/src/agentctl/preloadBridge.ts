@@ -15,5 +15,6 @@ export function makeAgentctlBridge(ipcRenderer: IpcRenderer): DesktopAgentctlBri
     addManifestRoot: (folder) => ipcRenderer.invoke(AGENTCTL_CHANNELS.addManifestRoot, folder),
     removeManifestRoot: (folder) =>
       ipcRenderer.invoke(AGENTCTL_CHANNELS.removeManifestRoot, folder),
+    pullManifestRoot: (folder) => ipcRenderer.invoke(AGENTCTL_CHANNELS.pullManifestRoot, folder),
   };
 }

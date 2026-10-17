@@ -7,7 +7,7 @@ import {
   type AgentctlSandboxSettings,
 } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
-import { FolderPlusIcon, PlusIcon, XIcon } from "lucide-react";
+import { DownloadIcon, FolderPlusIcon, PlusIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { SettingsRow, SettingsSection } from "../components/settings/settingsLayout";
@@ -15,6 +15,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { SidebarInset } from "../components/ui/sidebar";
+import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../components/WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../components/WorkspacePageContainer";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
@@ -236,6 +237,7 @@ function SandboxRow({ sandbox }: { readonly sandbox: AgentctlSandbox }) {
 /** Where "New Sandbox" looks for manifests. */
 function ManifestFolders() {
   const [settings, setSettings] = useState<AgentctlSandboxSettings | null>(null);
+  const [pulling, setPulling] = useState<string | null>(null);
 
   useEffect(() => {
     void readAgentctlBridge()
@@ -255,6 +257,25 @@ function ManifestFolders() {
   const removeRoot = async (folder: string) => {
     const saved = await readAgentctlBridge()?.removeManifestRoot(folder);
     if (saved) setSettings(saved);
+  };
+  const pullRoot = async (folder: string) => {
+    const bridge = readAgentctlBridge();
+    if (bridge === null || pulling !== null) return;
+    setPulling(folder);
+    try {
+      const result = await bridge.pullManifestRoot(folder);
+      toastManager.add(
+        stackedThreadToast({
+          type: result.error === null ? "success" : "error",
+          title: result.error === null ? "Repositories pulled" : "Could not pull repositories",
+          description: result.error ?? folder,
+        }),
+      );
+    } catch {
+      toastManager.add(stackedThreadToast({ type: "error", title: "Could not pull repositories" }));
+    } finally {
+      setPulling(null);
+    }
   };
 
   return (
@@ -278,14 +299,27 @@ function ManifestFolders() {
             key={root}
             title={<span className="truncate font-mono text-xs">{root}</span>}
             control={
-              <Button
-                size="icon-xs"
-                variant="ghost-muted"
-                aria-label={`Remove ${root}`}
-                onClick={() => void removeRoot(root)}
-              >
-                <XIcon className="size-3" />
-              </Button>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  aria-label={`Pull repositories in ${root}`}
+                  disabled={pulling !== null}
+                  onClick={() => void pullRoot(root)}
+                >
+                  <DownloadIcon className="size-3" />
+                  {pulling === root ? "Pulling…" : "Pull"}
+                </Button>
+                <Button
+                  size="icon-xs"
+                  variant="ghost-muted"
+                  aria-label={`Remove ${root}`}
+                  disabled={pulling === root}
+                  onClick={() => void removeRoot(root)}
+                >
+                  <XIcon className="size-3" />
+                </Button>
+              </div>
             }
           />
         ))

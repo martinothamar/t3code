@@ -112,4 +112,5 @@ export interface DesktopAgentctlBridge {
   getSettings: () => Promise<AgentctlSandboxSettings>;
   addManifestRoot: (folder: string) => Promise<AgentctlSandboxSettings>;
   removeManifestRoot: (folder: string) => Promise<AgentctlSandboxSettings>;
+  pullManifestRoot: (folder: string) => Promise<AgentctlActionResult>;
 }

@@ -423,6 +423,15 @@ describe("DesktopAgentctlSandboxes", () => {
     ),
   );
 
+  it.effect("refuses to pull a folder that is not configured", () =>
+    withSandboxes((sandboxes) =>
+      Effect.gen(function* () {
+        const result = yield* sandboxes.pullManifestRoot("/not-configured");
+        assert.strictEqual(result.error, "This manifest folder is no longer configured.");
+      }),
+    ),
+  );
+
   it.effect("sets an unreadable state file aside instead of overwriting it", () =>
     withSandboxes(
       (sandboxes, _harness, stateDir) =>
