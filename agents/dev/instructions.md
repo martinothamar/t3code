@@ -120,8 +120,8 @@ placeholders this Sandbox already holds, and keep nested secret files outside an
 
 ```sh
 printf '%s\n' "$AGENT_CLAUDE_ACCESS_TOKEN" | agentctl claude login --from-stdin
-printf 'GITHUB_TOKEN=%s\nGIT_USER_NAME=%s\nGIT_USER_EMAIL=%s\n' \
-  "$GITHUB_TOKEN" "$GIT_USER_NAME" "$GIT_USER_EMAIL" > ~/nested.env
+printf 'GITHUB_TOKEN=%s\nAIVAR_API_KEY=%s\nGIT_USER_NAME=%s\nGIT_USER_EMAIL=%s\n' \
+  "$GITHUB_TOKEN" "$AIVAR_API_KEY" "$GIT_USER_NAME" "$GIT_USER_EMAIL" > ~/nested.env
 ```
 
 To try changes to this Agent's own image or manifest, apply the `nested` variant from the
@@ -135,6 +135,8 @@ agentctl delete agent/t3code-dev-nested
 ```
 
 Other nested Agents must fit beside it, so give them at most 2 CPUs and 3 GiB of memory.
+The `mini` Agent's `nested` variant does:
+`agentctl apply -f agents/mini/agent.nested.yaml --env-file ~/nested.env --wait`.
 
 Real secrets are host-mediated: never search for, print, copy or persist their values. The
 placeholders above are inert. Git identity is explicitly selected non-secret data.
