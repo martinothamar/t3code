@@ -458,7 +458,7 @@ export interface ChatComposerProps {
   terminalOpen: boolean;
   gitCwd: string | null;
   pullRequestProjectId: ProjectId | null;
-  pullRequestRepository: string | null;
+  pullRequestRepositories: ReadonlyArray<string>;
   threadPullRequests: ReadonlyArray<ThreadPullRequestLink> | undefined;
   restingControlsHost: HTMLDivElement | null;
   restingControlsHaveLeadingContext: boolean;
@@ -594,7 +594,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     terminalOpen,
     gitCwd,
     pullRequestProjectId,
-    pullRequestRepository,
+    pullRequestRepositories,
     threadPullRequests,
     restingControlsHost,
     restingControlsHaveLeadingContext,
@@ -1201,7 +1201,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     gitCwd,
     activeThreadId,
     pullRequestProjectId,
-    pullRequestRepository,
+    pullRequestRepositories,
     threadPullRequests,
     planModeUiEnabled,
     compactSlashCommandAvailable,

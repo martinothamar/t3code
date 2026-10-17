@@ -1,4 +1,9 @@
-import type { EnvironmentId, PullRequestRef, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  PullRequestRef,
+  RepositoryIdentity,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { type MouseEvent } from "react";
@@ -27,17 +32,24 @@ export {
   changeRequestRepositoryUrl,
 } from "@t3tools/shared/changeRequestUrl";
 
+/** The repositories a project serves: its own, or those checked out in a workspace folder. */
+function projectRepositories(project: EnvironmentProject): ReadonlyArray<RepositoryIdentity> {
+  return project.repositoryIdentity != null
+    ? [project.repositoryIdentity]
+    : (project.workspaceRepositories ?? []);
+}
+
 export function findProjectForChangeRequest(
   projects: ReadonlyArray<EnvironmentProject>,
   link: ChangeRequestLink,
 ): EnvironmentProject | undefined {
-  return projects.find((project) => {
-    const identity = project.repositoryIdentity;
-    return (
-      identity?.provider !== undefined &&
-      sourceControlClients.get(identity.provider).isChangeRequestInRepository(identity, link)
-    );
-  });
+  return projects.find((project) =>
+    projectRepositories(project).some(
+      (identity) =>
+        identity.provider !== undefined &&
+        sourceControlClients.get(identity.provider).isChangeRequestInRepository(identity, link),
+    ),
+  );
 }
 
 export function resolvePullRequestPreviewTarget({
@@ -87,13 +99,13 @@ export function findProjectOnChangeRequestHost(
 ): EnvironmentProject | undefined {
   const own = findProjectForChangeRequest(projects, link);
   if (own !== undefined) return own;
-  return projects.find((project) => {
-    const identity = project.repositoryIdentity;
-    return (
-      identity?.provider !== undefined &&
-      sourceControlClients.get(identity.provider).canReadChangeRequestOnHost(identity, link)
-    );
-  });
+  return projects.find((project) =>
+    projectRepositories(project).some(
+      (identity) =>
+        identity.provider !== undefined &&
+        sourceControlClients.get(identity.provider).canReadChangeRequestOnHost(identity, link),
+    ),
+  );
 }
 
 export function shouldOpenPullRequestExternally(
