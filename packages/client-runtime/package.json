@@ -291,6 +291,10 @@
       "types": "./src/state/shell.ts",
       "default": "./src/state/shell.ts"
     },
+    "./state/sandboxes": {
+      "types": "./src/state/sandboxes.ts",
+      "default": "./src/state/sandboxes.ts"
+    },
     "./state/source-control": {
       "types": "./src/state/sourceControl.ts",
       "default": "./src/state/sourceControl.ts"
@@ -502,6 +506,18 @@
     "./provider-clients": {
       "types": "./src/providerClients.ts",
       "default": "./src/providerClients.ts"
+    },
+    "./sandboxes": {
+      "types": "./src/sandboxes/environments.ts",
+      "default": "./src/sandboxes/environments.ts"
+    },
+    "./sandboxes/projects": {
+      "types": "./src/sandboxes/projects.ts",
+      "default": "./src/sandboxes/projects.ts"
+    },
+    "./sandboxes/settings-seed": {
+      "types": "./src/sandboxes/settingsSeed.ts",
+      "default": "./src/sandboxes/settingsSeed.ts"
     }
   },
   "scripts": {

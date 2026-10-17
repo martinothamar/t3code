@@ -77,6 +77,7 @@ import {
   type ServerClientSessionRecord,
 } from "~/environments/primary";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
+import { sandboxForTarget } from "@t3tools/client-runtime/sandboxes";
 import { useUiStateStore } from "~/uiStateStore";
 import {
   resolveServerConfigVersionMismatch,
@@ -171,7 +172,10 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
     (environment) => environment.entry.target._tag !== "PrimaryConnectionTarget",
   );
   const listedEnvironments = savedEnvironments.filter(
-    (environment) => !isDesktopLocalConnectionTarget(environment.entry.target),
+    (environment) =>
+      !isDesktopLocalConnectionTarget(environment.entry.target) &&
+      // agentctl Sandboxes are managed from their own page.
+      sandboxForTarget(environment.entry.target) === null,
   );
   const savedUpdateStates = useAtomValue(
     environmentUpdateStatesAtom(
