@@ -1,0 +1,18 @@
+#!/bin/sh
+# Starts the desktop session once the display is up: a panel and a window manager.
+set -eu
+
+: "${AGENT_DESKTOP_DISPLAY:=:1}"
+export DISPLAY=$AGENT_DESKTOP_DISPLAY
+# Programs started from the desktop, such as its terminal, get no locale from systemd otherwise.
+export LC_ALL=${LC_ALL:-C.UTF-8}
+
+for _ in $(seq 1 100); do
+    xdpyinfo >/dev/null 2>&1 && break
+    sleep 0.1
+done
+xdpyinfo >/dev/null 2>&1 || { echo "desktop session: $DISPLAY never came up" >&2; exit 1; }
+
+# -c pins tint2 to the packaged configuration instead of copying a template into the home.
+tint2 -c /etc/xdg/tint2/tint2rc >/dev/null 2>&1 &
+exec openbox
