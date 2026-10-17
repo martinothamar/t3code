@@ -1,5 +1,6 @@
 import {
   composerPullRequestsFromLinks,
+  composerPullRequestKey,
   filterComposerPullRequestMatches,
 } from "@t3tools/shared/composerPullRequestMatches";
 import { resolveFilesystemReadAccess } from "@t3tools/client-runtime/state/filesystem";
@@ -83,7 +84,8 @@ export function useDebouncedValue<A>(value: A, delayMs: number): A {
 export function useComposerPullRequestSearch(input: {
   environmentId: EnvironmentId | null;
   projectId: ProjectId | null;
-  repository: string | null;
+  /** The project's own repositories: its own, or a workspace folder's checkouts. */
+  repositories: ReadonlyArray<string>;
   threadPullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
   query: string | null;
 }) {
@@ -97,7 +99,9 @@ export function useComposerPullRequestSearch(input: {
     query !== null &&
     input.environmentId !== null &&
     input.projectId !== null &&
-    input.repository !== null;
+    input.repositories.length > 0;
+  // A number typed in full is looked up directly only where it can name one repository.
+  const repository = input.repositories.length === 1 ? (input.repositories[0] ?? null) : null;
   const numeric = query !== null && /^\d*$/.test(query);
   const list = useEnvironmentQuery(
     ready
@@ -115,13 +119,18 @@ export function useComposerPullRequestSearch(input: {
   const number = numeric && query ? Number(query) : null;
   const hasExact = list.data?.entries.some(
     (entry) =>
-      entry.number === number && entry.repository.toLowerCase() === input.repository?.toLowerCase(),
+      entry.number === number && entry.repository.toLowerCase() === repository?.toLowerCase(),
   );
   const exact = useEnvironmentQuery(
-    ready && number !== null && Number.isSafeInteger(number) && number > 0 && !hasExact
+    ready &&
+      repository !== null &&
+      number !== null &&
+      Number.isSafeInteger(number) &&
+      number > 0 &&
+      !hasExact
       ? composerPullRequests.detail({
           environmentId: input.environmentId!,
-          input: { projectId: input.projectId!, repository: input.repository!, number },
+          input: { projectId: input.projectId!, repository, number },
         })
       : null,
   );
@@ -132,22 +141,28 @@ export function useComposerPullRequestSearch(input: {
         entries: [...(exact.data ? [exact.data] : []), ...(list.data?.entries ?? [])],
         linked,
         projectId: input.projectId!,
-        repository: input.repository!,
+        repositories: input.repositories,
         query: query ?? "",
         limit: 20,
       });
     }
+    const repositories = new Set(
+      input.repositories.map((candidate) => candidate.trim().toLowerCase()),
+    );
     const words = (query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
     const found = [...(exact.data ? [exact.data] : []), ...(list.data?.entries ?? [])].filter(
       (entry) =>
         entry.projectId === input.projectId &&
-        entry.repository.toLowerCase() === input.repository?.toLowerCase() &&
+        repositories.has(entry.repository.trim().toLowerCase()) &&
         words.every((word) =>
           `${entry.title} ${entry.headBranch} ${entry.baseBranch}`.toLowerCase().includes(word),
         ),
     );
-    const unique = new Map<number, (typeof found)[number]>();
-    for (const entry of found) if (!unique.has(entry.number)) unique.set(entry.number, entry);
+    const unique = new Map<string, (typeof found)[number]>();
+    for (const entry of found) {
+      const key = composerPullRequestKey(entry);
+      if (!unique.has(key)) unique.set(key, entry);
+    }
     return [...unique.values()]
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       .slice(0, 20);
