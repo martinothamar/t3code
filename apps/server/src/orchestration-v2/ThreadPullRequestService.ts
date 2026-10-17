@@ -65,7 +65,10 @@ const resolveProjectForPullRequestDiscovery = Effect.fn(
   "ThreadPullRequestServiceV2.resolveProject",
 )(function* (
   project: OrchestrationProjectShell,
-  repositoryIdentities: RepositoryIdentityResolver.RepositoryIdentityResolver["Service"],
+  repositoryIdentities: Pick<
+    RepositoryIdentityResolver.RepositoryIdentityResolver["Service"],
+    "resolve"
+  >,
   options?: { readonly refresh?: boolean },
 ) {
   // Post-turn discovery refreshes 15-minute identity caches because agents may add remotes.
