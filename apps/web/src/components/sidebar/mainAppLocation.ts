@@ -7,7 +7,9 @@ export function isAppModalPage(pathname: string) {
 }
 
 export function isSidebarUtilityPage(pathname: string) {
-  return pathname.startsWith("/projects/") || pathname === "/pull-requests";
+  return (
+    pathname.startsWith("/projects/") || pathname === "/sandboxes" || pathname === "/pull-requests"
+  );
 }
 
 let mainAppHref: string | null = null;
