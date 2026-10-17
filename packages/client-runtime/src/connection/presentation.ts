@@ -1,6 +1,8 @@
 import type { ServerConfig } from "@t3tools/contracts";
+import { environmentServerUrl } from "@t3tools/shared/advertisedEndpoint";
 import * as Option from "effect/Option";
 
+import { sandboxForTarget } from "../sandboxes/environments.ts";
 import type { ConnectionCatalogEntry } from "./catalog.ts";
 import type { ConnectionTarget, SupervisorConnectionState } from "./model.ts";
 import { connectionRouteId, connectionRoutes, routeHttpBaseUrl } from "./routes.ts";
@@ -97,13 +99,15 @@ export function connectionStatusTitle(connection: EnvironmentConnectionPresentat
 /**
  * The T3 Connect address wins whenever it is known: it works for agents anywhere, while the
  * connected route is often a LAN or loopback address. SSH routes ride a local forward that
- * disappears with the client, so they have no stable address.
+ * disappears with the client, so they have no stable address. A Sandbox's server sits behind
+ * its host's relay, which its MCP sign-in cannot see through.
  */
 export function environmentMcpUrl(input: {
   readonly entry: ConnectionCatalogEntry;
   readonly relayHttpBaseUrl?: string | undefined;
   readonly connectedTarget?: ConnectionTarget | null | undefined;
 }): string | null {
+  if (sandboxForTarget(input.entry.target) !== null) return null;
   const relayMcpUrl = input.relayHttpBaseUrl ? mcpUrlFromBase(input.relayHttpBaseUrl) : null;
   if (relayMcpUrl !== null) return relayMcpUrl;
   const connectedRouteId = input.connectedTarget ? connectionRouteId(input.connectedTarget) : null;
@@ -120,16 +124,11 @@ export function environmentMcpUrl(input: {
 }
 
 function mcpUrlFromBase(httpBaseUrl: string): string | null {
-  let url: URL;
   try {
-    url = new URL(httpBaseUrl);
+    return environmentServerUrl(httpBaseUrl, "/mcp").toString();
   } catch {
     return null;
   }
-  url.pathname = "/mcp";
-  url.search = "";
-  url.hash = "";
-  return url.toString();
 }
 
 export function connectionCatalogDisplayUrl(entry: ConnectionCatalogEntry): string | null {

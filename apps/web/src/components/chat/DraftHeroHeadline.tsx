@@ -50,6 +50,7 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
 import { DraftProjectName } from "./DraftProjectName";
+import { SandboxHostLine } from "../../sandboxes/SandboxHostSuffix";
 import { DraftHeroProjectHeading } from "./DraftHeroProjectHeading";
 import { TriageDraftHero } from "./TriageDraftHero";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
@@ -340,6 +341,11 @@ export function DraftHeroHeadline({
                 <Tooltip>
                   <TooltipTrigger render={<span className="min-w-0 flex-1 text-sm" />}>
                     <DraftProjectName value={item.label} />
+                    {entry?.group.memberProjects.length === 1 ? (
+                      <SandboxHostLine
+                        environmentId={entry.group.memberProjects[0]!.environmentId}
+                      />
+                    ) : null}
                   </TooltipTrigger>
                   <TooltipPopup side="top">{item.label}</TooltipPopup>
                 </Tooltip>

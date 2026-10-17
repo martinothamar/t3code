@@ -1,4 +1,5 @@
 import type { PreparedConnection } from "@t3tools/client-runtime/connection";
+import { sandboxForTarget } from "@t3tools/client-runtime/sandboxes";
 import type { EnvironmentId } from "@t3tools/contracts";
 
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
@@ -25,12 +26,17 @@ export function folderDropTarget(input: {
     : "remote";
 }
 
-// A direct saved connection to loopback shares the desktop's filesystem; WSL backends and SSH forwards do not.
+// A direct saved connection to loopback shares the desktop's filesystem; WSL backends, SSH forwards
+// and Sandboxes a loopback host relays do not.
 function isSavedLoopbackConnection({
   target,
   httpBaseUrl,
 }: Pick<PreparedConnection, "target" | "httpBaseUrl">): boolean {
-  if (target._tag !== "BearerConnectionTarget" || isDesktopLocalConnectionTarget(target)) {
+  if (
+    target._tag !== "BearerConnectionTarget" ||
+    isDesktopLocalConnectionTarget(target) ||
+    sandboxForTarget(target) !== null
+  ) {
     return false;
   }
   try {

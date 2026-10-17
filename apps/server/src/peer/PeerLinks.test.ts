@@ -457,6 +457,30 @@ it.effect("reads one stored link without asking the peer", () =>
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
+it.effect("moves a link to the peer's new address, keeping its token, and only to that peer", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const b = yield* serveB(box);
+      const a = yield* makeA(laptop);
+      const pairing = yield* b.auth.issuePairingCredential();
+      yield* a.links.link({ url: b.url, pairingCode: pairing.credential, access: "auto" });
+      const before = Option.getOrThrow(yield* a.links.get(box.environmentId));
+      const moved = b.url.replace("127.0.0.1", "localhost");
+
+      expect(yield* a.links.relocate(box.environmentId, [moved])).toBe(true);
+      const after = Option.getOrThrow(yield* a.links.get(box.environmentId));
+      expect(after.urls).toEqual([new URL(moved).origin]);
+      expect(after.expiresAt).toEqual(before.expiresAt);
+      yield* probe(a);
+
+      yield* Ref.set(b.descriptor, descriptorOf("environment-impostor", "Impostor"));
+      yield* a.links.relocate(box.environmentId, [b.url]).pipe(Effect.flip);
+      expect(Option.getOrThrow(yield* a.links.get(box.environmentId)).urls).toEqual(after.urls);
+      expect(yield* a.links.relocate(laptop.environmentId, [b.url])).toBe(false);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
 it.effect("a linked peer that is renamed shows its new name", () =>
   Effect.scoped(
     Effect.gen(function* () {
