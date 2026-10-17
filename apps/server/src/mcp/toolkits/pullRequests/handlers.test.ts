@@ -2073,7 +2073,8 @@ describe("source control tools", () => {
       const harness = yield* makeHarness({
         thread: branchThread,
         pullRequests: {
-          replyToThread: (input) => Effect.sync(() => calls.push(`reply ${input.threadId}`)),
+          replyToThread: (input) =>
+            Effect.sync(() => calls.push(`reply ${input.threadId} ${JSON.stringify(input.body)}`)),
           setThreadResolution: (input) =>
             input.threadId === "locked-thread"
               ? Effect.fail(
@@ -2091,7 +2092,11 @@ describe("source control tools", () => {
         resolved: true,
       });
       expect(result).toMatchObject({ replied: true, resolved: true });
-      expect(calls).toEqual(["reply open-thread", "resolve open-thread true"]);
+      // T3 marks what it posts as the agent's, so a watch on the PR is not woken by it.
+      expect(calls).toEqual([
+        'reply open-thread "Fixed.\\n\\n<!-- t3code:agent -->"',
+        "resolve open-thread true",
+      ]);
       const partial = yield* harness
         .call("pull_request_respond", {
           reviewThreadId: "locked-thread",
@@ -2143,10 +2148,11 @@ describe("source control tools", () => {
         {
           number: 42,
           verdict: "request-changes",
-          body: "Two things.",
+          body: "Two things.\n\n<!-- t3code:agent -->",
           comments: [
             {
               path: "b.ts",
+              body: "Why?\n\n<!-- t3code:agent -->",
               position: { kind: "added", newLine: 10 },
               startPosition: { kind: "context", oldLine: 9, newLine: 9, side: "right" },
             },
@@ -2199,7 +2205,10 @@ describe("source control tools", () => {
         verdict: "approve",
         expectedHeadSha: "abc1234def5678",
       });
-      expect(reviews).toMatchObject([{ verdict: "approve", expectedHeadSha: "abc1234def5678" }]);
+      // An approval without a summary stays one, with no comment carrying only the marker.
+      expect(reviews).toMatchObject([
+        { verdict: "approve", body: "", expectedHeadSha: "abc1234def5678" },
+      ]);
 
       const error = yield* harness
         .call("pull_request_review", { verdict: "approve" })
