@@ -77,17 +77,25 @@ const runGit = Effect.fn("desktop.agentctl.runManifestGit")(function* (
   );
 });
 
-/** Git's own reason from its stderr, such as "Not possible to fast-forward, aborting." */
+/**
+ * Git's own reason from its stderr, such as "Not possible to fast-forward, aborting.", with the
+ * indented files that follow a reason ending in a colon.
+ */
 export function gitFailureReason(stderr: string): string | null {
-  const lines = stderr
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const reason =
-    lines.find((line) => /^(fatal|error):/.test(line)) ??
-    lines.find((line) => !line.startsWith("hint:"));
+  const lines = stderr.split("\n").filter((line) => line.trim() !== "");
+  const prefixed = lines.findIndex((line) => /^(fatal|error):/.test(line));
+  const at = prefixed !== -1 ? prefixed : lines.findIndex((line) => !line.startsWith("hint:"));
+  const reason = lines[at];
   if (reason === undefined) return null;
-  const text = reason.replace(/^(fatal|error):\s*/, "");
+  let text = reason.trim().replace(/^(fatal|error):\s*/, "");
+  if (text.endsWith(":")) {
+    const details: string[] = [];
+    for (const line of lines.slice(at + 1)) {
+      if (!/^\s/.test(line)) break;
+      details.push(line.trim());
+    }
+    if (details.length > 0) text = `${text} ${details.join(", ")}`;
+  }
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 

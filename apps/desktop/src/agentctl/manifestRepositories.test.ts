@@ -249,6 +249,15 @@ describe("gitFailureReason", () => {
     );
   });
 
+  it("names the files git lists after a colon", () => {
+    assert.strictEqual(
+      gitFailureReason(
+        "error: Your local changes to the following files would be overwritten by merge:\n\tREADME.md\n\tagents/agent.yaml\nPlease commit your changes or stash them before you merge.\nAborting",
+      ),
+      "Your local changes to the following files would be overwritten by merge: README.md, agents/agent.yaml",
+    );
+  });
+
   it("uses the first line of an unprefixed message", () => {
     assert.strictEqual(
       gitFailureReason(
