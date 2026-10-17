@@ -3,6 +3,7 @@ import {
   AgentctlSandboxSettings,
   type AgentctlActionResult,
   type AgentctlCreateSandboxInput,
+  type AgentctlManifestRoot,
   type AgentctlSandboxAction,
   type AgentctlSandboxManifest,
   type AgentctlSandboxesSnapshot,
@@ -22,12 +23,14 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as HttpClient from "effect/http/HttpClient";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
 import * as AgentctlCli from "./AgentctlCli.ts";
 import { isConnectable, shouldCloseTunnel, sshAliasFor, type AgentResource } from "./agentState.ts";
 import { discoverManifests } from "./manifests.ts";
+import { pullManifestRepositories, resolveManifestRepository } from "./pullManifestRepositories.ts";
 import {
   DEFAULT_SANDBOX_SETTINGS,
   IDLE_RUNTIME,
@@ -55,10 +58,12 @@ export class DesktopAgentctlSandboxes extends Context.Service<
     readonly remove: (name: string) => Effect.Effect<AgentctlActionResult>;
     readonly create: (input: AgentctlCreateSandboxInput) => Effect.Effect<AgentctlActionResult>;
     readonly listManifests: Effect.Effect<ReadonlyArray<AgentctlSandboxManifest>>;
+    readonly listManifestRoots: Effect.Effect<ReadonlyArray<AgentctlManifestRoot>>;
     readonly getSettings: Effect.Effect<AgentctlSandboxSettings>;
     /** Folders are merged here, so two views never overwrite each other's changes. */
     readonly addManifestRoot: (folder: string) => Effect.Effect<AgentctlSandboxSettings>;
     readonly removeManifestRoot: (folder: string) => Effect.Effect<AgentctlSandboxSettings>;
+    readonly pullManifestRoot: (folder: string) => Effect.Effect<AgentctlActionResult>;
     /**
      * Starts watching agentctl. Call it once the app has loaded its shell
      * environment, so a macOS app opened from Finder finds agentctl on PATH.
@@ -98,7 +103,11 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const httpClient = yield* HttpClient.HttpClient;
-  const context = yield* Effect.context<FileSystem.FileSystem | Path.Path>();
+  const context = yield* Effect.context<
+    FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+  >();
+  // Overlapping manifest folders can refer to the same repository.
+  const pullLock = yield* Semaphore.make(1);
 
   const storePath = path.join(environment.stateDir, "agentctl-sandboxes.json");
   // A file T3 cannot read is kept aside rather than overwritten by the next save.
@@ -407,10 +416,35 @@ export const make = Effect.gen(function* () {
       Effect.provide(context),
     ),
     getSettings,
+    listManifestRoots: getSettings.pipe(
+      Effect.flatMap((settings) =>
+        Effect.forEach(settings.manifestRoots, (directory) =>
+          resolveManifestRepository(directory).pipe(
+            Effect.orElseSucceed(() => null),
+            Effect.map((repository) => ({ directory, repository })),
+          ),
+        ),
+      ),
+      Effect.provide(context),
+    ),
     addManifestRoot: (folder) =>
       updateManifestRoots((roots) => (roots.includes(folder) ? roots : [...roots, folder])),
     removeManifestRoot: (folder) =>
       updateManifestRoots((roots) => roots.filter((root) => root !== folder)),
+    pullManifestRoot: (folder) =>
+      pullLock.withPermits(1)(
+        Effect.gen(function* () {
+          const settings = yield* getSettings;
+          if (!settings.manifestRoots.includes(folder)) {
+            return { error: "This manifest folder is no longer configured." };
+          }
+          return yield* pullManifestRepositories(folder).pipe(
+            Effect.provide(context),
+            Effect.as<AgentctlActionResult>({ error: null }),
+            Effect.catch((error) => Effect.succeed({ error: error.message })),
+          );
+        }),
+      ),
     startPolling: Ref.getAndSet(polling, true).pipe(
       Effect.flatMap((started) =>
         started ? Effect.void : Effect.forever(pollOnce).pipe(Effect.forkIn(scope), Effect.asVoid),
