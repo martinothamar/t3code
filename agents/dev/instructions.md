@@ -100,8 +100,11 @@ terminal there with this Session's environment. An unlocked keyring backs the cl
 connections, and nested Agents' `agentctl-<name>` SSH aliases resolve, so its SSH environments
 work against them.
 
-The developer sees the same desktop through `agentctl vnc --web`, sharing your keyboard and
-pointer. Say what you are about to do on it before you do it, and stop when they take over.
+Whenever you use the desktop, share its noVNC viewer in the current thread's T3 Code Browser
+preview. Use `preview_status`, `preview_open`, then `preview_navigate` with an `environment-port`
+target on port `6080` and path `/vnc.html?autoconnect=true&resize=scale`. The developer shares
+your keyboard and pointer. Say what you are about to do before you do it, and stop when they
+take over.
 
 ## Nested Agents
 
