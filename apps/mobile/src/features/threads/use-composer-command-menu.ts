@@ -1,4 +1,5 @@
 import * as Dialog from "../../components/ui/Dialog";
+import { composerPullRequestKey } from "@t3tools/shared/composerPullRequestMatches";
 import type {
   EnvironmentId,
   ProjectId,
@@ -16,6 +17,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/model
 
 const EMPTY_THREAD_SHELLS: ReadonlyArray<EnvironmentThreadShell> = [];
 const EMPTY_ENVIRONMENTS: ReadonlyArray<ComposerEnvironmentCandidate> = [];
+const EMPTY_REPOSITORIES: ReadonlyArray<string> = [];
 const NO_LINKED_ENVIRONMENTS: ReadonlyMap<EnvironmentId, string> = new Map();
 import { COMPOSER_CONTEXT_MAX_RECORDS } from "@t3tools/contracts";
 import {
@@ -215,7 +217,7 @@ export function useComposerCommandMenu({
   currentThreadId = null,
   projectCwd,
   pullRequestProjectId = null,
-  pullRequestRepository = null,
+  pullRequestRepositories = EMPTY_REPOSITORIES,
   threadPullRequests,
   selectedProviderStatus,
   hasThread,
@@ -236,7 +238,8 @@ export function useComposerCommandMenu({
   readonly currentThreadId?: ThreadId | null;
   readonly projectCwd: string | null;
   readonly pullRequestProjectId?: ProjectId | null;
-  readonly pullRequestRepository?: string | null;
+  /** The project's own repositories: its own, or a workspace folder's checkouts. */
+  readonly pullRequestRepositories?: ReadonlyArray<string>;
   readonly threadPullRequests?: ReadonlyArray<ThreadPullRequestLink>;
   readonly selectedProviderStatus: ServerProvider | null;
   readonly hasThread: boolean;
@@ -310,7 +313,7 @@ export function useComposerCommandMenu({
   const pullRequestSearch = useComposerPullRequestSearch({
     environmentId,
     projectId: pullRequestProjectId,
-    repository: pullRequestRepository,
+    repositories: pullRequestRepositories,
     threadPullRequests,
     query: trigger?.kind === "pull-request" ? trigger.query : null,
   });
@@ -320,7 +323,7 @@ export function useComposerCommandMenu({
 
     if (trigger.kind === "pull-request") {
       return pullRequestSearch.entries.map((entry) => ({
-        id: `pr:${entry.projectId}:${entry.repository}:${entry.number}`,
+        id: `pr:${entry.projectId}:${composerPullRequestKey(entry)}`,
         type: "pull-request",
         pullRequest: {
           number: entry.number,
@@ -333,7 +336,8 @@ export function useComposerCommandMenu({
         },
         label: `#${entry.number}`,
         description: `${entry.isDraft ? "Draft" : entry.state} · ${
-          entry.repository.toLowerCase() === pullRequestRepository?.toLowerCase()
+          pullRequestRepositories.length === 1 &&
+          entry.repository.trim().toLowerCase() === pullRequestRepositories[0]?.trim().toLowerCase()
             ? ""
             : `${entry.repository} · `
         }${entry.title}`,
@@ -619,7 +623,7 @@ export function useComposerCommandMenu({
       trigger?.kind === "pull-request" ? pullRequestSearch.isPending : pathSearch.isPending,
     error:
       trigger?.kind === "pull-request"
-        ? pullRequestProjectId === null || pullRequestRepository === null
+        ? pullRequestProjectId === null || pullRequestRepositories.length === 0
           ? "Pull requests are unavailable for this project."
           : pullRequestSearch.error
         : null,

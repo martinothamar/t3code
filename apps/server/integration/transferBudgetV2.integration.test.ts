@@ -134,6 +134,7 @@ const layerEnrichment = Layer.unwrap(
       getAvailable: () =>
         Effect.succeed({
           repositoryIdentity: null,
+          workspaceRepositories: [],
           faviconPath: null,
           repositoryIdentityResolved: true,
         }),
