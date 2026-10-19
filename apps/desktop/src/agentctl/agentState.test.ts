@@ -174,6 +174,7 @@ describe("agentctl output", () => {
       memory: "6Gi",
       disk: "32Gi",
       network: "mediated",
+      harnesses: ["claudeCode"],
     });
   });
 

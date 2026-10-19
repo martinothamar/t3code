@@ -51,6 +51,8 @@ export const AgentctlSandbox = Schema.Struct({
   environmentId: Schema.NullOr(EnvironmentId),
   /** Whether this environment already got the user's preference settings from this computer. */
   settingsSeeded: Schema.Boolean,
+  /** The harnesses agentctl set up in it, such as `claudeCode` or `pi`. */
+  harnesses: Schema.Array(Schema.String),
   /** Where its agents work, and so its project's root; known once T3 has reached it. */
   workingDirectory: Schema.NullOr(Schema.String),
   /** Why T3 could not reach a Ready Sandbox, such as a missing SSH config include. */

@@ -53,6 +53,9 @@ export const AgentResource = Schema.Struct({
       provenance: Schema.optionalKey(
         Schema.Struct({ manifestPath: Schema.optionalKey(Schema.String) }),
       ),
+      sandbox: Schema.optionalKey(
+        Schema.Struct({ harnesses: Schema.optionalKey(Schema.Array(Schema.String)) }),
+      ),
     }),
   ),
 });
