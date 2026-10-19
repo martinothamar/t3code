@@ -94,11 +94,24 @@ describe("sandboxSettingsSeed", () => {
     expect(seed).toEqual({
       patch: { defaultModelSelection: pi },
       providerInstanceMutation: {
-        operation: "upsert",
+        operation: "create",
         instanceId: "pi",
         instance: { driver: "pi", enabled: true },
       },
     });
+  });
+
+  it("copies a Pi model selection only when the harness turns Pi on", () => {
+    const pi = { instanceId: ProviderInstanceId.make("pi"), model: "gateway/model" };
+    const patch = (harnesses: ReadonlyArray<string>) =>
+      sandboxSettingsSeed({
+        local: settings({ defaultModelSelection: pi }),
+        sandbox: settings({}),
+        sandboxProviderInstanceIds: providers,
+        harnesses,
+      }).patch;
+    expect(patch(["claudeCode", "pi"])).toEqual({ defaultModelSelection: pi });
+    expect(patch(["claudeCode"])).toEqual({});
   });
 
   it("leaves Pi alone without the harness or once the Sandbox has a Pi entry", () => {

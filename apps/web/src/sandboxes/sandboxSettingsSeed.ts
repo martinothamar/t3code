@@ -29,7 +29,7 @@ export interface SandboxSettingsSeed {
  * The settings a new Sandbox should start with: each project-scoped key the
  * user changed on this computer while the Sandbox still has the default.
  * A Sandbox's own choices are never overwritten. Model selections are only
- * copied when the Sandbox has that provider instance.
+ * copied when the Sandbox has that provider instance turned on.
  *
  * Pi is off until turned on, so a Sandbox whose Agent sets up agentctl's Pi
  * harness gets it turned on, unless its settings already have a Pi entry.
@@ -37,6 +37,7 @@ export interface SandboxSettingsSeed {
 export function sandboxSettingsSeed(input: {
   readonly local: ServerSettings;
   readonly sandbox: ServerSettings;
+  /** The provider instances the Sandbox has turned on. */
   readonly sandboxProviderInstanceIds: ReadonlySet<string>;
   readonly harnesses: ReadonlyArray<string>;
 }): SandboxSettingsSeed {
@@ -64,7 +65,9 @@ export function sandboxSettingsSeed(input: {
     ...(enablePi
       ? {
           providerInstanceMutation: {
-            operation: "upsert",
+            // The server refuses to create over an entry, so a Pi choice made in the
+            // Sandbox since its settings were read is kept.
+            operation: "create",
             instanceId: PI_INSTANCE_ID,
             instance: { driver: PI_DRIVER, enabled: true },
           },

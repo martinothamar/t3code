@@ -121,7 +121,9 @@ function SandboxEnvironmentCoordinator(props: {
         local: localConfig.settings,
         sandbox: sandboxConfig.settings,
         sandboxProviderInstanceIds: new Set(
-          sandboxConfig.providers.map((provider) => provider.instanceId),
+          sandboxConfig.providers
+            .filter((provider) => provider.enabled)
+            .map((provider) => provider.instanceId),
         ),
         harnesses: props.harnesses,
       });
