@@ -103,6 +103,7 @@ export function buildSandbox(
     sshTarget: record?.sshTarget ?? null,
     environmentId: record?.environmentId ?? null,
     settingsSeeded: record?.settingsSeeded ?? false,
+    harnesses: agent.status?.sandbox?.harnesses ?? [],
     workingDirectory: runtime.workingDirectory,
     connectError: state.phase === "ready" ? runtime.connectError : null,
     action: runtime.action,

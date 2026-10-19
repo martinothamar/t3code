@@ -1,5 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
-import { EnvironmentId, requiredScopesForServerSettingsPatch } from "@t3tools/contracts";
+import {
+  AuthProvidersManageScope,
+  EnvironmentId,
+  requiredScopesForServerSettingsPatch,
+} from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
 
@@ -12,7 +16,7 @@ import { environmentShell } from "../state/shell";
 import { useAtomCommand } from "../state/use-atom-command";
 import { isSandboxBeingDeleted, readAgentctlBridge } from "./sandboxConnections";
 import { useEnsureSandboxProject } from "./sandboxProjects";
-import { sandboxSettingsSeedPatch } from "./sandboxSettingsSeed";
+import { sandboxSettingsSeed } from "./sandboxSettingsSeed";
 import { useSandboxes } from "./useSandboxes";
 
 /**
@@ -53,6 +57,7 @@ export function SandboxConnectionCoordinator() {
         running={sandbox.phase === "ready" && sandbox.action === null}
         workingDirectory={sandbox.workingDirectory}
         settingsSeeded={sandbox.settingsSeeded}
+        harnesses={sandbox.harnesses}
       />
     ),
   );
@@ -64,6 +69,7 @@ function SandboxEnvironmentCoordinator(props: {
   readonly running: boolean;
   readonly workingDirectory: string | null;
   readonly settingsSeeded: boolean;
+  readonly harnesses: ReadonlyArray<string>;
 }) {
   const { presentation } = useEnvironmentPresentation(props.environmentId);
   const shell = useEnvironmentQuery(environmentShell.stateAtom(props.environmentId));
@@ -111,22 +117,24 @@ function SandboxEnvironmentCoordinator(props: {
     }
     seeding.current = true;
     try {
-      const patch = sandboxSettingsSeedPatch({
+      const seed = sandboxSettingsSeed({
         local: localConfig.settings,
         sandbox: sandboxConfig.settings,
         sandboxProviderInstanceIds: new Set(
-          sandboxConfig.providers.map((provider) => provider.instanceId),
+          sandboxConfig.providers
+            .filter((provider) => provider.enabled)
+            .map((provider) => provider.instanceId),
         ),
+        harnesses: props.harnesses,
       });
-      if (Object.keys(patch).length > 0) {
-        const allowed = requiredScopesForServerSettingsPatch(patch).every((scope) =>
-          readEnvironmentScope(props.environmentId, scope),
-        );
-        if (!allowed) return;
-        const result = await updateSettings({
-          environmentId: props.environmentId,
-          input: { patch },
-        });
+      const changesSettings = Object.keys(seed.patch).length > 0;
+      if (changesSettings || seed.providerInstanceMutation !== undefined) {
+        const scopes = [
+          ...(changesSettings ? requiredScopesForServerSettingsPatch(seed.patch) : []),
+          ...(seed.providerInstanceMutation !== undefined ? [AuthProvidersManageScope] : []),
+        ];
+        if (!scopes.every((scope) => readEnvironmentScope(props.environmentId, scope))) return;
+        const result = await updateSettings({ environmentId: props.environmentId, input: seed });
         if (result._tag === "Failure") {
           console.warn("Could not seed the Sandbox settings.");
           return;

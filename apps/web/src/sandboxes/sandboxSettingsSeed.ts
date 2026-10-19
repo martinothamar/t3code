@@ -1,7 +1,10 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
+  ProviderDriverKind,
+  defaultInstanceIdForDriver,
   type ProjectScopedServerSettingKey,
+  type ProviderInstanceMutation,
   type ServerSettings,
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
@@ -14,17 +17,36 @@ const MODEL_SELECTION_KEYS = [
   "reviewGuideModelSelection",
 ] as const satisfies ReadonlyArray<ProjectScopedServerSettingKey>;
 
+const PI_DRIVER = ProviderDriverKind.make("pi");
+const PI_INSTANCE_ID = defaultInstanceIdForDriver(PI_DRIVER);
+
+export interface SandboxSettingsSeed {
+  readonly patch: ServerSettingsPatch;
+  readonly providerInstanceMutation?: ProviderInstanceMutation;
+}
+
 /**
- * The preferences a new Sandbox should start with: each project-scoped key the
+ * The settings a new Sandbox should start with: each project-scoped key the
  * user changed on this computer while the Sandbox still has the default.
  * A Sandbox's own choices are never overwritten. Model selections are only
- * copied when the Sandbox has that provider instance.
+ * copied when the Sandbox has that provider instance turned on.
+ *
+ * Pi is off until turned on, so a Sandbox whose Agent sets up agentctl's Pi
+ * harness gets it turned on, unless its settings already have a Pi entry.
  */
-export function sandboxSettingsSeedPatch(input: {
+export function sandboxSettingsSeed(input: {
   readonly local: ServerSettings;
   readonly sandbox: ServerSettings;
+  /** The provider instances the Sandbox has turned on. */
   readonly sandboxProviderInstanceIds: ReadonlySet<string>;
-}): ServerSettingsPatch {
+  readonly harnesses: ReadonlyArray<string>;
+}): SandboxSettingsSeed {
+  const enablePi =
+    input.harnesses.includes("pi") &&
+    !Object.hasOwn(input.sandbox.providerInstances, PI_INSTANCE_ID);
+  const providerInstanceIds = enablePi
+    ? new Set([...input.sandboxProviderInstanceIds, PI_INSTANCE_ID])
+    : input.sandboxProviderInstanceIds;
   const patch: Record<string, unknown> = {};
   for (const key of PROJECT_SCOPED_SERVER_SETTING_KEYS) {
     const value = input.local[key];
@@ -32,14 +54,24 @@ export function sandboxSettingsSeedPatch(input: {
     if (!Equal.equals(input.sandbox[key], DEFAULT_SERVER_SETTINGS[key])) continue;
     if ((MODEL_SELECTION_KEYS as ReadonlyArray<string>).includes(key)) {
       const selection = input.local[key as (typeof MODEL_SELECTION_KEYS)[number]];
-      if (
-        selection !== null &&
-        !input.sandboxProviderInstanceIds.has(String(selection.instanceId))
-      ) {
+      if (selection !== null && !providerInstanceIds.has(String(selection.instanceId))) {
         continue;
       }
     }
     patch[key] = value;
   }
-  return patch as ServerSettingsPatch;
+  return {
+    patch: patch as ServerSettingsPatch,
+    ...(enablePi
+      ? {
+          providerInstanceMutation: {
+            // The server refuses to create over an entry, so a Pi choice made in the
+            // Sandbox since its settings were read is kept.
+            operation: "create",
+            instanceId: PI_INSTANCE_ID,
+            instance: { driver: PI_DRIVER, enabled: true },
+          },
+        }
+      : {}),
+  };
 }

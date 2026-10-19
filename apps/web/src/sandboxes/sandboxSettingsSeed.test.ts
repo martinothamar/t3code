@@ -1,11 +1,16 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  ProviderDriverKind,
   ProviderInstanceId,
   type ServerSettings,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { sandboxSettingsSeedPatch } from "./sandboxSettingsSeed";
+import { sandboxSettingsSeed } from "./sandboxSettingsSeed";
+
+const sandboxSettingsSeedPatch = (
+  input: Omit<Parameters<typeof sandboxSettingsSeed>[0], "harnesses">,
+) => sandboxSettingsSeed({ ...input, harnesses: ["claudeCode", "codex"] }).patch;
 
 const settings = (overrides: Partial<ServerSettings>): ServerSettings => ({
   ...DEFAULT_SERVER_SETTINGS,
@@ -15,7 +20,7 @@ const providers = new Set(["codex"]);
 const codex = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-test" };
 const other = { instanceId: ProviderInstanceId.make("elsewhere"), model: "gpt-test" };
 
-describe("sandboxSettingsSeedPatch", () => {
+describe("sandboxSettingsSeed", () => {
   it("copies preferences the user changed locally", () => {
     const patch = sandboxSettingsSeedPatch({
       local: settings({
@@ -76,5 +81,53 @@ describe("sandboxSettingsSeedPatch", () => {
     expect(patch(codex, providers)).toEqual({ defaultModelSelection: codex });
     expect(patch(other, providers)).toEqual({});
     expect(patch(codex, new Set())).toEqual({});
+  });
+
+  it("turns on Pi when the Sandbox has agentctl's Pi harness", () => {
+    const pi = { instanceId: ProviderInstanceId.make("pi"), model: "gateway/model" };
+    const seed = sandboxSettingsSeed({
+      local: settings({ defaultModelSelection: pi }),
+      sandbox: settings({}),
+      sandboxProviderInstanceIds: providers,
+      harnesses: ["claudeCode", "pi"],
+    });
+    expect(seed).toEqual({
+      patch: { defaultModelSelection: pi },
+      providerInstanceMutation: {
+        operation: "create",
+        instanceId: "pi",
+        instance: { driver: "pi", enabled: true },
+      },
+    });
+  });
+
+  it("copies a Pi model selection only when the harness turns Pi on", () => {
+    const pi = { instanceId: ProviderInstanceId.make("pi"), model: "gateway/model" };
+    const patch = (harnesses: ReadonlyArray<string>) =>
+      sandboxSettingsSeed({
+        local: settings({ defaultModelSelection: pi }),
+        sandbox: settings({}),
+        sandboxProviderInstanceIds: providers,
+        harnesses,
+      }).patch;
+    expect(patch(["claudeCode", "pi"])).toEqual({ defaultModelSelection: pi });
+    expect(patch(["claudeCode"])).toEqual({});
+  });
+
+  it("leaves Pi alone without the harness or once the Sandbox has a Pi entry", () => {
+    const seed = (harnesses: ReadonlyArray<string>, sandbox: ServerSettings) =>
+      sandboxSettingsSeed({
+        local: settings({}),
+        sandbox,
+        sandboxProviderInstanceIds: providers,
+        harnesses,
+      });
+    const disabledPi = settings({
+      providerInstances: {
+        [ProviderInstanceId.make("pi")]: { driver: ProviderDriverKind.make("pi"), enabled: false },
+      },
+    });
+    expect(seed(["claudeCode"], settings({}))).toEqual({ patch: {} });
+    expect(seed(["pi"], disabledPi)).toEqual({ patch: {} });
   });
 });
