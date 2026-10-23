@@ -190,16 +190,16 @@ const CREATE: &str = "1 · Create a Sandbox";
 const WORK: &str = "2 · Work in it";
 const MANAGE: &str = "3 · Stop, start, delete";
 
-// Cam and ring coordinates are source pixels of the 1600x900 recordings: a `desktop`
+// Cam and ring coordinates are source pixels of the 1456x819 recordings: a `desktop`
 // screenshot's coordinates scaled by the display's size over the screenshot's.
 fn shots() -> Vec<Shot> {
     vec![
         // --- create -------------------------------------------------------------------
         Shot {
             name: "CreateDialog", file: "c1.mp4", len: 14.0, chapter: CREATE, speed: 1.5,
-            cams: &[Cam(0.0, 1.0, 800.0, 450.0), Cam(1.6, 1.0, 800.0, 450.0), Cam(2.6, 1.55, 800.0, 430.0),
-                    Cam(6.4, 1.55, 800.0, 430.0), Cam(7.4, 1.3, 800.0, 600.0), Cam(12.0, 1.3, 800.0, 600.0),
-                    Cam(12.8, 1.55, 840.0, 470.0)],
+            cams: &[Cam(0.0, 1.0, 728.0, 410.0), Cam(1.6, 1.0, 728.0, 410.0), Cam(2.6, 1.55, 728.0, 391.0),
+                    Cam(6.4, 1.55, 728.0, 391.0), Cam(7.4, 1.3, 728.0, 546.0), Cam(12.0, 1.3, 728.0, 546.0),
+                    Cam(12.8, 1.55, 764.0, 428.0)],
             captions: &[(0.4, 6.6, "New Sandbox, from a folder of agentctl manifests"),
                         (6.6, 12.4, "T3 Code lists every Agent and variant in it"),
                         (12.4, 14.0, "Create")],
@@ -208,21 +208,21 @@ fn shots() -> Vec<Shot> {
         },
         Shot {
             name: "CreateProvision", file: "c2.mp4", len: 10.366, chapter: CREATE, speed: 8.0,
-            cams: &[Cam(0.0, 1.45, 620.0, 260.0)],
+            cams: &[Cam(0.0, 1.45, 564.0, 237.0)],
             captions: &[(0.3, 10.4, "agentctl provisions it, and T3 Code follows along")],
             rings: &[],
             fade_out: false,
         },
         Shot {
             name: "CreateReady", file: "c3.mp4", len: 8.0, chapter: CREATE, speed: 1.0,
-            cams: &[Cam(0.0, 1.45, 620.0, 260.0), Cam(8.0, 1.6, 700.0, 220.0)],
+            cams: &[Cam(0.0, 1.45, 564.0, 237.0), Cam(8.0, 1.6, 637.0, 200.0)],
             captions: &[(0.3, 8.0, "Ready: it installs its server over SSH and connects")],
             rings: &[],
             fade_out: false,
         },
         Shot {
             name: "CreateThread", file: "c4.mp4", len: 9.0, chapter: CREATE, speed: 1.0,
-            cams: &[Cam(0.0, 1.6, 700.0, 220.0), Cam(3.6, 1.6, 900.0, 220.0), Cam(4.8, 1.0, 800.0, 450.0)],
+            cams: &[Cam(0.0, 1.6, 637.0, 200.0), Cam(3.6, 1.6, 819.0, 200.0), Cam(4.8, 1.0, 728.0, 410.0)],
             captions: &[(0.3, 9.0, "The Sandbox is a project now. Start a thread in it")],
             rings: &[],
             fade_out: true,
@@ -230,14 +230,14 @@ fn shots() -> Vec<Shot> {
         // --- work -----------------------------------------------------------------------
         Shot {
             name: "ThreadPrompt", file: "t1.mp4", len: 9.0, chapter: WORK, speed: 1.0,
-            cams: &[Cam(0.0, 1.0, 800.0, 450.0), Cam(1.0, 1.7, 905.0, 390.0)],
+            cams: &[Cam(0.0, 1.0, 728.0, 410.0), Cam(1.0, 1.7, 824.0, 355.0)],
             captions: &[(0.4, 9.0, "Ask the agent to work on its own desktop, where you can watch")],
             rings: &[],
             fade_out: false,
         },
         Shot {
             name: "ThreadPopup", file: "t2.mp4", len: 10.5, chapter: WORK, speed: 2.0,
-            cams: &[Cam(0.0, 1.45, 800.0, 260.0), Cam(7.6, 1.45, 800.0, 260.0), Cam(8.8, 2.3, 1420.0, 745.0)],
+            cams: &[Cam(0.0, 1.45, 728.0, 237.0), Cam(7.6, 1.45, 728.0, 237.0), Cam(8.8, 2.3, 1292.0, 678.0)],
             captions: &[(0.3, 7.6, "It opens its desktop with T3 Code's browser tool"),
                         (7.6, 10.5, "A floating preview pops up: Agent has control")],
             rings: &[],
@@ -245,14 +245,14 @@ fn shots() -> Vec<Shot> {
         },
         Shot {
             name: "ThreadPopupWork", file: "t3.mp4", len: 8.0, chapter: WORK, speed: 8.0,
-            cams: &[Cam(0.0, 2.3, 1420.0, 745.0)],
+            cams: &[Cam(0.0, 2.3, 1292.0, 678.0)],
             captions: &[(0.0, 8.0, "Inside: the agent's own terminal, in the Sandbox")],
             rings: &[],
             fade_out: false,
         },
         Shot {
             name: "ThreadPanel", file: "t4.mp4", len: 12.8, chapter: WORK, speed: 1.25,
-            cams: &[Cam(0.0, 1.6, 1250.0, 300.0), Cam(2.2, 1.6, 1250.0, 300.0), Cam(3.4, 1.0, 800.0, 450.0)],
+            cams: &[Cam(0.0, 1.6, 1138.0, 273.0), Cam(2.2, 1.6, 1138.0, 273.0), Cam(3.4, 1.0, 728.0, 410.0)],
             captions: &[(0.3, 7.6, "Open it in the right panel, beside the chat"),
                         (7.6, 12.8, "…and give it some room")],
             rings: &[],
@@ -260,14 +260,14 @@ fn shots() -> Vec<Shot> {
         },
         Shot {
             name: "ThreadEnvUp", file: "t5.mp4", len: 13.6, chapter: WORK, speed: 2.5,
-            cams: &[Cam(0.0, 1.0, 800.0, 450.0), Cam(1.2, 1.75, 1112.0, 390.0)],
+            cams: &[Cam(0.0, 1.0, 728.0, 410.0), Cam(1.2, 1.75, 1012.0, 355.0)],
             captions: &[(0.3, 13.6, "studioctl env up starts localtest: four containers in the Sandbox")],
             rings: &[],
             fade_out: false,
         },
         Shot {
             name: "ThreadLocaltest", file: "t6.mp4", len: 14.0, chapter: WORK, speed: 1.0,
-            cams: &[Cam(0.0, 1.75, 1112.0, 390.0), Cam(3.2, 1.75, 1112.0, 390.0), Cam(4.6, 1.3, 1080.0, 420.0)],
+            cams: &[Cam(0.0, 1.75, 1012.0, 355.0), Cam(3.2, 1.75, 1012.0, 355.0), Cam(4.6, 1.3, 983.0, 382.0)],
             captions: &[(0.3, 7.0, "Then it opens localtest in Chromium, on its desktop"),
                         (7.0, 14.0, "App Localtest, served and shown from inside the Sandbox")],
             rings: &[],
@@ -275,7 +275,7 @@ fn shots() -> Vec<Shot> {
         },
         Shot {
             name: "ThreadSummary", file: "t7.mp4", len: 7.666, chapter: WORK, speed: 3.0,
-            cams: &[Cam(0.0, 1.3, 1080.0, 420.0), Cam(1.4, 1.0, 800.0, 450.0)],
+            cams: &[Cam(0.0, 1.3, 983.0, 382.0), Cam(1.4, 1.0, 728.0, 410.0)],
             captions: &[(0.3, 7.7, "Your computer only ran the T3 Code app")],
             rings: &[],
             fade_out: true,
@@ -283,7 +283,7 @@ fn shots() -> Vec<Shot> {
         // --- manage ---------------------------------------------------------------------
         Shot {
             name: "ManageStop", file: "l1.mp4", len: 14.0, chapter: MANAGE, speed: 1.5,
-            cams: &[Cam(0.0, 1.0, 800.0, 450.0), Cam(1.6, 1.45, 930.0, 300.0)],
+            cams: &[Cam(0.0, 1.0, 728.0, 410.0), Cam(1.6, 1.45, 846.0, 273.0)],
             captions: &[(0.4, 6.0, "Sandboxes: state, resources and threads"),
                         (6.0, 14.0, "Stop keeps its disk")],
             rings: &[],
@@ -291,21 +291,21 @@ fn shots() -> Vec<Shot> {
         },
         Shot {
             name: "ManageStart", file: "l2.mp4", len: 10.0, chapter: MANAGE, speed: 2.0,
-            cams: &[Cam(0.0, 1.45, 930.0, 300.0)],
+            cams: &[Cam(0.0, 1.45, 846.0, 273.0)],
             captions: &[(0.3, 10.0, "Start it again, and T3 Code reconnects")],
             rings: &[],
             fade_out: false,
         },
         Shot {
             name: "ManageThread", file: "l3.mp4", len: 7.0, chapter: MANAGE, speed: 1.0,
-            cams: &[Cam(0.0, 1.0, 800.0, 450.0), Cam(1.6, 1.55, 470.0, 330.0)],
+            cams: &[Cam(0.0, 1.0, 728.0, 410.0), Cam(1.6, 1.55, 428.0, 300.0)],
             captions: &[(0.3, 7.0, "Its threads are still there")],
             rings: &[],
             fade_out: false,
         },
         Shot {
             name: "ManageDelete", file: "l4.mp4", len: 12.8, chapter: MANAGE, speed: 1.25,
-            cams: &[Cam(0.0, 1.0, 800.0, 450.0), Cam(1.6, 1.45, 930.0, 330.0), Cam(9.0, 1.45, 930.0, 330.0), Cam(10.2, 1.0, 800.0, 450.0)],
+            cams: &[Cam(0.0, 1.0, 728.0, 410.0), Cam(1.6, 1.45, 846.0, 300.0), Cam(9.0, 1.45, 846.0, 300.0), Cam(10.2, 1.0, 728.0, 410.0)],
             captions: &[(0.3, 12.8, "Delete removes the Sandbox, its disk, project and threads")],
             rings: &[],
             fade_out: true,

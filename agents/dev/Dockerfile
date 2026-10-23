@@ -85,12 +85,8 @@ RUN { getent group kvm >/dev/null || groupadd --system kvm; } \
 
 COPY rootfs/ /
 
-# The demo-video skill lays its footage out for 1600x900 recordings; the desktop helper scales
-# screenshots of it to the base's budget. agent-ssh-config-init gives T3 Code's SSH environments
-# nested Agents' aliases.
-RUN sed -i 's/^AGENT_DESKTOP_GEOMETRY=.*/AGENT_DESKTOP_GEOMETRY=1600x900/' /etc/agent-desktop.conf \
-    && grep -qx 'AGENT_DESKTOP_GEOMETRY=1600x900' /etc/agent-desktop.conf \
-    && systemctl enable agent-ssh-config-init.service \
+# agent-ssh-config-init gives T3 Code's SSH environments nested Agents' aliases.
+RUN systemctl enable agent-ssh-config-init.service \
     && agent-image-check
 
 # agentd enables the Podman socket for the Agent user; Docker Engine API clients use it.
