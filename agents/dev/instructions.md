@@ -103,6 +103,11 @@ terminal there with this Session's environment. An unlocked keyring backs the cl
 connections, and nested Agents' `agentctl-<name>` SSH aliases resolve, so its SSH environments
 work against them.
 
+For T3 Code's web UI, the checkout's `test-t3-app` skill and its Browser panel come first. Use the
+desktop for what only the Electron client does, such as its SSH environments and native dialogs. A
+dev client's DevTools window stays behind it but can hold the focus, so click into the client or
+`desktop focus "T3 Code"` before typing.
+
 Whenever you use the desktop, share its noVNC viewer in the current thread's T3 Code Browser
 preview. Use `preview_status`, `preview_open`, then `preview_navigate` with an `environment-port`
 target on port `6080` and path `/vnc.html?autoconnect=true&resize=scale`. The developer shares
