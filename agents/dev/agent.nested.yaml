@@ -19,6 +19,8 @@ spec:
       rootFilesystem:
         capacity: "32Gi"
         mode: direct
+      # Nested Agents of its own would need virtualization two levels down.
+      nestedSandboxes: null
     mounts:
       - type: tmpfs
         target: /tmp

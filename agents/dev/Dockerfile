@@ -2,6 +2,25 @@
 # Code and Codex at the versions agentd is tested with, gh, Chromium with playwright-cli, and the
 # desktop with VNC access, the `desktop` helper and the computer-use skill. This image adds what
 # developing T3 Code needs.
+
+# agentctl and agentd from digdir-agents main, which the Agent needs until a release ships what it
+# relies on: nested Sandboxes, agentd's /dev/kvm and Podman setup, and the SSH OOM policy. The host
+# runs the same build, and nested Agents run on this one.
+ARG AGENTCTL_COMMIT=1c60ebdf753783a9157174cf7461a364e7180f37
+FROM docker.io/library/rust:1.97.1-trixie@sha256:b1b3c9c0d921d7fa0a6d1f9ec7e4eab87f8c8ec97644c3d791450f131dec813f AS agentctl
+ARG AGENTCTL_COMMIT
+# libcap-ng, as digdir-agents' release builds install.
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends libcap-ng-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN curl -fsSL "https://github.com/digdir/digdir-agents/archive/${AGENTCTL_COMMIT}.tar.gz" \
+        | tar -xz --strip-components=1 \
+    && AGENT_VERSION="v0.1.0-preview.12.main.$(printf %.7s "${AGENTCTL_COMMIT}")" \
+        cargo build --release --locked -p agent --bins \
+    && install -m 0755 target/release/agentctl target/release/agentd /usr/local/bin/ \
+    && rm -rf target "${CARGO_HOME}/registry" "${CARGO_HOME}/git"
+
 FROM ghcr.io/digdir/agentctl-base:ubuntu-26.04-desktop@sha256:b8591f7207bc65a0f5360334e62deab0b6cfb77d30c650fb4824e1130d955376
 
 # The base ends as the unprivileged Agent user; installing packages needs root again.
@@ -55,12 +74,10 @@ RUN case "${TARGETARCH}" in \
 # Matches the repository's playwright-core. The web app's browser tests run headless on this
 # version's Chromium build, beside the base's own one, which the desktop and playwright-cli use.
 ARG PLAYWRIGHT_VERSION=1.60.0
-ARG AGENTCTL_VERSION=v0.1.0-preview.12
 
-# agentctl/agentd for developing the integration against nested Agents. The standalone install only
-# places the binaries; agentd downloads its runtime on first use. Agent Sandboxes mount their CA
-# bundle at /run/agent/tls; Node trusts it only when told to. Playwright 1.60 predates Ubuntu 26.04
-# and only downloads for it with the 24.04 build named; it runs that build as it is.
+# Agent Sandboxes mount their CA bundle at /run/agent/tls; Node trusts it only when told to.
+# Playwright 1.60 predates Ubuntu 26.04 and only downloads for it with the 24.04 build named; it
+# runs that build as it is.
 RUN case "${TARGETARCH}" in \
         amd64) PLAYWRIGHT_ARCH=x64 ;; \
         arm64) PLAYWRIGHT_ARCH=arm64 ;; \
@@ -73,14 +90,11 @@ RUN case "${TARGETARCH}" in \
     && PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="ubuntu24.04-${PLAYWRIGHT_ARCH}" \
         npx --yes "playwright@${PLAYWRIGHT_VERSION}" install chromium-headless-shell \
     && chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" \
-    && rm -rf "${HOME}" /root/.npm \
-    && AGENT_INSTALL_MODE=standalone AGENT_VERSION="${AGENTCTL_VERSION}" AGENT_INSTALL_DIR=/usr/local/bin \
-        sh -c "$(curl -fsSL https://raw.githubusercontent.com/digdir/digdir-agents/agentctl/${AGENTCTL_VERSION}/agentctl/install.sh)" \
-    && agentctl --version
+    && rm -rf "${HOME}" /root/.npm
 
-# kvm lets a nested agentd start Sandboxes; tmpfiles.d hands it /dev/kvm.
-RUN { getent group kvm >/dev/null || groupadd --system kvm; } \
-    && usermod --append --groups kvm agent
+# agentd downloads its runtime on first use.
+COPY --from=agentctl /usr/local/bin/agentctl /usr/local/bin/agentd /usr/local/bin/
+RUN agentctl --version
 
 COPY rootfs/ /
 

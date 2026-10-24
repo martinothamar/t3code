@@ -12,6 +12,10 @@ The `demo-video` skill films that desktop into captioned demo videos with fframe
 | default  | Fresh clone of `martinothamar/t3code`, `upstream` added |
 | `nested` | Fresh clone, reduced to fit inside the default Agent    |
 
+The manifest needs an agentctl built from digdir-agents `main`, at least the commit the
+Dockerfile's `AGENTCTL_COMMIT` names, until a release includes `nestedSandboxes`: `make
+user-install` in a digdir-agents checkout installs one. `0.1.0-preview.12` and earlier refuse it.
+
 ```sh
 cp agents/dev/.env.sample agents/dev/.env   # fill in GITHUB_TOKEN and Git identity
 agentctl apply -f agents/dev/agent.yaml --wait

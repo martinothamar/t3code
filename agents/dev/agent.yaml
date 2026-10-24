@@ -15,6 +15,9 @@ spec:
       rootFilesystem:
         capacity: "64Gi"
         mode: direct
+      # Nested Agents, for developing the agentctl integration. A host that cannot provide them
+      # leaves the Agent without them, as its NestedSandboxes condition says.
+      nestedSandboxes: preferred
     initSystem: image
     mounts:
       - type: tmpfs
