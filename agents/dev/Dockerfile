@@ -2,28 +2,26 @@
 # Code and Codex at the versions agentd is tested with, gh, Chromium with playwright-cli, and the
 # desktop with VNC access, the `desktop` helper and the computer-use skill. This image adds what
 # developing T3 Code needs.
-FROM ghcr.io/digdir/agentctl-base:ubuntu-26.04-desktop@sha256:1bdd793c97af6cf943c4477dc06d40c65ceeab38463623e85e8c787ce294333d
+FROM ghcr.io/digdir/agentctl-base:ubuntu-26.04-desktop@sha256:b8591f7207bc65a0f5360334e62deab0b6cfb77d30c650fb4824e1130d955376
 
 # The base ends as the unprivileged Agent user; installing packages needs root again.
 USER root
 
 # T3 Code's build tooling (ImageMagick resizes the desktop app's icons; libsecret-1-dev and
-# pkg-config build its native keyring helper), Podman so a nested agentd can build Agent images,
-# with nftables and aardvark-dns for its rootful bridge networking, and Inter, the demo-video
-# skill's font beside the base's JetBrains Mono.
+# pkg-config build its native keyring helper), libatomic1, which Node.js 26 needs, and Inter, the
+# demo-video skill's font beside the base's JetBrains Mono. The containers feature adds Podman, so
+# a nested agentd can build Agent images, and the `docker` command.
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
-        aardvark-dns \
         build-essential \
         fonts-inter \
         imagemagick \
+        libatomic1 \
         libsecret-1-dev \
-        nftables \
         pkg-config \
-        podman \
-        podman-docker \
         unzip \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && agent-feature install containers
 
 ARG TARGETARCH
 # The checkout requires exactly this Node (package.json engines). It replaces the base's Node 24 in
@@ -42,6 +40,7 @@ RUN case "${TARGETARCH}" in \
     && curl -fsSL "https://nodejs.org/download/release/v${NODE_VERSION}/${NODE_ARCHIVE}" -o /tmp/node.tar.xz \
     && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/include/node \
+        /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
     && tar -xJf /tmp/node.tar.xz --strip-components=1 --no-same-owner -C /usr/local \
         --exclude=CHANGELOG.md --exclude=LICENSE --exclude=README.md \
         --exclude="node-v${NODE_VERSION}-linux-${NODE_ARCH}/include" \
@@ -88,9 +87,6 @@ COPY rootfs/ /
 # agent-ssh-config-init gives T3 Code's SSH environments nested Agents' aliases.
 RUN systemctl enable agent-ssh-config-init.service \
     && agent-image-check
-
-# agentd enables the Podman socket for the Agent user; Docker Engine API clients use it.
-ENV DOCKER_HOST=unix:///run/podman/podman.sock
 
 USER agent
 

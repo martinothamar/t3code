@@ -561,18 +561,16 @@ fn camera_at(cams: &[Cam], t: f32) -> (f32, f32, f32) {
     (last.1, last.2, last.3)
 }
 
-// The recording's place on the 1920x1080 grid, 1536 wide from a 1456x819 recording, the base
-// image's desktop. Only the top 789 source pixels show: the bottom 30 are the recording desktop's
-// own taskbar.
-const SRC_W: f32 = 1456.0;
-const SRC_H: f32 = 819.0;
-const SRC_VISIBLE_H: f32 = SRC_H - 30.0;
+// The recording's place on the 1920x1080 grid, 0.96x of a 1600x900 recording. Only the top 870
+// source pixels show: the bottom 30 are the recording desktop's own taskbar.
+const SRC_W: f32 = 1600.0;
+const SRC_VISIBLE_H: f32 = 870.0;
 const CX: f32 = 192.0;
 const CY: f32 = 112.0;
 const CW: f32 = 1536.0;
 const K: f32 = CW / SRC_W;
 const CH: f32 = SRC_VISIBLE_H * K;
-const IMG_H: f32 = SRC_H * K;
+const IMG_H: f32 = 900.0 * K;
 
 impl Scene for Shot {
     fn name(&self) -> &'static str {
