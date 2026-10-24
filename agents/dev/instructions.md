@@ -44,10 +44,11 @@ upstream sync, `main` is rewritten so they fold back into the stack. Every rewri
 6. `gh workflow run fork-release.yml --ref sync/<date>` builds the apps and server archives
    without publishing them. Test that build as below and post the results on the pull request.
 7. Once the developer approves, tag the old tip `archive/main-<date>` and push the tag, then
-   `git push --force-with-lease=main:<old tip> origin sync/<date>:main` and close the pull
-   request. Then `gh workflow run fork-release.yml --ref main -f from_run=<run id>` publishes the
-   tested build as the release. If the stack changed since that run, build and test again first;
-   the workflow refuses a run of another commit.
+   `git push --force-with-lease=main:<old tip> origin sync/<date>:main`. GitHub then marks the
+   pull request merged, since its head is `main`'s tip, so it needs no closing; comment that the
+   rewrite is applied. Then `gh workflow run fork-release.yml --ref main -f from_run=<run id>`
+   publishes the tested build as the release. If the stack changed since that run, build and test
+   again first; the workflow refuses a run of another commit.
 8. Move the primary checkout with `git checkout -B main origin/main`, and each branch from step 1
    with `git rebase --onto origin/main archive/main-<date> <branch>`.
 
