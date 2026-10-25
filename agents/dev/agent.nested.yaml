@@ -1,0 +1,23 @@
+apiVersion: agents.platform/v1alpha1
+kind: AgentVariant
+extends: agent.yaml
+
+# The same Agent, built from this checkout's Dockerfile, reduced to fit inside the default one so
+# a Session can try changes to its own image and manifest.
+metadata:
+  name: t3code-dev-nested
+
+spec:
+  sandbox:
+    image:
+      type: build
+      context: .
+      dockerfile: Dockerfile
+    resources:
+      cpu: "4"
+      memory: "6Gi"
+      rootFilesystem:
+        capacity: "32Gi"
+        mode: direct
+      # Nested Agents of its own would need virtualization two levels down.
+      nestedSandboxes: null
