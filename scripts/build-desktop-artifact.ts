@@ -1259,9 +1259,14 @@ function normalizePasskeyRpDomain(value: string): string {
   return parsed.hostname;
 }
 
+/** Without a team or profile, a Developer ID build signs without passkeys, as a fork's must: the
+ * profile grants them only to upstream's app ID, which belongs to upstream's team. */
 export function resolveMacPasskeySigningConfiguration(
   env: Readonly<Record<string, string | undefined>>,
-): MacPasskeySigningConfiguration {
+): MacPasskeySigningConfiguration | undefined {
+  if (!env.T3CODE_APPLE_TEAM_ID?.trim() && !env.T3CODE_MACOS_PROVISIONING_PROFILE?.trim()) {
+    return undefined;
+  }
   const teamId = env.T3CODE_APPLE_TEAM_ID?.trim().toUpperCase() ?? "";
   if (!APPLE_TEAM_ID_PATTERN.test(teamId)) {
     throw new InvalidAppleTeamIdError({ teamId });
@@ -1358,12 +1363,23 @@ export function resolveMacWebAuthnEntitlements(
 }
 
 export function renderMacPasskeyEntitlements(
-  configuration: MacPasskeySigningConfiguration,
+  configuration: MacPasskeySigningConfiguration | undefined,
   webAuthn: MacWebAuthnEntitlements,
 ): string {
-  const associatedDomains = configuration.rpDomains
+  const associatedDomains = configuration?.rpDomains
     .map((domain) => `      <string>webcredentials:${escapeXml(domain)}</string>`)
     .join("\n");
+  const identity = configuration
+    ? `
+    <key>com.apple.application-identifier</key>
+    <string>${escapeXml(`${configuration.teamId}.${configuration.appId}`)}</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>${escapeXml(configuration.teamId)}</string>
+    <key>com.apple.developer.associated-domains</key>
+    <array>
+${associatedDomains}
+    </array>`
+    : "";
   const keychainAccessGroups = webAuthn.touchIdKeychainAccessGroup
     ? `
     <key>keychain-access-groups</key>
@@ -1380,15 +1396,7 @@ export function renderMacPasskeyEntitlements(
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-  <dict>
-    <key>com.apple.application-identifier</key>
-    <string>${escapeXml(`${configuration.teamId}.${configuration.appId}`)}</string>
-    <key>com.apple.developer.team-identifier</key>
-    <string>${escapeXml(configuration.teamId)}</string>
-    <key>com.apple.developer.associated-domains</key>
-    <array>
-${associatedDomains}
-    </array>${keychainAccessGroups}${browserPasskeys}
+  <dict>${identity}${keychainAccessGroups}${browserPasskeys}
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
@@ -2758,6 +2766,18 @@ export function resolveDesktopUpdateChannel(version: string): "latest" | "nightl
   return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
 }
 
+function isPreviewReleaseVersion(version: string): boolean {
+  return /-preview\.\d{8}\.\d+$/.test(version);
+}
+
+/**
+ * Upstream's preview releases sit beside its stable ones, where a feed would move stable installs
+ * onto them. Every release of a fork is a preview, so a fork's preview builds follow its feed.
+ */
+function isForkRepository(publishConfig: { readonly owner: string; readonly repo: string }) {
+  return `${publishConfig.owner}/${publishConfig.repo}` !== "pingdotgg/t3code";
+}
+
 export function isDesktopPreviewVersion(version: string): boolean {
   return /-pr\./.test(version) || /-preview\.\d{8}\.\d+$/.test(version);
 }
@@ -2810,10 +2830,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   signed: boolean,
   mockUpdates: boolean,
   mockUpdateServerPort: number | undefined,
-  macPasskeySigning:
+  macSigning:
     | {
         readonly entitlementsPath: string;
-        readonly provisioningProfilePath: string;
+        readonly provisioningProfilePath: string | undefined;
       }
     | undefined,
   wslRuntimeBundled = false,
@@ -2859,7 +2879,13 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const updateChannel = resolveDesktopUpdateChannel(version);
   // Missing publish config infers a GitHub feed from tokens; staging has no repository, so manifest generation would crash.
   buildConfig.publish = null;
-  if (!isDesktopPreviewVersion(version)) {
+  if (isPreviewReleaseVersion(version)) {
+    const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
+    // macOS installs an update only when it is signed as the running app is.
+    if (publishConfig && isForkRepository(publishConfig) && (platform !== "mac" || signed)) {
+      buildConfig.publish = [publishConfig];
+    }
+  } else if (!isDesktopPreviewVersion(version)) {
     const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
     if (publishConfig) {
       buildConfig.publish = [publishConfig];
@@ -2924,10 +2950,12 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         },
       ],
       ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
-      ...(macPasskeySigning
+      ...(macSigning
         ? {
-            entitlements: macPasskeySigning.entitlementsPath,
-            provisioningProfile: macPasskeySigning.provisioningProfilePath,
+            entitlements: macSigning.entitlementsPath,
+            ...(macSigning.provisioningProfilePath
+              ? { provisioningProfile: macSigning.provisioningProfilePath }
+              : {}),
           }
         : {}),
     };
@@ -3923,9 +3951,10 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
         ),
       }
     : undefined;
-  const macEntitlementsPath = macPasskeySigning
-    ? path.join(stageAppDir, "entitlements.mac.plist")
-    : undefined;
+  const macEntitlementsPath =
+    options.platform === "mac" && options.signed
+      ? path.join(stageAppDir, "entitlements.mac.plist")
+      : undefined;
   let macWebAuthn: MacWebAuthnEntitlements | undefined;
   if (macPasskeySigning && macEntitlementsPath) {
     if (!(yield* fs.exists(macPasskeySigning.provisioningProfilePath))) {
@@ -3940,9 +3969,14 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     yield* Effect.log(
       `[desktop-artifact] In-app browser passkeys: Touch ID ${macWebAuthn.touchIdKeychainAccessGroup ? "enabled" : "disabled"}, browser passkeys ${macWebAuthn.browserPasskeys ? "enabled" : "disabled"}.`,
     );
+  }
+  if (macEntitlementsPath) {
     yield* fs.writeFileString(
       macEntitlementsPath,
-      renderMacPasskeyEntitlements(macPasskeySigning, macWebAuthn),
+      renderMacPasskeyEntitlements(
+        macPasskeySigning,
+        macWebAuthn ?? { touchIdKeychainAccessGroup: undefined, browserPasskeys: false },
+      ),
     );
   }
 
@@ -3986,10 +4020,10 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
       options.signed,
       options.mockUpdates,
       options.mockUpdateServerPort,
-      macPasskeySigning && macEntitlementsPath
+      macEntitlementsPath
         ? {
             entitlementsPath: macEntitlementsPath,
-            provisioningProfilePath: macPasskeySigning.provisioningProfilePath,
+            provisioningProfilePath: macPasskeySigning?.provisioningProfilePath,
           }
         : undefined,
       bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
