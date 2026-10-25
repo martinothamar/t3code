@@ -1,0 +1,484 @@
+# Publishes the fork's desktop apps and the T3 server archives its SSH hosts and Sandboxes install,
+# under one version, as a release of this repository. Run it by hand from the Actions tab.
+#
+# The version is upstream's preview form, `<core>-preview.<date>.<run>`. The apps follow this
+# repository's releases as their update feed (scripts/build-desktop-artifact.ts), except unsigned
+# macOS builds, which macOS would refuse to update. The app installs the server archive of its own
+# version from these releases (apps/desktop/src/ssh/remoteServerOverrides.ts).
+#
+# Packaging is upstream's release-desktop.yml, called once per target as release.yml does: it
+# needs only the `js-bundle` artifact built here, and skips signing without the secrets. macOS
+# builds are signed and notarized with this repository's Developer ID secrets, which
+# release-desktop.yml accepts without upstream's passkey provisioning profile, a fork edit.
+#
+# A run on `main` builds and becomes the latest release. A run on any other branch, such as a
+# `sync/<date>` branch, only builds and leaves its apps and server archives as artifacts, for
+# testing before main moves. `from_run` publishes such a run from `main` without building again,
+# once main points at the commit it built.
+name: Fork release
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_run:
+        description: Publish this run's build instead of building; it must have built main's commit
+        required: false
+        default: ""
+
+concurrency:
+  group: fork-release
+  cancel-in-progress: false
+
+permissions:
+  # The Windows build reads this run's artifact list to wait for the Linux archive it embeds.
+  actions: read
+  contents: read
+
+jobs:
+  preflight:
+    name: Resolve version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.meta.outputs.version || steps.source.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag || steps.source.outputs.tag }}
+    steps:
+      - name: Checkout
+        if: inputs.from_run == ''
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        if: inputs.from_run == ''
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/scripts...
+
+      - id: meta
+        name: Resolve release version
+        if: inputs.from_run == ''
+        run: |
+          node scripts/resolve-nightly-release.ts \
+            --channel preview \
+            --date "$(date -u +%Y%m%d)" \
+            --run-number "${{ github.run_number }}" \
+            --sha "${{ github.sha }}" \
+            --github-output
+
+      # A later run publishes this build with from_run, under the version it was built with.
+      - name: Record release version
+        if: inputs.from_run == ''
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: printf 'version=%s\ntag=%s\nsha=%s\n' "$VERSION" "$TAG" "$GITHUB_SHA" > release-meta.txt
+
+      - name: Upload release version
+        if: inputs.from_run == ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-meta
+          path: release-meta.txt
+          if-no-files-found: error
+
+      # Only a finished, successful run of this workflow that built the very commit main points
+      # at may be published, so a release never holds code other than what was tested.
+      - name: Check the run to publish
+        if: inputs.from_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FROM_RUN: ${{ inputs.from_run }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_NAME" != main ]]; then
+            echo "from_run publishes only from main, not $GITHUB_REF_NAME." >&2
+            exit 1
+          fi
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FROM_RUN" \
+            --jq '[.path, .status, .conclusion, .head_sha, .head_branch] | @tsv')"
+          IFS=$'\t' read -r path status conclusion head_sha head_branch <<<"$run"
+          if [[ "$path" != .github/workflows/fork-release.yml ]]; then
+            echo "Run $FROM_RUN is $path, not a Fork release run." >&2
+            exit 1
+          fi
+          if [[ "$status" != completed || "$conclusion" != success ]]; then
+            echo "Run $FROM_RUN is $status ($conclusion); only a successful run can be published." >&2
+            exit 1
+          fi
+          if [[ "$head_sha" != "$GITHUB_SHA" ]]; then
+            echo "Run $FROM_RUN built $head_sha on $head_branch, but main is $GITHUB_SHA." >&2
+            exit 1
+          fi
+
+      - name: Download release version
+        if: inputs.from_run != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: release-meta
+          run-id: ${{ inputs.from_run }}
+          github-token: ${{ github.token }}
+
+      - id: source
+        name: Read release version
+        if: inputs.from_run != ''
+        run: grep -E '^(version|tag)=' release-meta.txt >> "$GITHUB_OUTPUT"
+
+  # The server bundle, web client and Electron main, built once for every target. Without T3
+  # Connect's public config, which only upstream's deployment has, the server runs and only T3
+  # Connect is unavailable.
+  build_bundle:
+    name: Build JS bundle
+    needs: [preflight]
+    if: inputs.from_run == ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=t3... --filter=@t3tools/web... --filter=@t3tools/desktop... --filter=@t3tools/scripts...
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
+
+      # The bundle leaves out the Linux browser secret helper, which each Linux job of
+      # release-desktop.yml compiles for its own arch.
+      - name: Build JS bundle
+        run: vp run build:desktop:bundle
+
+      - name: Upload JS bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: js-bundle
+          path: |
+            apps/server/dist
+            apps/desktop/dist-electron
+          if-no-files-found: error
+          retention-days: 1
+
+  # Server archives come for the hosts the SSH installer supports (packages/ssh/src/tunnel.ts):
+  # Linux x64 and arm64, and macOS arm64, each from the job of its own platform. Node cannot build
+  # a single executable for an Intel Mac, so that job builds only the app. Windows is no SSH host;
+  # its WSL backend embeds the Linux archive of its own arch, which release-desktop.yml waits for
+  # by the name of the job that builds it, `Build Linux <arch>`. As in release.yml, Windows builds
+  # on Linux and runs its packaged binaries on a Windows `verify_runner`.
+  # The `FORK_MAC_RUNNER` variable moves both macOS builds to a self-hosted runner's label, since
+  # GitHub's hosted macOS runners often go unassigned (docs/operations/fork-desktop-build.md).
+  desktop:
+    name: Desktop
+    needs: [preflight, build_bundle]
+    if: inputs.from_run == ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+            target: AppImage
+            arch: x64
+            rust_target: x86_64-unknown-linux-gnu
+            resource_key: linux-x64
+            cli_archive: true
+            launch_check: true
+          - label: Linux arm64
+            runner: ubuntu-24.04-arm
+            platform: linux
+            target: AppImage
+            arch: arm64
+            rust_target: aarch64-unknown-linux-gnu
+            resource_key: linux-arm64
+            cli_archive: true
+          - label: macOS arm64
+            runner: ${{ vars.FORK_MAC_RUNNER || 'macos-15' }}
+            platform: mac
+            target: dmg
+            arch: arm64
+            rust_target: aarch64-apple-darwin
+            resource_key: darwin-arm64
+            cli_archive: true
+            launch_check: true
+          - label: macOS x64
+            runner: ${{ vars.FORK_MAC_RUNNER || 'macos-15' }}
+            platform: mac
+            target: dmg
+            arch: x64
+            rust_target: x86_64-apple-darwin
+            resource_key: darwin-x64
+            cli_archive: false
+          - label: Windows x64
+            runner: ubuntu-24.04
+            verify_runner: windows-2025
+            platform: win
+            target: nsis
+            arch: x64
+            rust_target: x86_64-pc-windows-msvc
+            resource_key: win32-x64
+            cli_archive: false
+          - label: Windows arm64
+            runner: ubuntu-24.04
+            verify_runner: windows-11-arm
+            platform: win
+            target: nsis
+            arch: arm64
+            rust_target: aarch64-pc-windows-msvc
+            resource_key: win32-arm64
+            cli_archive: false
+    uses: ./.github/workflows/release-desktop.yml
+    # Only the macOS builds sign.
+    secrets:
+      CSC_LINK: ${{ matrix.platform == 'mac' && secrets.CSC_LINK || '' }}
+      CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.CSC_KEY_PASSWORD || '' }}
+      APPLE_API_KEY: ${{ matrix.platform == 'mac' && secrets.APPLE_API_KEY || '' }}
+      APPLE_API_KEY_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+      APPLE_API_ISSUER: ${{ matrix.platform == 'mac' && secrets.APPLE_API_ISSUER || '' }}
+    with:
+      version: ${{ needs.preflight.outputs.version }}
+      ref: ${{ github.sha }}
+      # `preview` would drop the updater manifests; the version still marks the build a preview.
+      release_channel: latest
+      relay_client_tracing: false
+      clerk_publishable_key: ""
+      clerk_jwt_template: ""
+      clerk_cli_oauth_client_id: ""
+      relay_url: ""
+      label: ${{ matrix.label }}
+      runner: ${{ matrix.runner }}
+      verify_runner: ${{ matrix.verify_runner || '' }}
+      platform: ${{ matrix.platform }}
+      target: ${{ matrix.target }}
+      arch: ${{ matrix.arch }}
+      rust_target: ${{ matrix.rust_target }}
+      resource_key: ${{ matrix.resource_key }}
+      cli_archive: ${{ matrix.cli_archive }}
+      launch_check: ${{ matrix.launch_check || false }}
+
+  # Publishing with from_run skips the build jobs, which a plain `needs` would treat as a reason
+  # to skip this one too. A build GitHub cancelled, such as one no macOS runner picked up, is no
+  # failure, so it is refused here rather than publishing a release without its apps.
+  release:
+    name: Publish release
+    needs: [preflight, desktop]
+    if: ${{ github.ref_name == 'main' && !cancelled() && !failure() && !contains(needs.*.result, 'cancelled') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      # Reads the build's artifacts through the API, which from_run needs for another run's.
+      actions: read
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          filter: tree:0
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/scripts...
+
+      - name: Download desktop apps
+        uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: release-assets
+          run-id: ${{ inputs.from_run || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download server archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: cli-*
+          merge-multiple: true
+          path: release-assets
+          run-id: ${{ inputs.from_run || github.run_id }}
+          github-token: ${{ github.token }}
+
+      # electron-updater reads one manifest per platform and picks the file for its arch, so each
+      # platform's arches are merged into one, and every file a manifest names must be released.
+      - name: Merge updater manifests
+        working-directory: release-assets
+        run: |
+          set -euo pipefail
+          rm -f builder-debug.yml
+          node ../scripts/merge-update-manifests.ts --platform win \
+            latest-win-x64.yml latest-win-arm64.yml latest.yml
+          rm latest-win-x64.yml latest-win-arm64.yml
+          # Unsigned macOS builds carry no feed, and then neither arch has a manifest.
+          if [[ -f latest-mac.yml || -f latest-mac-x64.yml ]]; then
+            node ../scripts/merge-update-manifests.ts --platform mac latest-mac.yml latest-mac-x64.yml
+            rm latest-mac-x64.yml
+          fi
+          for manifest in latest-linux.yml latest-linux-arm64.yml latest.yml; do
+            [[ -f "$manifest" ]] || { echo "Missing updater manifest $manifest." >&2; exit 1; }
+          done
+          for manifest in *.yml; do
+            for file in $(sed -nE 's/^[ -]*url: *//p' "$manifest"); do
+              [[ -f "$file" ]] || { echo "$manifest names $file, which the release lacks." >&2; exit 1; }
+            done
+          done
+
+      # The SSH installer and scripts/fork/install-desktop.ts both verify downloads against this.
+      - name: Write checksums
+        working-directory: release-assets
+        run: |
+          set -euo pipefail
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          BUILD_RUN: ${{ inputs.from_run || github.run_id }}
+        run: |
+          set -euo pipefail
+          # The apps update to the latest release only when it is newer, so publishing an older
+          # build as latest would hold every install back until the next release.
+          if ! latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>latest-error.txt)"; then
+            grep -q "release not found" latest-error.txt || { cat latest-error.txt >&2; exit 1; }
+          fi
+          latest="${latest#v}"
+          if [[ -n "$latest" && "$(printf '%s\n%s\n' "$latest" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ]]; then
+            echo "The latest release, $latest, is newer than $VERSION; build and test main again." >&2
+            exit 1
+          fi
+          # Only for the notes, so a failed fetch leaves the base unknown rather than the release.
+          git fetch --quiet --filter=tree:0 https://github.com/pingdotgg/t3code.git \
+            'refs/tags/v*:refs/tags/v*' || true
+          nightly="$(git describe --tags --abbrev=0 --match 'v*-nightly.*' "$GITHUB_SHA" 2>/dev/null || true)"
+          stable="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' "$GITHUB_SHA" 2>/dev/null || true)"
+          if [[ -n "$stable" ]] && { [[ -z "$nightly" ]] || git merge-base --is-ancestor "$nightly" "$stable"; }; then
+            upstream="$stable"
+          else
+            upstream="${nightly:-unknown}"
+          fi
+          {
+            echo "Built from \`$GITHUB_SHA\` in run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN, based on upstream \`$upstream\`."
+            echo
+            echo 'Install the desktop app with `node scripts/fork/install-desktop.ts`; see docs/operations/fork-desktop-build.md.'
+          } > notes.md
+          gh release create "$TAG" release-assets/* \
+            --target "$GITHUB_SHA" \
+            --title "T3 Code fork $VERSION" \
+            --notes-file notes.md \
+            --latest
+
+  # Each published release also goes to TestFlight, built from the same commit and numbered by the
+  # release's run. It runs on the self-hosted Mac, whose VM has Xcode, and is skipped until the
+  # repository has the iOS variables and signing secrets (docs/operations/fork-ios-app.md).
+  testflight:
+    name: TestFlight
+    needs: [preflight, release]
+    if: ${{ !cancelled() && needs.release.result == 'success' && vars.FORK_MAC_RUNNER != '' && vars.IOS_BUNDLE_ID != '' }}
+    runs-on: ${{ vars.FORK_MAC_RUNNER }}
+    timeout-minutes: 90
+    env:
+      APP_VARIANT: production
+      EXPO_NO_GIT_STATUS: "1"
+      LANG: en_US.UTF-8
+      NODE_OPTIONS: --max-old-space-size=8192
+      T3CODE_IOS_TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+      T3CODE_IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/mobile... --filter=@t3tools/scripts...
+
+      - name: Install CocoaPods
+        run: command -v pod >/dev/null || brew install cocoapods
+
+      # A keychain of its own, so codesign never waits on a password prompt.
+      - name: Install the distribution certificate
+        env:
+          CERTIFICATE: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/ios-signing.keychain-db"
+          password="$(uuidgen)"
+          (umask 077 && printf '%s' "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/distribution.p12")
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/distribution.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm "$RUNNER_TEMP/distribution.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain" | grep -q "Apple Distribution" ||
+            { echo "The certificate is not an Apple Distribution identity." >&2; exit 1; }
+
+      - name: Generate the iOS project
+        working-directory: apps/mobile
+        run: vp exec expo prebuild --clean --platform ios
+
+      - name: Sign for TestFlight
+        env:
+          PROFILES: ${{ secrets.IOS_PROVISIONING_PROFILES }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/profiles"
+          printf '%s' "$PROFILES" | base64 --decode | tar -xz -C "$RUNNER_TEMP/profiles"
+          # The version ends in the release's run number, which only grows.
+          node scripts/fork/ios-testflight-signing.ts --project apps/mobile/ios \
+            --profiles "$RUNNER_TEMP/profiles" --build-number "${VERSION##*.}" \
+            --export-options "$RUNNER_TEMP/ExportOptions.plist"
+
+      - name: Archive
+        working-directory: apps/mobile
+        run: |
+          xcodebuild archive -workspace ios/T3Code.xcworkspace -scheme T3Code -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/T3Code.xcarchive" \
+            COMPILER_INDEX_STORE_ENABLE=NO
+
+      # A Developer-role App Store Connect key may upload builds; signing was manual, so it needs
+      # no more than that.
+      - name: Upload to TestFlight
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY_ID.p8"
+          (umask 077 && printf '%s' "$APPLE_API_KEY" > "$key")
+          plutil -insert destination -string upload "$RUNNER_TEMP/ExportOptions.plist"
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/T3Code.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -authenticationKeyPath "$key" -authenticationKeyID "$APPLE_API_KEY_ID" \
+            -authenticationKeyIssuerID "$APPLE_API_ISSUER"
+          rm "$key"
+
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/ios-signing.keychain-db" 2>/dev/null || true

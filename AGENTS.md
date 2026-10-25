@@ -155,3 +155,19 @@ Read the matching doc before changing code in that area; code review enforces th
 - No continuously repainting animations; they peg the GPU on high-refresh displays.
 - Security matters, but do not over-index on dev-mode or maintainer-only features. Read [SECURITY.md](SECURITY.md) before auditing or triaging reports.
 - If a rule here fights the task in front of you, say so loudly and get a human sign-off before breaking it.
+
+## Fork
+
+The fork publishes its desktop apps and server archives with the Fork release workflow, and
+`node scripts/fork/install-desktop.ts` installs one; see
+[Releasing and installing the fork's desktop app](docs/operations/fork-desktop-build.md).
+
+Never reference an upstream issue, pull request or commit in a form GitHub links in anything
+published on the fork: issues, pull requests, comments, reviews and commit messages.
+`pingdotgg/t3code#N`, `pingdotgg/t3code@<sha>` and `github.com/pingdotgg/t3code` URLs each leave
+a permanent backlink on upstream's timeline, which editing or deleting the text does not remove.
+Write `upstream#N` instead: GitHub does not link it, so it is safe in commit messages too, and a
+code span around it in Markdown adds a margin. A bare `#N`, or `upstream #N` with a space, links
+the fork's own issue or pull request N. The rule covers only what reaches GitHub. In conversation
+with the developer, and in local files that are never pushed, link upstream issues and pull
+requests normally, with full URLs, so the developer can click through.

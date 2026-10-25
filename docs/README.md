@@ -72,3 +72,5 @@ anything.
 - [03 · Release](./operations/03_release.md)
 - [04 · Observability](./operations/04_observability.md)
 - [05 · Relay observability](./operations/05_relay-observability.md)
+- [Releasing and installing the fork's desktop app](./operations/fork-desktop-build.md)
+- [The fork's iOS app](./operations/fork-ios-app.md)
