@@ -400,6 +400,8 @@ export interface DesktopSshEnvironmentBootstrap {
   pairingToken: string | null;
   remotePort?: number;
   remoteServerKind?: "external" | "managed";
+  /** The T3 release the desktop runs on the host, which mints its pairing credentials. */
+  remoteServerVersion?: string;
 }
 
 export const DesktopSshEnvironmentBootstrapSchema = Schema.Struct({
@@ -409,6 +411,7 @@ export const DesktopSshEnvironmentBootstrapSchema = Schema.Struct({
   pairingToken: Schema.NullOr(Schema.String),
   remotePort: Schema.optionalKey(Schema.Number),
   remoteServerKind: Schema.optionalKey(Schema.Literals(["external", "managed"])),
+  remoteServerVersion: Schema.optionalKey(Schema.String),
 });
 
 export interface DesktopSshPasswordPromptRequest {
