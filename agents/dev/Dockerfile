@@ -77,7 +77,7 @@ RUN case "${TARGETARCH}" in \
 # nested Sandboxes, agentd's /dev/kvm and Podman setup, the SSH OOM policy, and the Agent sandbox
 # section, agentctl skill and flagless logins it gives nested Agents. The host needs that release
 # or later, and nested Agents run on this one. agentd downloads its runtime on first use.
-COPY --from=ghcr.io/digdir/agentctl:v0.1.0-preview.13@sha256:2374c65d96d61d91df1a6416e444a067d825f9650151d933b8563cad77e02d2a /agentctl /agentd /usr/local/bin/
+COPY --from=ghcr.io/digdir/agentctl:v0.1.0-preview.13@sha256:5451dd5e912865d7ed4544f0bf2e6d0912cd274b878515224cd05896a286b28f /agentctl /agentd /usr/local/bin/
 RUN agentctl --version
 
 COPY rootfs/ /
