@@ -21,7 +21,3 @@ spec:
         mode: direct
       # Nested Agents of its own would need virtualization two levels down.
       nestedSandboxes: null
-    mounts:
-      - type: tmpfs
-        target: /tmp
-        capacity: "2Gi"

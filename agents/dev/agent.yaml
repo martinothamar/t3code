@@ -19,10 +19,6 @@ spec:
       # leaves the Agent without them, as its NestedSandboxes condition says.
       nestedSandboxes: preferred
     initSystem: image
-    mounts:
-      - type: tmpfs
-        target: /tmp
-        capacity: "4Gi"
   home:
     source: home
   instructions:

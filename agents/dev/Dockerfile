@@ -3,7 +3,7 @@
 # desktop with VNC access, the `desktop` helper and the computer-use skill. This image adds what
 # developing T3 Code needs.
 
-FROM ghcr.io/digdir/agentctl-base:ubuntu-26.04-desktop@sha256:ec5ce4ba36f5f8a71078fb02703d4604d28411fc3a035f2ee2c24d1febb3839e
+FROM ghcr.io/digdir/agentctl-base:ubuntu-26.04-desktop@sha256:762a7fd2fc929cddcd1ee8ab90a203c963518719e904fca7a6802111796e2cc7
 
 # The base ends as the unprivileged Agent user; installing packages needs root again.
 USER root
@@ -73,11 +73,11 @@ RUN case "${TARGETARCH}" in \
     && chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" \
     && rm -rf "${HOME}" /root/.npm
 
-# agentctl and agentd from digdir-agents main, which the Agent needs until a release ships what it
-# relies on: nested Sandboxes, agentd's /dev/kvm and Podman setup, the SSH OOM policy, and the
-# Agent sandbox section, agentctl skill and flagless logins it gives nested Agents. The host runs
-# the same build, and nested Agents run on this one. agentd downloads its runtime on first use.
-COPY --from=ghcr.io/digdir/agentctl:main@sha256:20419bf3c63d835318d6815949741ea272b4d8eaff49e3ff6c759080858a0f38 /agentctl /agentd /usr/local/bin/
+# agentctl and agentd from 0.1.0-preview.13, the first release with what the Agent relies on:
+# nested Sandboxes, agentd's /dev/kvm and Podman setup, the SSH OOM policy, and the Agent sandbox
+# section, agentctl skill and flagless logins it gives nested Agents. The host needs that release
+# or later, and nested Agents run on this one. agentd downloads its runtime on first use.
+COPY --from=ghcr.io/digdir/agentctl:v0.1.0-preview.13@sha256:5451dd5e912865d7ed4544f0bf2e6d0912cd274b878515224cd05896a286b28f /agentctl /agentd /usr/local/bin/
 RUN agentctl --version
 
 COPY rootfs/ /
