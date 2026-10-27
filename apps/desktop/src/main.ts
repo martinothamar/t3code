@@ -62,7 +62,10 @@ import * as DesktopShellEnvironment from "./shell/DesktopShellEnvironment.ts";
 import * as DesktopSshEnvironment from "./ssh/DesktopSshEnvironment.ts";
 import * as DesktopAgentctlSandboxes from "./agentctl/DesktopAgentctlSandboxes.ts";
 import * as DesktopSshPasswordPrompts from "./ssh/DesktopSshPasswordPrompts.ts";
-import { remoteServerOverrides, withRemoteServerOverrides } from "./ssh/remoteServerOverrides.ts";
+import {
+  remoteServerOverrides,
+  withRemoteServerOverrides,
+} from "@t3tools/ssh/remoteServerOverrides";
 import * as DesktopState from "./app/DesktopState.ts";
 import * as DesktopLegacyLocalStorage from "./app/DesktopLegacyLocalStorage.ts";
 import * as DesktopTelemetryPublisher from "./telemetry/DesktopTelemetryPublisher.ts";

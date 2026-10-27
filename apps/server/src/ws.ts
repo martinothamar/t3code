@@ -189,6 +189,7 @@ import { terminalOutputStream, withTerminalOutputWindow } from "./terminal/Outpu
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as DeviceService from "./device/DeviceService.ts";
+import * as AgentctlSandboxes from "./agentctl/AgentctlSandboxes.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -1275,6 +1276,7 @@ export const layerWsRpc = (
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
+      const sandboxes = yield* AgentctlSandboxes.AgentctlSandboxes;
       const deviceHostContext =
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
       const orchestrationEngine = yield* Orchestrator.OrchestratorV2;
@@ -1779,6 +1781,7 @@ export const layerWsRpc = (
           shellResumeCompletionMarker: true,
           shellThreadFamilies: true,
           shellOlderSettled: true,
+          agentctlSandboxes: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
           threadFind: true,
@@ -3057,6 +3060,23 @@ export const layerWsRpc = (
         [WS_METHODS.deviceDetail]: (input) => deviceService.detail(input),
         [WS_METHODS.deviceAction]: (input) => deviceService.action(input),
         [WS_METHODS.subscribeDeviceState]: (_input) => DeviceService.stateStream(deviceService),
+        [WS_METHODS.agentctlStartSandbox]: (input) => sandboxes.start(input.name),
+        [WS_METHODS.agentctlStopSandbox]: (input) => sandboxes.stop(input.name),
+        [WS_METHODS.agentctlDeleteSandbox]: (input) => sandboxes.remove(input.name),
+        [WS_METHODS.agentctlCreateSandbox]: (input) => sandboxes.create(input),
+        [WS_METHODS.agentctlPairSandbox]: (input) => sandboxes.pair(input.name),
+        [WS_METHODS.agentctlMarkSettingsSeeded]: (input) =>
+          sandboxes.markSettingsSeeded(input.name, input.environmentId),
+        [WS_METHODS.agentctlListManifests]: (_input) => sandboxes.listManifests,
+        [WS_METHODS.agentctlListManifestRoots]: (_input) => sandboxes.listManifestRoots,
+        [WS_METHODS.agentctlRefreshManifestRoots]: (_input) => sandboxes.refreshManifestRoots,
+        [WS_METHODS.agentctlGetSettings]: (_input) => sandboxes.getSettings,
+        [WS_METHODS.agentctlAddManifestRoot]: (input) => sandboxes.addManifestRoot(input.folder),
+        [WS_METHODS.agentctlRemoveManifestRoot]: (input) =>
+          sandboxes.removeManifestRoot(input.folder),
+        [WS_METHODS.agentctlPullManifestRoots]: (input) =>
+          sandboxes.pullManifestRoots(input.folders),
+        [WS_METHODS.subscribeAgentctlSandboxes]: (_input) => sandboxes.changes,
         [WS_METHODS.subscribeDiscoveredLocalServers]: (input) =>
           Stream.callback<DiscoveredLocalServerList>((queue) =>
             Effect.gen(function* () {

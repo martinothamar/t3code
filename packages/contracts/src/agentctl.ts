@@ -3,9 +3,10 @@ import * as Schema from "effect/Schema";
 import { EnvironmentId } from "./baseSchemas.ts";
 import { DesktopSshEnvironmentTargetSchema } from "./ipc.ts";
 
-// agentctl Agent Sandboxes, discovered and managed by the desktop app. These
-// types only cross the desktop IPC bridge, never the server wire: each Sandbox
-// runs its own unmodified T3 server, reached over SSH like any SSH host.
+// agentctl Agent Sandboxes, which the host's T3 server discovers and manages
+// for every client connected to it. Each Sandbox runs its own unmodified T3
+// server, which the host reaches over SSH and relays at
+// `/sandbox/<name>/` on its own origin.
 
 /** Lifecycle of an Agent as agentctl reports it, derived like `agentctl tui` does. */
 export const AgentctlSandboxPhase = Schema.Literals([
@@ -149,6 +150,39 @@ export const AgentctlActionResult = Schema.Struct({
   error: Schema.NullOr(Schema.String),
 });
 export type AgentctlActionResult = typeof AgentctlActionResult.Type;
+
+export const AgentctlSandboxNameInput = Schema.Struct({ name: Schema.String });
+export type AgentctlSandboxNameInput = typeof AgentctlSandboxNameInput.Type;
+
+export const AgentctlManifestRootInput = Schema.Struct({ folder: Schema.String });
+export type AgentctlManifestRootInput = typeof AgentctlManifestRootInput.Type;
+
+export const AgentctlPullManifestRootsInput = Schema.Struct({
+  folders: Schema.Array(Schema.String),
+});
+export type AgentctlPullManifestRootsInput = typeof AgentctlPullManifestRootsInput.Type;
+
+export const AgentctlMarkSettingsSeededInput = Schema.Struct({
+  name: Schema.String,
+  environmentId: EnvironmentId,
+});
+export type AgentctlMarkSettingsSeededInput = typeof AgentctlMarkSettingsSeededInput.Type;
+
+/** A one-time code the Sandbox's own server issued, which a client redeems for its own session. */
+export const AgentctlSandboxPairing = Schema.Struct({
+  environmentId: EnvironmentId,
+  pairingToken: Schema.String,
+});
+export type AgentctlSandboxPairing = typeof AgentctlSandboxPairing.Type;
+
+export class AgentctlSandboxError extends Schema.TaggedError<AgentctlSandboxError>()(
+  "AgentctlSandboxError",
+  {
+    name: Schema.String,
+    reason: Schema.Literals(["not-found", "not-running", "unreachable"]),
+    message: Schema.String,
+  },
+) {}
 
 export interface DesktopAgentctlBridge {
   /** The latest discovery result; cheap and synchronous, so callers poll it. */
