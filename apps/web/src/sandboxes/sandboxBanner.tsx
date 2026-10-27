@@ -1,39 +1,56 @@
-import type { AgentctlSandboxesSnapshot } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
 import { WifiOffIcon } from "lucide-react";
+import { Atom } from "effect/reactivity";
 
 import type { ComposerBannerStackItem } from "../components/chat/ComposerBannerStack";
 import { Button } from "../components/ui/button";
+import { sandboxEnvironment } from "../state/sandboxes";
 import { startSandbox } from "./sandboxActions";
-import { useSandboxSelector } from "./useSandboxes";
+import { readSandboxes } from "./useSandboxes";
 
-const findSandbox = (snapshot: AgentctlSandboxesSnapshot, environmentId: string | null) =>
-  environmentId === null
-    ? undefined
-    : snapshot.sandboxes.find((sandbox) => sandbox.environmentId === environmentId);
+// A primitive per environment, so the chat only re-renders when the banner changes.
+const bannerStateAtom = Atom.family((environmentId: string) =>
+  Atom.make((get): `${"stopped" | "starting"}:${string}` | null => {
+    const sandbox = get(sandboxEnvironment.sandboxesAtom).find(
+      (candidate) => candidate.environmentId === environmentId,
+    );
+    if (sandbox === undefined) return null;
+    if (sandbox.action === null && sandbox.phase === "stopped") return `stopped:${sandbox.name}`;
+    if (sandbox.action === "starting" || sandbox.phase === "starting") {
+      return `starting:${sandbox.name}`;
+    }
+    return null;
+  }).pipe(Atom.withLabel(`sandboxes:banner:${environmentId}`)),
+);
+const NO_BANNER = Atom.make(null).pipe(Atom.withLabel("sandboxes:banner:none"));
 
 /**
  * The composer's offline banner for a Sandbox environment, in place of the
  * generic one: a stopped Sandbox is not reconnecting, it needs starting.
  */
 export function useSandboxBanner(environmentId: string | null): ComposerBannerStackItem | null {
-  // Primitive selections, so the chat only re-renders when the banner changes.
-  const name = useSandboxSelector((snapshot) => findSandbox(snapshot, environmentId)?.name ?? null);
-  const state = useSandboxSelector((snapshot) => {
-    const sandbox = findSandbox(snapshot, environmentId);
-    if (sandbox?.action === null && sandbox.phase === "stopped") return "stopped";
-    if (sandbox?.action === "starting" || sandbox?.phase === "starting") return "starting";
-    return null;
-  });
-
-  if (environmentId === null || name === null || state === null) return null;
+  const state = useAtomValue(environmentId === null ? NO_BANNER : bannerStateAtom(environmentId));
+  if (environmentId === null || state === null) return null;
+  const separator = state.indexOf(":");
+  const kind = state.slice(0, separator);
+  const name = state.slice(separator + 1);
   return {
     id: `environment-unavailable:${environmentId}`,
     variant: "warning",
     icon: <WifiOffIcon />,
-    title: state === "stopped" ? `${name} is stopped` : `${name} is starting…`,
+    title: kind === "stopped" ? `${name} is stopped` : `${name} is starting…`,
     actions:
-      state === "stopped" ? (
-        <Button size="xs" variant="ghost" onClick={() => void startSandbox(name)}>
+      kind === "stopped" ? (
+        <Button
+          size="xs"
+          variant="ghost"
+          onClick={() => {
+            const sandbox = readSandboxes().find(
+              (candidate) => candidate.environmentId === environmentId,
+            );
+            if (sandbox !== undefined) void startSandbox(sandbox);
+          }}
+        >
           Start
         </Button>
       ) : undefined,

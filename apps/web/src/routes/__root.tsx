@@ -248,8 +248,8 @@ function RootRouteView() {
         >
           {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
           {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
-          {isElectron ? <SandboxConnectionCoordinator /> : null}
-          {isElectron ? <NewSandboxDialogHost /> : null}
+          <SandboxConnectionCoordinator />
+          <NewSandboxDialogHost />
           {primaryEnvironmentAuthenticated ? <DesktopWebLinkCoordinator /> : null}
           {isElectron ? <RunningThreadKeepAlive /> : null}
           <RelayClientInstallDialog />

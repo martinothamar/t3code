@@ -1,7 +1,6 @@
 import * as Schema from "effect/Schema";
 
 import { EnvironmentId } from "./baseSchemas.ts";
-import { DesktopSshEnvironmentTargetSchema } from "./ipc.ts";
 
 // agentctl Agent Sandboxes, which the host's T3 server discovers and manages
 // for every client connected to it. Each Sandbox runs its own unmodified T3
@@ -46,8 +45,6 @@ export const AgentctlSandbox = Schema.Struct({
   network: Schema.NullOr(Schema.String),
   /** False when the manifest has no `ssh` access, so T3 cannot reach it. */
   sshAccess: Schema.Boolean,
-  /** The SSH target as T3 resolved it when it first reached the Sandbox. */
-  sshTarget: Schema.NullOr(DesktopSshEnvironmentTargetSchema),
   /** Known once T3 has reached the Sandbox's server; null before that. */
   environmentId: Schema.NullOr(EnvironmentId),
   /** Whether this environment already got the user's preference settings from this computer. */
@@ -183,25 +180,3 @@ export class AgentctlSandboxError extends Schema.TaggedError<AgentctlSandboxErro
     message: Schema.String,
   },
 ) {}
-
-export interface DesktopAgentctlBridge {
-  /** The latest discovery result; cheap and synchronous, so callers poll it. */
-  getSnapshot: () => AgentctlSandboxesSnapshot;
-  start: (name: string) => Promise<AgentctlActionResult>;
-  stop: (name: string) => Promise<AgentctlActionResult>;
-  remove: (name: string) => Promise<AgentctlActionResult>;
-  create: (input: AgentctlCreateSandboxInput) => Promise<AgentctlActionResult>;
-  listManifests: () => Promise<readonly AgentctlSandboxManifest[]>;
-  listManifestRoots: () => Promise<readonly AgentctlManifestRoot[]>;
-  /** Fetches each manifest repository first, so `behind` is current. */
-  refreshManifestRoots: () => Promise<readonly AgentctlManifestRoot[]>;
-  getSettings: () => Promise<AgentctlSandboxSettings>;
-  addManifestRoot: (folder: string) => Promise<AgentctlSandboxSettings>;
-  removeManifestRoot: (folder: string) => Promise<AgentctlSandboxSettings>;
-  /** Fast-forwards every repository in these folders, each once. */
-  pullManifestRoots: (folders: readonly string[]) => Promise<AgentctlPullResult>;
-  /** Records that the Sandbox's environment got its preference settings, so they are not copied again. */
-  markSettingsSeeded: (name: string, environmentId: EnvironmentId) => Promise<void>;
-  /** Opens a configured folder in the system file manager. */
-  openManifestRoot: (folder: string) => Promise<boolean>;
-}

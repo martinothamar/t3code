@@ -6,7 +6,7 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { sandboxSettingsSeed } from "./sandboxSettingsSeed";
+import { sandboxSettingsSeed } from "./settingsSeed.ts";
 
 const sandboxSettingsSeedPatch = (
   input: Omit<Parameters<typeof sandboxSettingsSeed>[0], "harnesses">,

@@ -1,4 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
+import { isSandboxBeingDeleted } from "@t3tools/client-runtime/sandboxes";
+import { sandboxSettingsSeed } from "@t3tools/client-runtime/sandboxes/settings-seed";
 import {
   AuthProvidersManageScope,
   EnvironmentId,
@@ -7,21 +9,19 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef } from "react";
 
-import { environmentCatalog } from "../connection/catalog";
 import { useEnvironmentPresentation } from "../state/presentation";
 import { useEnvironmentQuery } from "../state/query";
-import { primaryServerConfigAtom, serverEnvironment } from "../state/server";
+import { sandboxEnvironment } from "../state/sandboxes";
+import { serverEnvironment } from "../state/server";
 import { readEnvironmentScope } from "../state/session";
 import { environmentShell } from "../state/shell";
 import { useAtomCommand } from "../state/use-atom-command";
-import { isSandboxBeingDeleted, readAgentctlBridge } from "./sandboxConnections";
 import { useEnsureSandboxProject } from "./sandboxProjects";
-import { sandboxSettingsSeed } from "./sandboxSettingsSeed";
 import { useSandboxes } from "./useSandboxes";
 
 /**
- * Keeps each known Sandbox's environment in step with the Sandbox: connects
- * as soon as it is running again, and gives it its project once connected.
+ * Gives each Sandbox environment its project once connected, and the preferences changed on its
+ * host once. Connecting follows the host's Sandbox list in client-runtime.
  */
 export function SandboxConnectionCoordinator() {
   const sandboxes = useSandboxes();
@@ -51,10 +51,10 @@ export function SandboxConnectionCoordinator() {
   return sandboxes.map((sandbox) =>
     sandbox.environmentId === null ? null : (
       <SandboxEnvironmentCoordinator
-        key={`${sandbox.name}:${sandbox.environmentId}`}
+        key={`${sandbox.hostEnvironmentId}:${sandbox.name}:${sandbox.environmentId}`}
         name={sandbox.name}
+        hostEnvironmentId={sandbox.hostEnvironmentId}
         environmentId={EnvironmentId.make(sandbox.environmentId)}
-        running={sandbox.phase === "ready" && sandbox.action === null}
         workingDirectory={sandbox.workingDirectory}
         settingsSeeded={sandbox.settingsSeeded}
         harnesses={sandbox.harnesses}
@@ -65,8 +65,8 @@ export function SandboxConnectionCoordinator() {
 
 function SandboxEnvironmentCoordinator(props: {
   readonly name: string;
+  readonly hostEnvironmentId: EnvironmentId;
   readonly environmentId: EnvironmentId;
-  readonly running: boolean;
   readonly workingDirectory: string | null;
   readonly settingsSeeded: boolean;
   readonly harnesses: ReadonlyArray<string>;
@@ -77,25 +77,19 @@ function SandboxEnvironmentCoordinator(props: {
   const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
     reportFailure: false,
   });
-  const localConfig = useAtomValue(primaryServerConfigAtom);
+  const markSettingsSeeded = useAtomCommand(sandboxEnvironment.markSettingsSeeded, {
+    reportFailure: false,
+  });
+  const localConfig = useAtomValue(serverEnvironment.configValueAtom(props.hostEnvironmentId));
   const sandboxConfig = useAtomValue(serverEnvironment.configValueAtom(props.environmentId));
   // The Sandbox's providers arrive after it connects; waiting for them keeps
   // model selections from being skipped for good.
   const configsLoaded =
     localConfig !== null && sandboxConfig !== null && sandboxConfig.providers.length > 0;
   const seeding = useRef(false);
-  const retryNow = useAtomCommand(environmentCatalog.retryNow, { reportFailure: false });
   const connected = presentation?.connection.phase === "connected";
   // Only a live project list can show the project is missing; a cached one may predate a removal.
   const ready = connected && shell.data?.status === "live" && shell.data.snapshot._tag === "Some";
-
-  // A started Sandbox should not wait out the backoff its stopped time built up.
-  const reconnect = useEffectEvent(() => {
-    if (!connected) void retryNow(props.environmentId);
-  });
-  useEffect(() => {
-    if (props.running) reconnect();
-  }, [props.running]);
 
   // Each connect makes sure the Sandbox has its project, so a removed one comes back.
   useEffect(() => {
@@ -109,7 +103,7 @@ function SandboxEnvironmentCoordinator(props: {
     });
   }, [ready, ensureProject, props.name, props.environmentId, props.workingDirectory]);
 
-  // A new Sandbox starts with the preferences changed on this computer, once,
+  // A new Sandbox starts with the preferences changed on its host, once,
   // so a later deliberate choice in the Sandbox is never undone.
   const seedSettings = useEffectEvent(async () => {
     if (seeding.current || props.settingsSeeded || !configsLoaded) {
@@ -140,7 +134,10 @@ function SandboxEnvironmentCoordinator(props: {
           return;
         }
       }
-      await readAgentctlBridge()?.markSettingsSeeded(props.name, props.environmentId);
+      await markSettingsSeeded({
+        environmentId: props.hostEnvironmentId,
+        input: { name: props.name, environmentId: props.environmentId },
+      });
     };
     // `.finally` rather than try/finally, which the React Compiler cannot compile.
     await run().finally(() => {

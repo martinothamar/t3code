@@ -1,3 +1,4 @@
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useSyncExternalStore } from "react";
 
 // Sandboxes this window created, kept in view in the sidebar until a thread
@@ -10,14 +11,19 @@ function emit(next: ReadonlySet<string>) {
   for (const listener of listeners) listener();
 }
 
-export function rememberCreatedSandbox(name: string) {
-  if (!created.has(name)) emit(new Set([...created, name]));
+/** Names a Sandbox across hosts, which may each have one of the same name. */
+export const createdSandboxKey = (hostEnvironmentId: EnvironmentId, name: string) =>
+  `${hostEnvironmentId}:${name}`;
+
+export function rememberCreatedSandbox(hostEnvironmentId: EnvironmentId, name: string) {
+  const key = createdSandboxKey(hostEnvironmentId, name);
+  if (!created.has(key)) emit(new Set([...created, key]));
 }
 
-export function forgetCreatedSandbox(name: string) {
-  if (!created.has(name)) return;
+export function forgetCreatedSandbox(key: string) {
+  if (!created.has(key)) return;
   const next = new Set(created);
-  next.delete(name);
+  next.delete(key);
   emit(next);
 }
 

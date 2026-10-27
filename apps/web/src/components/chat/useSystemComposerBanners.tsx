@@ -14,7 +14,7 @@ import { environmentCatalog } from "../../connection/catalog";
 import { ConnectionDiagnosisHeadline } from "../settings/ConnectionDiagnosisDetails";
 import { isDesktopLocalConnectionTarget } from "../../connection/desktopLocal";
 import { useSandboxBanner } from "../../sandboxes/sandboxBanner";
-import { sandboxNameForTarget } from "../../sandboxes/sandboxConnections";
+import { sandboxForTarget } from "@t3tools/client-runtime/sandboxes";
 import { useEnvironmentDisconnectDelay } from "../../hooks/useEnvironmentDisconnectDelay";
 import { serverEnvironment } from "../../state/server";
 import { type EnvironmentPresentation } from "../../state/environments";
@@ -131,7 +131,7 @@ export function useSystemComposerBanners(input: SystemComposerBannersInput) {
     activeEnvironment.entry.target._tag !== "PrimaryConnectionTarget" &&
     !isDesktopLocalConnectionTarget(activeEnvironment.entry.target) &&
     // A Sandbox is managed from its own lifecycle; stopping it is the way out.
-    sandboxNameForTarget(activeEnvironment.entry.target) === null;
+    sandboxForTarget(activeEnvironment.entry.target) === null;
   const [disconnectingEnvironment, setDisconnectingEnvironment] = useState(false);
   const handleDisconnectActiveEnvironment = async (environmentId: EnvironmentId) => {
     setDisconnectingEnvironment(true);

@@ -58,11 +58,19 @@ export function sandboxForTarget(
 }
 
 /** A Sandbox on its way out, whose environment clients let go of right away. */
-const isSandboxBeingDeleted = (sandbox: AgentctlSandbox) =>
+export const isSandboxBeingDeleted = (sandbox: AgentctlSandbox) =>
   sandbox.action === "deleting" || sandbox.phase === "terminating";
 
 const isSandboxRunning = (sandbox: AgentctlSandbox) =>
   sandbox.phase === "ready" && sandbox.action === null;
+
+/** The Sandboxes that are environments: reached once, running or not, and not on their way out. */
+export const reachedSandboxes = (sandboxes: ReadonlyArray<AgentctlSandbox>) =>
+  sandboxes.flatMap((sandbox) =>
+    sandbox.environmentId === null || isSandboxBeingDeleted(sandbox)
+      ? []
+      : [{ ...sandbox, environmentId: EnvironmentId.make(sandbox.environmentId) }],
+  );
 
 export function sandboxRoute(hostHttpBaseUrl: string, name: string) {
   const httpBaseUrl = environmentServerUrl(hostHttpBaseUrl, `/sandbox/${name}/`).toString();
@@ -211,9 +219,8 @@ export const watchSandboxEnvironments = Effect.fn("SandboxEnvironments.watch")(f
       new Map(current).set(hostEnvironmentId, view.snapshot),
     );
     const registrations: BearerConnectionRegistration[] = [];
-    for (const sandbox of view.snapshot.sandboxes) {
-      if (sandbox.environmentId === null || isSandboxBeingDeleted(sandbox)) continue;
-      const environmentId = EnvironmentId.make(sandbox.environmentId);
+    for (const sandbox of reachedSandboxes(view.snapshot.sandboxes)) {
+      const environmentId = sandbox.environmentId;
       const connectionId = sandboxConnectionId(hostEnvironmentId, sandbox.name, environmentId);
       let token = yield* savedToken(connectionId);
       // A Sandbox this client never paired with is not an environment until it runs.
@@ -233,7 +240,7 @@ export const watchSandboxEnvironments = Effect.fn("SandboxEnvironments.watch")(f
         sandboxRegistration({
           hostEnvironmentId,
           hostHttpBaseUrl: view.httpBaseUrl,
-          sandbox: { ...sandbox, environmentId },
+          sandbox,
           token,
         }),
       );

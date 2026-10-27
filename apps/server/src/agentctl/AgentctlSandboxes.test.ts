@@ -231,7 +231,6 @@ describe("AgentctlSandboxes", () => {
     withSandboxes((sandboxes, harness) =>
       Effect.gen(function* () {
         const snapshot = yield* until(sandboxes, discovered("env-1"));
-        assert.deepStrictEqual(snapshot.sandboxes[0]?.sshTarget?.username, "agent");
         assert.strictEqual(snapshot.sandboxes[0]?.workingDirectory, "/home/agent/code");
         yield* sandboxes.refresh;
         yield* sandboxes.refresh;

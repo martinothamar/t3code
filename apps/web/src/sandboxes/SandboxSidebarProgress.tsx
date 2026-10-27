@@ -1,11 +1,12 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import type { HostedSandbox } from "@t3tools/client-runtime/state/sandboxes";
 import type { AgentctlSandbox } from "@t3tools/contracts";
 import { BoxIcon, XIcon } from "lucide-react";
 import { useEffect } from "react";
 
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useProjects, useThreadShells } from "../state/entities";
-import { forgetCreatedSandbox, useCreatedSandboxes } from "./createdSandboxes";
+import { createdSandboxKey, forgetCreatedSandbox, useCreatedSandboxes } from "./createdSandboxes";
 import { deleteSandbox, sandboxStatus, sandboxStatusDetail } from "./sandboxActions";
 import { useSandboxes } from "./useSandboxes";
 
@@ -19,9 +20,12 @@ const SETTING_UP = new Set<AgentctlSandbox["phase"]>([
 ]);
 
 /** A Sandbox still being set up, or one this window made that has no thread yet. */
-function isShown(sandbox: AgentctlSandbox, created: ReadonlySet<string>): boolean {
+const keyOf = (sandbox: HostedSandbox) =>
+  createdSandboxKey(sandbox.hostEnvironmentId, sandbox.name);
+
+function isShown(sandbox: HostedSandbox, created: ReadonlySet<string>): boolean {
   if (sandbox.phase === "terminating") return false;
-  if (sandbox.action === "creating" || created.has(sandbox.name)) return true;
+  if (sandbox.action === "creating" || created.has(keyOf(sandbox))) return true;
   return sandbox.environmentId === null && SETTING_UP.has(sandbox.phase);
 }
 
@@ -37,11 +41,7 @@ export function SandboxSidebarProgress() {
   return shown.length === 0 ? null : <SandboxProgressRows sandboxes={shown} />;
 }
 
-function SandboxProgressRows({
-  sandboxes,
-}: {
-  readonly sandboxes: ReadonlyArray<AgentctlSandbox>;
-}) {
+function SandboxProgressRows({ sandboxes }: { readonly sandboxes: ReadonlyArray<HostedSandbox> }) {
   const projects = useProjects();
   const threads = useThreadShells();
   const openThread = useNewThreadHandler();
@@ -53,10 +53,10 @@ function SandboxProgressRows({
       (sandbox) =>
         sandbox.environmentId !== null && environmentsWithThreads.has(sandbox.environmentId),
     )
-    .map((sandbox) => sandbox.name)
+    .map(keyOf)
     .join("\n");
   useEffect(() => {
-    for (const name of startedKey.split("\n")) if (name) forgetCreatedSandbox(name);
+    for (const key of startedKey.split("\n")) if (key) forgetCreatedSandbox(key);
   }, [startedKey]);
 
   return (
@@ -76,7 +76,7 @@ function SandboxProgressRows({
         const detail = ready ? null : sandboxStatusDetail(sandbox);
         return (
           <li
-            key={sandbox.name}
+            key={keyOf(sandbox)}
             className="flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-sidebar-foreground text-xs"
           >
             <BoxIcon
@@ -100,7 +100,7 @@ function SandboxProgressRows({
                   type="button"
                   className="mt-0.5 cursor-pointer text-sidebar-muted-foreground hover:text-sidebar-foreground"
                   onClick={() => {
-                    forgetCreatedSandbox(sandbox.name);
+                    forgetCreatedSandbox(keyOf(sandbox));
                     void openThread(scopeProjectRef(project.environmentId, project.id));
                   }}
                 >
@@ -116,12 +116,12 @@ function SandboxProgressRows({
                 </button>
               ) : null}
             </div>
-            {created.has(sandbox.name) && (ready || failed) ? (
+            {created.has(keyOf(sandbox)) && (ready || failed) ? (
               <button
                 type="button"
                 aria-label={`Dismiss ${sandbox.name}`}
                 className="shrink-0 cursor-pointer text-sidebar-muted-foreground/60 hover:text-sidebar-foreground"
-                onClick={() => forgetCreatedSandbox(sandbox.name)}
+                onClick={() => forgetCreatedSandbox(keyOf(sandbox))}
               >
                 <XIcon className="size-3.5" />
               </button>

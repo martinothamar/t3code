@@ -1,5 +1,8 @@
-import type { AgentctlSandboxManifest, AgentctlSandboxSettings } from "@t3tools/contracts";
-import { FolderSearchIcon } from "lucide-react";
+import type {
+  AgentctlSandboxManifest,
+  AgentctlSandboxSettings,
+  EnvironmentId,
+} from "@t3tools/contracts";
 import { useEffect, useEffectEvent, useState, useSyncExternalStore } from "react";
 
 import { Button } from "../components/ui/button";
@@ -14,23 +17,33 @@ import {
 } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
+import { sandboxEnvironment } from "../state/sandboxes";
 import { rememberCreatedSandbox } from "./createdSandboxes";
+import { ManifestFolderInput } from "./ManifestFolderInput";
 import { ManifestPicker } from "./ManifestPicker";
-import { suggestSandboxName } from "./sandboxActions";
-import { readAgentctlBridge } from "./sandboxConnections";
-import { refreshSandboxSnapshot, useSandboxes } from "./useSandboxes";
+import { runOnHost, suggestSandboxName } from "./sandboxActions";
+import {
+  readDefaultSandboxHost,
+  useOffersSandboxes,
+  useSandboxes,
+  useSandboxHost,
+} from "./useSandboxes";
 
-let open = false;
+// The host the dialog creates on, while it is open.
+let openHost: EnvironmentId | null = null;
 const listeners = new Set<() => void>();
 
-/** Opens the dialog from anywhere: the sidebar, the Sandboxes page or the command palette. */
-export function openNewSandboxDialog() {
-  open = true;
+/**
+ * Opens the dialog from anywhere: the sidebar, the Sandboxes page or the command palette. Without
+ * a host it uses the first that can reach agentctl.
+ */
+export function openNewSandboxDialog(hostEnvironmentId?: EnvironmentId) {
+  openHost = hostEnvironmentId ?? readDefaultSandboxHost();
   for (const listener of listeners) listener();
 }
 
 function closeNewSandboxDialog() {
-  open = false;
+  openHost = null;
   for (const listener of listeners) listener();
 }
 
@@ -40,17 +53,24 @@ function subscribe(listener: () => void) {
 }
 
 export function NewSandboxDialogHost() {
-  const isOpen = useSyncExternalStore(subscribe, () => open);
-  if (readAgentctlBridge() === null) return null;
+  const host = useSyncExternalStore(subscribe, () => openHost);
+  if (!useOffersSandboxes()) return null;
   return (
-    <Dialog open={isOpen} onOpenChange={(next) => (next ? null : closeNewSandboxDialog())}>
-      {isOpen ? <NewSandboxDialogContent /> : null}
+    <Dialog open={host !== null} onOpenChange={(next) => (next ? null : closeNewSandboxDialog())}>
+      {host !== null ? <NewSandboxDialogContent hostEnvironmentId={host} /> : null}
     </Dialog>
   );
 }
 
-function NewSandboxDialogContent() {
-  const sandboxes = useSandboxes();
+function NewSandboxDialogContent({
+  hostEnvironmentId,
+}: {
+  readonly hostEnvironmentId: EnvironmentId;
+}) {
+  const sandboxes = useSandboxes().filter(
+    (sandbox) => sandbox.hostEnvironmentId === hostEnvironmentId,
+  );
+  const homeDirectory = useSandboxHost(hostEnvironmentId)?.snapshot.homeDirectory ?? "";
   const [manifests, setManifests] = useState<ReadonlyArray<AgentctlSandboxManifest> | null>(null);
   const [settings, setSettings] = useState<AgentctlSandboxSettings | null>(null);
   const [manifestPath, setManifestPath] = useState<string | null>(null);
@@ -74,14 +94,17 @@ function NewSandboxDialogContent() {
         null,
     );
   };
-  const load = () => {
-    const bridge = readAgentctlBridge();
-    if (bridge === null) return Promise.resolve(null);
-    return Promise.all([bridge.listManifests(), bridge.getSettings()]).catch((cause: unknown) => {
-      setError(cause instanceof Error ? cause.message : String(cause));
-      return null;
+  const load = () =>
+    Promise.all([
+      runOnHost(sandboxEnvironment.listManifests, hostEnvironmentId, {}),
+      runOnHost(sandboxEnvironment.getSettings, hostEnvironmentId, {}),
+    ]).then(([listed, read]) => {
+      if ("error" in listed || "error" in read) {
+        setError("error" in listed ? listed.error : "error" in read ? read.error : null);
+        return null;
+      }
+      return [listed.value, read.value] as const;
     });
-  };
 
   const loadInitial = useEffectEvent((isCancelled: () => boolean) => {
     void load().then((loaded) => {
@@ -103,32 +126,39 @@ function NewSandboxDialogContent() {
   const suggestedName = manifest === null ? "" : suggestSandboxName(manifest.agentName, sandboxes);
   const effectiveName = nameEdited ? name : suggestedName;
 
-  const addManifestRoot = async () => {
-    const bridge = readAgentctlBridge();
-    const folder = await window.desktopBridge?.pickFolder();
-    if (!bridge || !folder) return;
-    await bridge.addManifestRoot(folder);
+  const addManifestRoot = async (folder: string) => {
+    const added = await runOnHost(sandboxEnvironment.addManifestRoot, hostEnvironmentId, {
+      folder,
+    });
+    if ("error" in added) {
+      setError(added.error);
+      return;
+    }
+    // The host keeps only folders that exist there.
+    if (added.value.manifestRoots.length === (settings?.manifestRoots.length ?? 0)) {
+      setError(`${folder} is not a folder on this host.`);
+    }
     const loaded = await load();
     if (loaded !== null) apply(...loaded);
   };
 
   const create = async () => {
-    const bridge = readAgentctlBridge();
-    if (bridge === null || manifest === null) return;
+    if (manifest === null) return;
     setSubmitting(true);
     setError(null);
-    const result = await bridge.create({
+    const name = effectiveName.trim();
+    const created = await runOnHost(sandboxEnvironment.create, hostEnvironmentId, {
       manifestPath: manifest.path,
-      name: effectiveName.trim(),
+      name,
     });
     setSubmitting(false);
-    refreshSandboxSnapshot();
-    if (result.error !== null) {
-      setError(result.error);
+    const failure = "error" in created ? created.error : created.value.error;
+    if (failure !== null) {
+      setError(failure);
       return;
     }
     // The sidebar shows its progress from here, so there is nothing to wait for.
-    rememberCreatedSandbox(effectiveName.trim());
+    rememberCreatedSandbox(hostEnvironmentId, name);
     closeNewSandboxDialog();
   };
 
@@ -143,13 +173,17 @@ function NewSandboxDialogContent() {
             Code finds every agent.yaml and agent.&lt;variant&gt;.yaml in it.
           </DialogDescription>
         </DialogHeader>
+        <DialogPanel>
+          <ManifestFolderInput
+            hostEnvironmentId={hostEnvironmentId}
+            label="Choose folder…"
+            onAdd={addManifestRoot}
+          />
+          {error ? <div className="mt-2 break-words text-destructive text-sm">{error}</div> : null}
+        </DialogPanel>
         <DialogFooter variant="bare">
           <Button variant="outline" onClick={closeNewSandboxDialog}>
             Cancel
-          </Button>
-          <Button onClick={() => void addManifestRoot()}>
-            <FolderSearchIcon className="size-4" />
-            Choose folder…
           </Button>
         </DialogFooter>
       </DialogPopup>
@@ -181,20 +215,17 @@ function NewSandboxDialogContent() {
           ) : (
             <ManifestPicker
               manifests={manifests}
+              homeDirectory={homeDirectory}
               value={manifest}
               onValueChange={(next) => setManifestPath(next.path)}
             />
           )}
           <div>
-            <Button
-              type="button"
-              size="xs"
-              variant="ghost-muted"
-              onClick={() => void addManifestRoot()}
-            >
-              <FolderSearchIcon className="size-3" />
-              Add manifest folder
-            </Button>
+            <ManifestFolderInput
+              hostEnvironmentId={hostEnvironmentId}
+              label="Add manifest folder"
+              onAdd={addManifestRoot}
+            />
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="new-sandbox-name">Name</Label>

@@ -442,7 +442,10 @@ export const make = Effect.gen(function* () {
 
   return AgentctlSandboxes.of({
     snapshot: SubscriptionRef.get(snapshotRef),
-    changes: Stream.unwrap(startPolling.pipe(Effect.as(SubscriptionRef.changes(snapshotRef)))),
+    // Each poll publishes; clients only hear about a change.
+    changes: Stream.unwrap(startPolling.pipe(Effect.as(SubscriptionRef.changes(snapshotRef)))).pipe(
+      Stream.changesWith((previous, next) => JSON.stringify(previous) === JSON.stringify(next)),
+    ),
     refresh,
     start: (name) => runAction(name, "starting", cli.start(name)),
     stop: (name) => runAction(name, "stopping", cli.stop(name)),
@@ -504,8 +507,10 @@ export const make = Effect.gen(function* () {
       return yield* Deferred.await(next);
     }),
     addManifestRoot: Effect.fn("AgentctlSandboxes.addManifestRoot")(function* (folder) {
-      // "/a/" and "/a" are one folder.
-      const resolved = path.resolve(folder);
+      // "/a/" and "/a" are one folder, and a client names this machine's home as `~`.
+      const expanded = folder.trim().replace(/^~(?=$|[\\/])/u, homeDirectory);
+      if (!path.isAbsolute(expanded)) return yield* getSettings;
+      const resolved = path.resolve(expanded);
       // Only directories, since a desktop client can open a configured folder with the system handler.
       if (!(yield* isDirectory(resolved))) return yield* getSettings;
       return yield* updateManifestRoots((roots) =>

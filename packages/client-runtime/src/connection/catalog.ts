@@ -100,18 +100,6 @@ export class SshConnectionRegistration extends Schema.TaggedClass<SshConnectionR
   },
 ) {}
 
-/**
- * An SSH host the platform discovers, such as an agentctl Sandbox. It pairs on
- * its first connect, like a saved SSH environment, so it carries no credential.
- */
-export class PlatformSshConnectionRegistration extends Schema.TaggedClass<PlatformSshConnectionRegistration>()(
-  "PlatformSshConnectionRegistration",
-  {
-    target: SshConnectionTarget,
-    profile: SshConnectionProfile,
-  },
-) {}
-
 export const ConnectionRegistration = Schema.Union([
   RelayConnectionRegistration,
   BearerConnectionRegistration,
@@ -120,19 +108,19 @@ export const ConnectionRegistration = Schema.Union([
 export type ConnectionRegistration = typeof ConnectionRegistration.Type;
 
 /**
- * The primary stays on same-origin cookie auth; secondary local backends live on a separate
- * loopback origin with a bearer token minted from their bootstrap credential. Hosts the desktop
- * discovers over SSH, such as agentctl Sandboxes, connect like saved SSH environments.
+ * The primary stays on same-origin cookie auth
+ * (`PrimaryConnectionRegistration`); secondary local backends live on a
+ * separate loopback origin and authenticate with a bearer token minted from
+ * their bootstrap credential (`BearerConnectionRegistration`).
  */
 export const PlatformConnectionRegistration = Schema.Union([
   PrimaryConnectionRegistration,
   BearerConnectionRegistration,
-  PlatformSshConnectionRegistration,
 ]);
 export type PlatformConnectionRegistration = typeof PlatformConnectionRegistration.Type;
 
 export function connectionRegistrationCatalogEntry(
-  registration: ConnectionRegistration | PlatformConnectionRegistration,
+  registration: ConnectionRegistration | PrimaryConnectionRegistration,
 ): ConnectionCatalogEntry {
   switch (registration._tag) {
     case "PrimaryConnectionRegistration":
@@ -144,7 +132,6 @@ export function connectionRegistrationCatalogEntry(
       };
     case "BearerConnectionRegistration":
     case "SshConnectionRegistration":
-    case "PlatformSshConnectionRegistration":
       return {
         target: registration.target,
         profile: Option.some(registration.profile),

@@ -3,6 +3,7 @@ import { EnvironmentId, type AgentctlSandbox } from "@t3tools/contracts";
 
 import { BearerConnectionTarget, SshConnectionTarget } from "../connection/model.ts";
 import {
+  reachedSandboxes,
   sandboxConnectionId,
   sandboxForTarget,
   sandboxRegistration,
@@ -22,7 +23,6 @@ const sandbox: AgentctlSandbox & { readonly environmentId: EnvironmentId } = {
   disk: null,
   network: null,
   sshAccess: true,
-  sshTarget: null,
   environmentId: SANDBOX,
   settingsSeeded: false,
   harnesses: [],
@@ -81,6 +81,24 @@ describe("Sandbox environments", () => {
         }),
       ),
     ).toBeNull();
+  });
+
+  it("makes every Sandbox it has reached an environment, running or not", () => {
+    const reached = reachedSandboxes([
+      sandbox,
+      { ...sandbox, name: "stopped", phase: "stopped" },
+      { ...sandbox, name: "new", environmentId: null },
+    ]);
+    expect(reached.map((candidate) => candidate.name)).toEqual(["worker-1", "stopped"]);
+  });
+
+  it("lets go of a Sandbox as soon as it is being deleted", () => {
+    const reached = reachedSandboxes([
+      { ...sandbox, name: "deleting", action: "deleting" },
+      { ...sandbox, name: "terminating", phase: "terminating" },
+      { ...sandbox, name: "stopping", action: "stopping" },
+    ]);
+    expect(reached.map((candidate) => candidate.name)).toEqual(["stopping"]);
   });
 
   it("gives a recreated Sandbox a connection of its own", () => {

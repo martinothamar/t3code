@@ -103,7 +103,6 @@ export function buildSandbox(
     disk: resources?.rootFilesystem?.capacity ?? null,
     network: agent.spec.network?.mode ?? null,
     sshAccess: hasSshAccess(agent),
-    sshTarget: record?.sshTarget ?? null,
     environmentId: record?.environmentId ?? null,
     settingsSeeded: record?.settingsSeeded ?? false,
     harnesses: agent.status?.sandbox?.harnesses ?? [],
