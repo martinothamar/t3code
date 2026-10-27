@@ -207,6 +207,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.deviceDetail]: AuthOrchestrationReadScope,
   [WS_METHODS.deviceAction]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeDeviceState]: AuthOrchestrationReadScope,
+  // Clients pair in the background, so only the server checks this one.
+  [WS_METHODS.agentctlPairSandbox]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentctlListManifests]: AuthOrchestrationReadScope,
   [WS_METHODS.agentctlListManifestRoots]: AuthOrchestrationReadScope,
   [WS_METHODS.agentctlRefreshManifestRoots]: AuthOrchestrationReadScope,

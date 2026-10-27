@@ -6,12 +6,14 @@ import {
 } from "@t3tools/contracts";
 import { environmentServerUrl } from "@t3tools/shared/advertisedEndpoint";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
+import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as HttpClient from "effect/http/HttpClient";
@@ -27,7 +29,7 @@ import { BearerConnectionTarget, type ConnectionTarget } from "../connection/mod
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
-import { requestGuarded, subscribe } from "../rpc/client.ts";
+import { request, subscribe } from "../rpc/client.ts";
 
 // A host that advertises `agentctlSandboxes` relays each of its Sandboxes at
 // `/sandbox/<name>/`. Each Sandbox reached once becomes an environment of its
@@ -35,6 +37,9 @@ import { requestGuarded, subscribe } from "../rpc/client.ts";
 // every client gets them the same way.
 
 const CONNECTION_ID_PREFIX = "agentctl:";
+// How soon a running Sandbox this client could not pair with yet, or a host whose Sandbox list
+// failed, is tried again.
+const PAIR_RETRY = Duration.seconds(10);
 
 /** One id per host, Sandbox and environment, so a recreated Sandbox pairs again. */
 export const sandboxConnectionId = (
@@ -195,7 +200,7 @@ export const watchSandboxEnvironments = Effect.fn("SandboxEnvironments.watch")(f
     );
 
   const pairSandbox = (hostEnvironmentId: EnvironmentId, name: string, httpBaseUrl: string) =>
-    registry.run(hostEnvironmentId, requestGuarded(WS_METHODS.agentctlPairSandbox, { name })).pipe(
+    registry.run(hostEnvironmentId, request(WS_METHODS.agentctlPairSandbox, { name })).pipe(
       Effect.flatMap((pairing) =>
         bootstrapRemoteBearerSession({
           httpBaseUrl: sandboxRoute(httpBaseUrl, name).httpBaseUrl,
@@ -219,6 +224,7 @@ export const watchSandboxEnvironments = Effect.fn("SandboxEnvironments.watch")(f
       new Map(current).set(hostEnvironmentId, view.snapshot),
     );
     const registrations: BearerConnectionRegistration[] = [];
+    let unpaired = false;
     for (const sandbox of reachedSandboxes(view.snapshot.sandboxes)) {
       const environmentId = sandbox.environmentId;
       const connectionId = sandboxConnectionId(hostEnvironmentId, sandbox.name, environmentId);
@@ -235,7 +241,10 @@ export const watchSandboxEnvironments = Effect.fn("SandboxEnvironments.watch")(f
           token = paired.value.token;
         }
       }
-      if (token === null) continue;
+      if (token === null) {
+        if (isSandboxRunning(sandbox)) unpaired = true;
+        continue;
+      }
       registrations.push(
         sandboxRegistration({
           hostEnvironmentId,
@@ -271,7 +280,17 @@ export const watchSandboxEnvironments = Effect.fn("SandboxEnvironments.watch")(f
       registry.retryNow,
       { discard: true },
     );
+    return unpaired;
   });
+
+  // Until a newer list arrives, which interrupts this.
+  const applyUntilPaired = (hostEnvironmentId: EnvironmentId, view: HostView) =>
+    applyHost(hostEnvironmentId, view).pipe(
+      Effect.repeat({
+        while: (unpaired) => unpaired,
+        schedule: Schedule.spaced(PAIR_RETRY),
+      }),
+    );
 
   const forgetHost = Effect.fn("SandboxEnvironments.forgetHost")(function* (
     hostEnvironmentId: EnvironmentId,
@@ -306,13 +325,19 @@ export const watchSandboxEnvironments = Effect.fn("SandboxEnvironments.watch")(f
             followers,
             hostEnvironmentId,
             registry.followStream(hostEnvironmentId, hostView).pipe(
-              Stream.runForEach((view) => applyHost(hostEnvironmentId, view)),
+              Stream.switchMap((view) =>
+                Stream.fromEffect(applyUntilPaired(hostEnvironmentId, view)),
+              ),
+              Stream.runDrain,
+              // A failed subscription or pairing must not leave the host unfollowed for good.
               Effect.catchCause((cause) =>
-                Effect.logWarning("Stopped following a host's Sandboxes.", {
+                Effect.logWarning("Following a host's Sandboxes failed; trying again.", {
                   hostEnvironmentId,
                   cause,
                 }),
               ),
+              Effect.andThen(Effect.sleep(PAIR_RETRY)),
+              Effect.forever,
             ),
           );
         }

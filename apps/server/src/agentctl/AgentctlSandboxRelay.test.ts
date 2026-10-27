@@ -26,7 +26,12 @@ const fixture = (options: { readonly reachable?: boolean; readonly fail?: boolea
       return HttpClientResponse.fromWeb(
         request,
         new Response('{"ok":true}', {
-          headers: { "content-type": "application/json", "set-cookie": "sandbox=1" },
+          headers: {
+            "content-type": "application/json",
+            "set-cookie": "sandbox=1",
+            // As a compressed body reports it, before the client decoded it.
+            "content-length": "3",
+          },
         }),
       );
     }),
@@ -87,6 +92,7 @@ describe("Sandbox relay", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
     expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("content-length")).not.toBe("3");
     expect(requests.map((request) => request.url)).toEqual([
       "http://127.0.0.1:4010/api/auth/session?x=1",
     ]);

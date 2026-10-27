@@ -36,10 +36,13 @@ const DROPPED_REQUEST_HEADERS = new Set([
   "x-forwarded-proto",
 ]);
 
+// The client decodes a compressed body, so its length no longer holds.
 const DROPPED_RESPONSE_HEADERS = new Set([
   "content-encoding",
+  "content-length",
   "transfer-encoding",
   "connection",
+  "keep-alive",
   "set-cookie",
 ]);
 

@@ -56,7 +56,6 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.agentctlStopSandbox]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentctlDeleteSandbox]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentctlCreateSandbox]: AuthOrchestrationOperateScope,
-  [WS_METHODS.agentctlPairSandbox]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentctlMarkSettingsSeeded]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentctlAddManifestRoot]: AuthSettingsWriteScope,
   [WS_METHODS.agentctlRemoveManifestRoot]: AuthSettingsWriteScope,
