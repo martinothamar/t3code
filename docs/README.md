@@ -56,6 +56,7 @@ source alone does not explain. Most code changes do not need an internal documen
 - [Mobile development lifecycle](./internals/mobile-development.md)
 - [Terminal runtime](./internals/terminal-runtime.md)
 - [Devices](./internals/devices.md)
+- [agentctl Sandboxes](./internals/agentctl-sandboxes.md)
 - [Voice input](./internals/voice-input.md)
 
 ### Runbooks
