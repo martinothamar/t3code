@@ -44,6 +44,15 @@ describe("previewPdfAssetUrl", () => {
     expect(previewPdfAssetUrl(source, "https://environment.test")).toBe(source);
   });
 
+  it("loads PDF bytes below an environment's base path", () => {
+    expect(
+      previewPdfAssetUrl(
+        "http://127.0.0.1:14537/api/assets/token/guide.pdf#page=3",
+        "https://host.test/sandbox/worker-1/",
+      ),
+    ).toBe("https://host.test/sandbox/worker-1/api/assets/token/guide.pdf#page=3");
+  });
+
   it.each(["127.0.0.2", "localhost.", "[::1]"])(
     "remaps local assets on %s through the client connection",
     (host) => {

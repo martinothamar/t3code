@@ -1,4 +1,5 @@
 import type { ServerConfig } from "@t3tools/contracts";
+import { environmentServerUrl } from "@t3tools/shared/advertisedEndpoint";
 import * as Option from "effect/Option";
 
 import type { ConnectionCatalogEntry } from "./catalog.ts";
@@ -126,16 +127,11 @@ export function environmentMcpUrl(input: {
 }
 
 function mcpUrlFromBase(httpBaseUrl: string): string | null {
-  let url: URL;
   try {
-    url = new URL(httpBaseUrl);
+    return environmentServerUrl(httpBaseUrl, "/mcp").toString();
   } catch {
     return null;
   }
-  url.pathname = "/mcp";
-  url.search = "";
-  url.hash = "";
-  return url.toString();
 }
 
 export function connectionCatalogDisplayUrl(entry: ConnectionCatalogEntry): string | null {

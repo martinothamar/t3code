@@ -109,6 +109,13 @@ describe("connection presentation", () => {
         relayHttpBaseUrl: "https://tunnel.example.test",
       }),
     ).toBe("https://tunnel.example.test/mcp");
+    expect(
+      environmentMcpUrl({
+        entry,
+        connectedTarget: relay,
+        relayHttpBaseUrl: "http://host.example.test/sandbox/worker-1/",
+      }),
+    ).toBe("http://host.example.test/sandbox/worker-1/mcp");
   });
 
   it("distinguishes initial connection, reconnect, and retry errors", () => {
