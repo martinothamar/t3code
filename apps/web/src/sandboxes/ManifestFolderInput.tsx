@@ -6,11 +6,13 @@ import { useState } from "react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { isElectron } from "../env";
+import { isWindowsPlatform } from "../lib/utils";
 import { primaryEnvironmentIdAtom } from "../state/primaryEnvironment";
+import { serverEnvironment } from "../state/server";
 
 /**
- * Adds a manifest folder on the host's machine: the system picker when the host is this desktop,
- * otherwise a path on the host, which may start with `~`.
+ * Adds a manifest folder on the host's machine: the system picker when the host is this desktop
+ * and shares its paths, otherwise a path on the host, which may start with `~`.
  */
 export function ManifestFolderInput(props: {
   readonly hostEnvironmentId: EnvironmentId;
@@ -18,11 +20,15 @@ export function ManifestFolderInput(props: {
   readonly label?: string;
 }) {
   const primaryEnvironmentId = useAtomValue(primaryEnvironmentIdAtom);
+  const hostOs = useAtomValue(serverEnvironment.configValueAtom(props.hostEnvironmentId))
+    ?.environment.platform.os;
   const [path, setPath] = useState("");
   const [editing, setEditing] = useState(false);
   const label = props.label ?? "Add folder";
 
-  if (isElectron && primaryEnvironmentId === props.hostEnvironmentId) {
+  // A WSL host's paths are not the ones the Windows picker returns.
+  const pickerPathsFitHost = !isWindowsPlatform(navigator.platform) || hostOs === "windows";
+  if (isElectron && primaryEnvironmentId === props.hostEnvironmentId && pickerPathsFitHost) {
     return (
       <Button
         type="button"
