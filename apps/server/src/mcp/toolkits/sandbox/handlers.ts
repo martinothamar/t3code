@@ -26,16 +26,16 @@ export const layer = McpToolAccess.toLayer(SandboxToolkit, {
       };
     }),
   ),
-  t3_sandbox_start: McpToolAccess.writesWithCapability(({ name }) =>
+  t3_sandbox_start: McpToolAccess.writesEnvironment(({ name }) =>
     Effect.flatMap(AgentctlSandboxes.AgentctlSandboxes, (sandboxes) => sandboxes.start(name)),
   ),
-  t3_sandbox_stop: McpToolAccess.writesWithCapability(({ name }) =>
+  t3_sandbox_stop: McpToolAccess.writesEnvironment(({ name }) =>
     Effect.flatMap(AgentctlSandboxes.AgentctlSandboxes, (sandboxes) => sandboxes.stop(name)),
   ),
-  t3_sandbox_create: McpToolAccess.writesWithCapability((input) =>
+  t3_sandbox_create: McpToolAccess.writesEnvironment((input) =>
     Effect.flatMap(AgentctlSandboxes.AgentctlSandboxes, (sandboxes) => sandboxes.create(input)),
   ),
-  t3_sandbox_delete: McpToolAccess.writesWithCapability(({ name }) =>
+  t3_sandbox_delete: McpToolAccess.writesEnvironment(({ name }) =>
     Effect.flatMap(AgentctlSandboxes.AgentctlSandboxes, (sandboxes) => sandboxes.remove(name)),
   ),
 });
