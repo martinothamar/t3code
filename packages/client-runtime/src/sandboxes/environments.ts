@@ -25,7 +25,11 @@ import {
   BearerConnectionRegistration,
 } from "../connection/catalog.ts";
 import * as ConnectionCredentialStore from "../connection/credentialStore.ts";
-import { BearerConnectionTarget, type ConnectionTarget } from "../connection/model.ts";
+import {
+  BearerConnectionTarget,
+  type ConnectionTarget,
+  type SupervisorConnectionState,
+} from "../connection/model.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
@@ -137,6 +141,11 @@ export const layer = Layer.effect(
   }),
 );
 
+const isCredentialRejected = (state: SupervisorConnectionState) =>
+  state.phase === "blocked" &&
+  state.lastFailure?._tag === "ConnectionBlockedError" &&
+  state.lastFailure.reason === "authentication";
+
 interface HostView {
   readonly snapshot: AgentctlSandboxesSnapshot;
   readonly httpBaseUrl: string;
@@ -199,6 +208,12 @@ export const watchSandboxEnvironments = Effect.fn("SandboxEnvironments.watch")(f
       Effect.orElseSucceed(() => null),
     );
 
+  const rejection = (environmentId: EnvironmentId) =>
+    registry.state(environmentId).pipe(
+      Effect.map((state) => (isCredentialRejected(state) ? state : null)),
+      Effect.orElseSucceed(() => null),
+    );
+
   const pairSandbox = (hostEnvironmentId: EnvironmentId, name: string, httpBaseUrl: string) =>
     registry.run(hostEnvironmentId, request(WS_METHODS.agentctlPairSandbox, { name })).pipe(
       Effect.flatMap((pairing) =>
@@ -224,27 +239,32 @@ export const watchSandboxEnvironments = Effect.fn("SandboxEnvironments.watch")(f
       new Map(current).set(hostEnvironmentId, view.snapshot),
     );
     const registrations: BearerConnectionRegistration[] = [];
+    // The rejection each replaced session got, which the new session must not be taken for.
+    const replaced = new Map<EnvironmentId, SupervisorConnectionState>();
     let unpaired = false;
     for (const sandbox of reachedSandboxes(view.snapshot.sandboxes)) {
       const environmentId = sandbox.environmentId;
       const connectionId = sandboxConnectionId(hostEnvironmentId, sandbox.name, environmentId);
       let token = yield* savedToken(connectionId);
+      // An expired or revoked session is replaced the way the first one was made.
+      const rejected = token === null ? null : yield* rejection(environmentId);
+      let paired = token !== null && rejected === null;
       // A Sandbox this client never paired with is not an environment until it runs.
-      if (token === null && isSandboxRunning(sandbox)) {
-        const paired = yield* pairSandbox(hostEnvironmentId, sandbox.name, view.httpBaseUrl).pipe(
+      if (!paired && isSandboxRunning(sandbox)) {
+        const pairing = yield* pairSandbox(hostEnvironmentId, sandbox.name, view.httpBaseUrl).pipe(
           Effect.tapError((error) =>
             Effect.logWarning("Could not pair with a Sandbox.", { name: sandbox.name, error }),
           ),
           Effect.option,
         );
-        if (Option.isSome(paired) && paired.value.environmentId === environmentId) {
-          token = paired.value.token;
+        if (Option.isSome(pairing) && pairing.value.environmentId === environmentId) {
+          token = pairing.value.token;
+          paired = true;
+          if (rejected !== null) replaced.set(environmentId, rejected);
         }
       }
-      if (token === null) {
-        if (isSandboxRunning(sandbox)) unpaired = true;
-        continue;
-      }
+      if (!paired && isSandboxRunning(sandbox)) unpaired = true;
+      if (token === null) continue;
       registrations.push(
         sandboxRegistration({
           hostEnvironmentId,
@@ -280,16 +300,52 @@ export const watchSandboxEnvironments = Effect.fn("SandboxEnvironments.watch")(f
       registry.retryNow,
       { discard: true },
     );
-    return unpaired;
+    return {
+      unpaired,
+      // A stopped Sandbox cannot pair; starting it sends a new list.
+      paired: registrations.flatMap((registration) => {
+        const environmentId = registration.target.environmentId;
+        return nowRunning.has(environmentId)
+          ? [{ environmentId, replaced: replaced.get(environmentId) ?? null }]
+          : [];
+      }),
+    };
   });
 
+  // Waits for a session the Sandbox accepted to be turned down, such as one that expired.
+  const untilRejected = (
+    paired: ReadonlyArray<{
+      readonly environmentId: EnvironmentId;
+      readonly replaced: SupervisorConnectionState | null;
+    }>,
+  ) =>
+    paired.length === 0
+      ? Effect.never
+      : Stream.mergeAll(
+          paired.map(({ environmentId, replaced }) =>
+            registry.stateChanges(environmentId).pipe(
+              // Registering it may still be under way.
+              Stream.retry(Schedule.spaced(PAIR_RETRY)),
+              Stream.filter(
+                (state) =>
+                  isCredentialRejected(state) &&
+                  (replaced === null ||
+                    state.generation !== replaced.generation ||
+                    state.attempt !== replaced.attempt),
+              ),
+            ),
+          ),
+          { concurrency: "unbounded" },
+        ).pipe(Stream.runHead, Effect.asVoid);
+
   // Until a newer list arrives, which interrupts this.
-  const applyUntilPaired = (hostEnvironmentId: EnvironmentId, view: HostView) =>
-    applyHost(hostEnvironmentId, view).pipe(
-      Effect.repeat({
-        while: (unpaired) => unpaired,
-        schedule: Schedule.spaced(PAIR_RETRY),
-      }),
+  const keepPaired = (hostEnvironmentId: EnvironmentId, view: HostView) =>
+    Effect.forever(
+      applyHost(hostEnvironmentId, view).pipe(
+        Effect.flatMap(({ unpaired, paired }) =>
+          unpaired ? Effect.sleep(PAIR_RETRY) : untilRejected(paired),
+        ),
+      ),
     );
 
   const forgetHost = Effect.fn("SandboxEnvironments.forgetHost")(function* (
@@ -325,9 +381,7 @@ export const watchSandboxEnvironments = Effect.fn("SandboxEnvironments.watch")(f
             followers,
             hostEnvironmentId,
             registry.followStream(hostEnvironmentId, hostView).pipe(
-              Stream.switchMap((view) =>
-                Stream.fromEffect(applyUntilPaired(hostEnvironmentId, view)),
-              ),
+              Stream.switchMap((view) => Stream.fromEffect(keepPaired(hostEnvironmentId, view))),
               Stream.runDrain,
               // A failed subscription or pairing must not leave the host unfollowed for good.
               Effect.catchCause((cause) =>
