@@ -18,10 +18,16 @@ import * as AgentctlSandboxes from "./AgentctlSandboxes.ts";
 
 const SANDBOX_RELAY_PREFIX = "/sandbox/";
 
-// This server's own cookies and forwarding hints mean nothing to the Sandbox's server.
+// This server's own cookies and forwarding hints mean nothing to the Sandbox's server, and
+// hop-by-hop headers describe only the client's connection, which fetch refuses to forward.
 const DROPPED_REQUEST_HEADERS = new Set([
   "host",
   "connection",
+  "keep-alive",
+  "transfer-encoding",
+  "te",
+  "trailer",
+  "proxy-connection",
   "upgrade",
   "sec-websocket-key",
   "sec-websocket-version",
@@ -62,8 +68,11 @@ export function parseRelayPath(
 
 const forwardHeaders = (request: HttpServerRequest.HttpServerRequest) => {
   const headers: Record<string, string> = {};
+  const nominated = new Set(
+    (request.headers.connection ?? "").split(",").map((name) => name.trim().toLowerCase()),
+  );
   for (const [name, value] of Object.entries(request.headers)) {
-    if (DROPPED_REQUEST_HEADERS.has(name) || value === undefined) continue;
+    if (DROPPED_REQUEST_HEADERS.has(name) || nominated.has(name) || value === undefined) continue;
     headers[name] = value;
   }
   return headers;

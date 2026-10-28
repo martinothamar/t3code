@@ -128,6 +128,26 @@ describe("Sandbox relay", () => {
     expect(requests.map((request) => request.url)).toEqual([upstream]);
   });
 
+  it("forwards no headers about the client's own connection", async () => {
+    const { handler, requests } = fixture();
+    const response = await handler(
+      new Request("http://host.test/sandbox/worker-1/api/upload", {
+        method: "POST",
+        body: "chunk",
+        headers: {
+          connection: "keep-alive, x-hop",
+          "transfer-encoding": "chunked",
+          "x-hop": "1",
+          "content-type": "text/plain",
+        },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(requests[0]?.headers["transfer-encoding"]).toBeUndefined();
+    expect(requests[0]?.headers["x-hop"]).toBeUndefined();
+    expect(requests[0]?.headers["content-type"]).toBe("text/plain");
+  });
+
   it("leaves redirects to the client", async () => {
     const { handler, requests } = fixture();
     await handler(new Request("http://host.test/sandbox/worker-1/api/auth/session"));
