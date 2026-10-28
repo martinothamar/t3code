@@ -529,9 +529,15 @@ describe("AgentctlSandboxes", () => {
         yield* fileSystem.writeFileString(file!, "not a folder\n");
         yield* sandboxes.addManifestRoot(a!);
         yield* sandboxes.addManifestRoot(`${b}/`);
+        // Adding a folder again keeps it once, without an error.
         yield* sandboxes.addManifestRoot(`${a}/`);
         // A file would be opened, and on Windows run, by a desktop client's Open folder.
-        yield* sandboxes.addManifestRoot(file!);
+        const refused = yield* Effect.flip(sandboxes.addManifestRoot(file!));
+        assert.strictEqual(refused._tag, "AgentctlManifestRootError");
+        assert.strictEqual(
+          (yield* Effect.flip(sandboxes.addManifestRoot("relative/agents")))._tag,
+          "AgentctlManifestRootError",
+        );
         const settings = yield* sandboxes.removeManifestRoot(a!);
         assert.deepStrictEqual(settings.manifestRoots, [b!]);
         assert.deepStrictEqual(yield* sandboxes.listManifestRoots, [

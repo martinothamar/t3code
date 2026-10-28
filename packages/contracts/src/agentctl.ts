@@ -172,6 +172,15 @@ export const AgentctlSandboxPairing = Schema.Struct({
 });
 export type AgentctlSandboxPairing = typeof AgentctlSandboxPairing.Type;
 
+/** A manifest folder this computer does not have. */
+export class AgentctlManifestRootError extends Schema.TaggedError<AgentctlManifestRootError>()(
+  "AgentctlManifestRootError",
+  {
+    folder: Schema.String,
+    message: Schema.String,
+  },
+) {}
+
 export class AgentctlSandboxError extends Schema.TaggedError<AgentctlSandboxError>()(
   "AgentctlSandboxError",
   {

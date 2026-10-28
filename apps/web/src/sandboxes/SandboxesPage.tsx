@@ -327,16 +327,15 @@ function ManifestFolders({
 
   if (roots === null) return null;
   const addRoot = async (folder: string) => {
-    const before = roots.length;
     const added = await runOnHost(sandboxEnvironment.addManifestRoot, hostEnvironmentId, {
       folder,
     });
-    if ("error" in added || added.value.manifestRoots.length === before) {
+    if ("error" in added) {
       toastManager.add(
         stackedThreadToast({
           type: "error",
           title: "Could not add folder",
-          description: "error" in added ? added.error : `${folder} is not a folder on this host.`,
+          description: added.error,
         }),
       );
     }

@@ -1,4 +1,5 @@
 import {
+  AgentctlManifestRootError,
   AgentctlSandboxError,
   AgentctlSandboxSettings,
   EnvironmentId,
@@ -70,7 +71,9 @@ export class AgentctlSandboxes extends Context.Service<
     readonly refreshManifestRoots: Effect.Effect<ReadonlyArray<AgentctlManifestRoot>>;
     readonly getSettings: Effect.Effect<AgentctlSandboxSettings>;
     /** Folders are merged here, so two views never overwrite each other's changes. */
-    readonly addManifestRoot: (folder: string) => Effect.Effect<AgentctlSandboxSettings>;
+    readonly addManifestRoot: (
+      folder: string,
+    ) => Effect.Effect<AgentctlSandboxSettings, AgentctlManifestRootError>;
     readonly removeManifestRoot: (folder: string) => Effect.Effect<AgentctlSandboxSettings>;
     readonly pullManifestRoots: (
       folders: ReadonlyArray<string>,
@@ -531,10 +534,14 @@ export const make = Effect.gen(function* () {
     addManifestRoot: Effect.fn("AgentctlSandboxes.addManifestRoot")(function* (folder) {
       // "/a/" and "/a" are one folder, and a client names this machine's home as `~`.
       const expanded = folder.trim().replace(/^~(?=$|[\\/])/u, homeDirectory);
-      if (!path.isAbsolute(expanded)) return yield* getSettings;
       const resolved = path.resolve(expanded);
       // Only directories, since a desktop client can open a configured folder with the system handler.
-      if (!(yield* isDirectory(resolved))) return yield* getSettings;
+      if (!path.isAbsolute(expanded) || !(yield* isDirectory(resolved))) {
+        return yield* new AgentctlManifestRootError({
+          folder,
+          message: `${folder} is not a folder on this host.`,
+        });
+      }
       return yield* updateManifestRoots((roots) =>
         roots.some((root) => path.resolve(root) === resolved) ? roots : [...roots, resolved],
       );

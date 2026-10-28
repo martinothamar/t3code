@@ -134,10 +134,6 @@ function NewSandboxDialogContent({
       setError(added.error);
       return;
     }
-    // The host keeps only folders that exist there.
-    if (added.value.manifestRoots.length === (settings?.manifestRoots.length ?? 0)) {
-      setError(`${folder} is not a folder on this host.`);
-    }
     const loaded = await load();
     if (loaded !== null) apply(...loaded);
   };

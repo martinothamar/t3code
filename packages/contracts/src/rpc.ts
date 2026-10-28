@@ -305,6 +305,7 @@ import {
   AgentctlMarkSettingsSeededInput,
   AgentctlPullManifestRootsInput,
   AgentctlPullResult,
+  AgentctlManifestRootError,
   AgentctlSandboxError,
   AgentctlSandboxManifest,
   AgentctlSandboxNameInput,
@@ -1704,11 +1705,11 @@ const WsAgentctlGetSettingsRpc = agentctlRpc(
   Schema.Struct({}),
   AgentctlSandboxSettings,
 );
-const WsAgentctlAddManifestRootRpc = agentctlRpc(
-  WS_METHODS.agentctlAddManifestRoot,
-  AgentctlManifestRootInput,
-  AgentctlSandboxSettings,
-);
+const WsAgentctlAddManifestRootRpc = Rpc.make(WS_METHODS.agentctlAddManifestRoot, {
+  payload: AgentctlManifestRootInput,
+  success: AgentctlSandboxSettings,
+  error: Schema.Union([AgentctlManifestRootError, EnvironmentAuthorizationError]),
+});
 const WsAgentctlRemoveManifestRootRpc = agentctlRpc(
   WS_METHODS.agentctlRemoveManifestRoot,
   AgentctlManifestRootInput,
