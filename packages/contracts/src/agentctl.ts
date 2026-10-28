@@ -1,11 +1,11 @@
 import * as Schema from "effect/Schema";
 
 import { EnvironmentId } from "./baseSchemas.ts";
-import { DesktopSshEnvironmentTargetSchema } from "./ipc.ts";
 
-// agentctl Agent Sandboxes, discovered and managed by the desktop app. These
-// types only cross the desktop IPC bridge, never the server wire: each Sandbox
-// runs its own unmodified T3 server, reached over SSH like any SSH host.
+// agentctl Agent Sandboxes, which the host's T3 server discovers and manages
+// for every client connected to it. Each Sandbox runs its own unmodified T3
+// server, which the host reaches over SSH and relays at
+// `/sandbox/<name>/` on its own origin.
 
 /** Lifecycle of an Agent as agentctl reports it, derived like `agentctl tui` does. */
 export const AgentctlSandboxPhase = Schema.Literals([
@@ -45,8 +45,6 @@ export const AgentctlSandbox = Schema.Struct({
   network: Schema.NullOr(Schema.String),
   /** False when the manifest has no `ssh` access, so T3 cannot reach it. */
   sshAccess: Schema.Boolean,
-  /** The SSH target as T3 resolved it when it first reached the Sandbox. */
-  sshTarget: Schema.NullOr(DesktopSshEnvironmentTargetSchema),
   /** Known once T3 has reached the Sandbox's server; null before that. */
   environmentId: Schema.NullOr(EnvironmentId),
   /** Whether this environment already got the user's preference settings from this computer. */
@@ -150,24 +148,44 @@ export const AgentctlActionResult = Schema.Struct({
 });
 export type AgentctlActionResult = typeof AgentctlActionResult.Type;
 
-export interface DesktopAgentctlBridge {
-  /** The latest discovery result; cheap and synchronous, so callers poll it. */
-  getSnapshot: () => AgentctlSandboxesSnapshot;
-  start: (name: string) => Promise<AgentctlActionResult>;
-  stop: (name: string) => Promise<AgentctlActionResult>;
-  remove: (name: string) => Promise<AgentctlActionResult>;
-  create: (input: AgentctlCreateSandboxInput) => Promise<AgentctlActionResult>;
-  listManifests: () => Promise<readonly AgentctlSandboxManifest[]>;
-  listManifestRoots: () => Promise<readonly AgentctlManifestRoot[]>;
-  /** Fetches each manifest repository first, so `behind` is current. */
-  refreshManifestRoots: () => Promise<readonly AgentctlManifestRoot[]>;
-  getSettings: () => Promise<AgentctlSandboxSettings>;
-  addManifestRoot: (folder: string) => Promise<AgentctlSandboxSettings>;
-  removeManifestRoot: (folder: string) => Promise<AgentctlSandboxSettings>;
-  /** Fast-forwards every repository in these folders, each once. */
-  pullManifestRoots: (folders: readonly string[]) => Promise<AgentctlPullResult>;
-  /** Records that the Sandbox's environment got its preference settings, so they are not copied again. */
-  markSettingsSeeded: (name: string, environmentId: EnvironmentId) => Promise<void>;
-  /** Opens a configured folder in the system file manager. */
-  openManifestRoot: (folder: string) => Promise<boolean>;
-}
+export const AgentctlSandboxNameInput = Schema.Struct({ name: Schema.String });
+export type AgentctlSandboxNameInput = typeof AgentctlSandboxNameInput.Type;
+
+export const AgentctlManifestRootInput = Schema.Struct({ folder: Schema.String });
+export type AgentctlManifestRootInput = typeof AgentctlManifestRootInput.Type;
+
+export const AgentctlPullManifestRootsInput = Schema.Struct({
+  folders: Schema.Array(Schema.String),
+});
+export type AgentctlPullManifestRootsInput = typeof AgentctlPullManifestRootsInput.Type;
+
+export const AgentctlMarkSettingsSeededInput = Schema.Struct({
+  name: Schema.String,
+  environmentId: EnvironmentId,
+});
+export type AgentctlMarkSettingsSeededInput = typeof AgentctlMarkSettingsSeededInput.Type;
+
+/** A one-time code the Sandbox's own server issued, which a client redeems for its own session. */
+export const AgentctlSandboxPairing = Schema.Struct({
+  environmentId: EnvironmentId,
+  pairingToken: Schema.String,
+});
+export type AgentctlSandboxPairing = typeof AgentctlSandboxPairing.Type;
+
+/** A manifest folder this computer does not have. */
+export class AgentctlManifestRootError extends Schema.TaggedError<AgentctlManifestRootError>()(
+  "AgentctlManifestRootError",
+  {
+    folder: Schema.String,
+    message: Schema.String,
+  },
+) {}
+
+export class AgentctlSandboxError extends Schema.TaggedError<AgentctlSandboxError>()(
+  "AgentctlSandboxError",
+  {
+    name: Schema.String,
+    reason: Schema.Literals(["not-found", "not-running", "unreachable"]),
+    message: Schema.String,
+  },
+) {}

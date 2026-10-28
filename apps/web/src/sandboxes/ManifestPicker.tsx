@@ -24,7 +24,6 @@ import {
   pickAgentManifest,
 } from "./manifestAgents";
 import { tildePath } from "./manifestFolders";
-import { useSandboxSnapshot } from "./useSandboxes";
 
 /**
  * Picks a manifest in two steps: the agent, a folder found in one of the user's repositories,
@@ -32,17 +31,19 @@ import { useSandboxSnapshot } from "./useSandboxes";
  */
 export function ManifestPicker({
   manifests,
+  homeDirectory,
   value,
   onValueChange,
 }: {
   manifests: ReadonlyArray<AgentctlSandboxManifest>;
+  /** The host's home, so paths read as `~/…`. */
+  homeDirectory: string;
   value: AgentctlSandboxManifest | null;
   onValueChange: (manifest: AgentctlSandboxManifest) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const highlighted = useRef<string | null>(null);
-  const { homeDirectory } = useSandboxSnapshot();
   const repositories = groupManifests(manifests);
   const filtered = filterManifestRepositories(repositories, query);
   const keys = filtered.flatMap((repository) => repository.agents.map((agent) => agent.directory));

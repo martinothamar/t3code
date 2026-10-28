@@ -56,7 +56,7 @@ export class AgentctlCli extends Context.Service<
     /** Applies without waiting; provisioning progress shows up in `listAgents`. */
     readonly apply: (input: AgentctlApplyInput) => Effect.Effect<void, AgentctlError>;
   }
->()("@t3tools/desktop/agentctl/AgentctlCli") {}
+>()("t3/agentctl/AgentctlCli") {}
 
 interface CommandResult {
   readonly exitCode: number;

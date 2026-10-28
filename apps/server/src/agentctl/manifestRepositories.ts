@@ -44,7 +44,7 @@ const decodeOutput = (chunks: ReadonlyArray<Uint8Array>) => {
   ).trim();
 };
 
-const runGit = Effect.fn("desktop.agentctl.runManifestGit")(function* (
+const runGit = Effect.fn("AgentctlSandboxes.runManifestGit")(function* (
   directory: string,
   args: ReadonlyArray<string>,
   timeout: Duration.Input = PULL_TIMEOUT,
@@ -99,7 +99,7 @@ export function gitFailureReason(stderr: string): string | null {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-export const resolveManifestRepository = Effect.fn("desktop.agentctl.resolveManifestRepository")(
+export const resolveManifestRepository = Effect.fn("AgentctlSandboxes.resolveManifestRepository")(
   function* (directory: string) {
     const result = yield* runGit(directory, ["rev-parse", "--show-toplevel"]);
     return result.exitCode === 0 ? result.stdout : null;
@@ -107,7 +107,7 @@ export const resolveManifestRepository = Effect.fn("desktop.agentctl.resolveMani
 );
 
 /** The folder's own checkout and every checkout holding one of its manifests. */
-const folderRepositories = Effect.fn("desktop.agentctl.folderRepositories")(function* (
+const folderRepositories = Effect.fn("AgentctlSandboxes.folderRepositories")(function* (
   folder: string,
 ) {
   const manifests = yield* discoverManifests([folder]);
@@ -152,7 +152,7 @@ export function parseRepositoryStatus(
   return { path, branch, upstream, changes, ahead, behind };
 }
 
-const repositoryStatus = Effect.fn("desktop.agentctl.repositoryStatus")(function* (
+const repositoryStatus = Effect.fn("AgentctlSandboxes.repositoryStatus")(function* (
   repository: string,
   fetchError: string | null,
 ) {
@@ -173,46 +173,52 @@ const fetchRepository = (repository: string) =>
   );
 
 /** Each folder's manifests and the state of its repositories, fetching them first when asked. */
-export const describeManifestRoots = Effect.fn("desktop.agentctl.describeManifestRoots")(function* (
-  folders: ReadonlyArray<string>,
-  options: { readonly fetch: boolean },
-) {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const fetched = new Map<string, string | null>();
-  return yield* Effect.forEach(folders, (directory) =>
-    Effect.gen(function* () {
-      const exists = yield* fileSystem.exists(directory).pipe(Effect.orElseSucceed(() => false));
-      if (!exists) {
-        return { directory, exists, manifests: 0, repositories: [] } satisfies AgentctlManifestRoot;
-      }
-      const found = yield* folderRepositories(directory);
-      const repositories: AgentctlRepositoryStatus[] = [];
-      for (const repository of found.repositories) {
-        // Overlapping folders can share a repository, which is fetched once.
-        if (options.fetch && !fetched.has(repository)) {
-          fetched.set(repository, yield* fetchRepository(repository));
+export const describeManifestRoots = Effect.fn("AgentctlSandboxes.describeManifestRoots")(
+  function* (folders: ReadonlyArray<string>, options: { readonly fetch: boolean }) {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const fetched = new Map<string, string | null>();
+    return yield* Effect.forEach(folders, (directory) =>
+      Effect.gen(function* () {
+        const exists = yield* fileSystem.exists(directory).pipe(Effect.orElseSucceed(() => false));
+        if (!exists) {
+          return {
+            directory,
+            exists,
+            manifests: 0,
+            repositories: [],
+          } satisfies AgentctlManifestRoot;
         }
-        const status = yield* repositoryStatus(repository, fetched.get(repository) ?? null).pipe(
-          Effect.orElseSucceed(() => null),
-        );
-        if (status !== null) repositories.push(status);
-      }
-      return {
-        directory,
-        exists,
-        manifests: found.manifests,
-        repositories,
-      } satisfies AgentctlManifestRoot;
-    }),
-  );
-});
+        const found = yield* folderRepositories(directory);
+        const repositories: AgentctlRepositoryStatus[] = [];
+        for (const repository of found.repositories) {
+          // Overlapping folders can share a repository, which is fetched once.
+          if (options.fetch && !fetched.has(repository)) {
+            fetched.set(repository, yield* fetchRepository(repository));
+          }
+          const status = yield* repositoryStatus(repository, fetched.get(repository) ?? null).pipe(
+            Effect.orElseSucceed(() => null),
+          );
+          if (status !== null) repositories.push(status);
+        }
+        return {
+          directory,
+          exists,
+          manifests: found.manifests,
+          repositories,
+        } satisfies AgentctlManifestRoot;
+      }),
+    );
+  },
+);
 
 const revision = (repository: string) =>
   runGit(repository, ["rev-parse", "--verify", "--quiet", "HEAD"]).pipe(
     Effect.map((result) => (result.exitCode === 0 ? result.stdout : null)),
   );
 
-const pullRepository = Effect.fn("desktop.agentctl.pullRepository")(function* (repository: string) {
+const pullRepository = Effect.fn("AgentctlSandboxes.pullRepository")(function* (
+  repository: string,
+) {
   const before = yield* revision(repository);
   // Override rebase and autostash preferences: this action only fast-forwards.
   const result = yield* runGit(repository, ["pull", "--ff-only", "--no-rebase", "--no-autostash"]);
@@ -245,7 +251,7 @@ const pullRepository = Effect.fn("desktop.agentctl.pullRepository")(function* (r
  * Fast-forwards each repository the folders hold once, including a folder's own checkout. A
  * repository that cannot be pulled is reported without stopping the others.
  */
-export const pullManifestRepositories = Effect.fn("desktop.agentctl.pullManifestRepositories")(
+export const pullManifestRepositories = Effect.fn("AgentctlSandboxes.pullManifestRepositories")(
   function* (folders: ReadonlyArray<string>) {
     const repositories = new Set<string>();
     for (const folder of folders) {

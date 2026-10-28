@@ -19,14 +19,11 @@ import * as Stream from "effect/Stream";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import { TestClock } from "effect/testing";
 
-import * as DesktopConfig from "../app/DesktopConfig.ts";
-import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
-import { SshLaunchError } from "@t3tools/ssh/errors";
-
-import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
+import * as ServerConfig from "../config.ts";
 import * as AgentctlCli from "./AgentctlCli.ts";
+import * as AgentctlSandboxes from "./AgentctlSandboxes.ts";
+import * as AgentctlSandboxTunnels from "./AgentctlSandboxTunnels.ts";
 import type { AgentResource } from "./agentState.ts";
-import * as DesktopAgentctlSandboxes from "./DesktopAgentctlSandboxes.ts";
 
 const NAME = "worker";
 
@@ -55,9 +52,17 @@ interface Harness {
   readonly agents: Ref.Ref<ReadonlyArray<AgentResource>>;
   readonly listFails: Ref.Ref<boolean>;
   readonly ensured: Ref.Ref<number>;
+  /** Each time T3 opens the forward to the Sandbox. */
+  readonly ensures: Queue.Queue<void>;
   /** What the Sandbox's T3 server reports; plain, because fetch reads it. */
   readonly environment: { id: string };
   readonly disconnected: Deferred.Deferred<void>;
+  /**
+   * While set, each check hands its gate to `heldChecks` once it has the environment id, and
+   * waits for it.
+   */
+  readonly holdChecks: Ref.Ref<boolean>;
+  readonly heldChecks: Queue.Queue<Deferred.Deferred<void>>;
   /** The next SSH reach fails, like a Sandbox still booting. */
   readonly ensureFails: Ref.Ref<boolean>;
   /**
@@ -74,31 +79,20 @@ const makeHarness = Effect.gen(function* () {
     agents: yield* Ref.make<ReadonlyArray<AgentResource>>([agent("ready")]),
     listFails: yield* Ref.make(false),
     ensured: yield* Ref.make(0),
+    ensures: yield* Queue.unbounded<void>(),
     environment: { id: "env-1" },
     disconnected: yield* Deferred.make<void>(),
     ensureFails: yield* Ref.make(false),
+    holdChecks: yield* Ref.make(false),
+    heldChecks: yield* Queue.unbounded<Deferred.Deferred<void>>(),
     holdStarts: yield* Ref.make(false),
     heldStarts: yield* Queue.unbounded<Deferred.Deferred<void>>(),
     applyFails: yield* Ref.make(false),
   } satisfies Harness;
 });
 
-const environmentLayer = (baseDir: string) =>
-  DesktopEnvironment.layer({
-    dirname: "/repo/apps/desktop/src",
-    homeDirectory: baseDir,
-    platform: "linux",
-    processArch: "x64",
-    appVersion: "1.2.3",
-    appPath: "/repo",
-    isPackaged: true,
-    resourcesPath: "/missing/resources",
-    runningUnderArm64Translation: false,
-  }).pipe(
-    Layer.provide(
-      Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({ T3CODE_HOME: baseDir })),
-    ),
-  );
+const configLayer = (baseDir: string) =>
+  ServerConfig.ServerConfig.layerTest(baseDir, baseDir).pipe(Layer.provide(NodeServices.layer));
 
 function layer(harness: Harness, baseDir: string) {
   const cli = AgentctlCli.AgentctlCli.of({
@@ -115,7 +109,20 @@ function layer(harness: Harness, baseDir: string) {
           : Ref.get(harness.agents),
       ),
     ),
-    sshInfo: () => Effect.succeed({ workingDirectory: "/home/agent/code" }),
+    // Runs after the check fetched the environment id.
+    sshInfo: () =>
+      Ref.get(harness.holdChecks).pipe(
+        Effect.flatMap((hold) =>
+          hold
+            ? Effect.gen(function* () {
+                const gate = yield* Deferred.make<void>();
+                yield* Queue.offer(harness.heldChecks, gate);
+                yield* Deferred.await(gate);
+              })
+            : Effect.void,
+        ),
+        Effect.as({ workingDirectory: "/home/agent/code" }),
+      ),
     start: () =>
       Ref.get(harness.holdStarts).pipe(
         Effect.flatMap((hold) =>
@@ -156,26 +163,27 @@ function layer(harness: Harness, baseDir: string) {
     username: "agent",
     port: 22,
   };
-  const ssh = DesktopSshEnvironment.DesktopSshEnvironment.of({
-    discoverHosts: () => Effect.succeed([]),
-    resolveHost: () => Effect.succeed(target),
-    ensureEnvironment: () =>
+  const tunnels = AgentctlSandboxTunnels.AgentctlSandboxTunnels.of({
+    ensure: (_target, options) =>
       Ref.update(harness.ensured, (count) => count + 1).pipe(
+        Effect.andThen(Queue.offer(harness.ensures, undefined)),
+
         Effect.andThen(Ref.getAndSet(harness.ensureFails, false)),
         Effect.flatMap((fails) =>
           fails
-            ? Effect.fail(new SshLaunchError({ message: "Sandbox still booting", stdout: "" }))
+            ? Effect.fail(
+                new AgentctlSandboxTunnels.SandboxTunnelError({ message: "Sandbox still booting" }),
+              )
             : Effect.void,
         ),
         Effect.as({
           target,
           httpBaseUrl: "http://127.0.0.1:4010/",
-          wsBaseUrl: "ws://127.0.0.1:4010/",
-          pairingToken: null,
+          pairingToken: options?.issuePairingToken === true ? "pairing-code" : null,
         }),
       ),
     // Stopping T3's server over SSH hangs while a Sandbox stops; nothing may wait for it.
-    disconnectEnvironment: () =>
+    disconnect: () =>
       Deferred.succeed(harness.disconnected, undefined).pipe(Effect.andThen(Effect.never)),
   });
   const fetchDescriptor: typeof globalThis.fetch = () =>
@@ -189,18 +197,15 @@ function layer(harness: Harness, baseDir: string) {
         capabilities: { repositoryIdentity: true },
       }),
     );
-  return Layer.effect(
-    DesktopAgentctlSandboxes.DesktopAgentctlSandboxes,
-    DesktopAgentctlSandboxes.make,
-  ).pipe(
+  return Layer.effect(AgentctlSandboxes.AgentctlSandboxes, AgentctlSandboxes.make).pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.succeed(AgentctlCli.AgentctlCli, cli),
-        Layer.succeed(DesktopSshEnvironment.DesktopSshEnvironment, ssh),
+        Layer.succeed(AgentctlSandboxTunnels.AgentctlSandboxTunnels, tunnels),
         FetchHttpClient.layer.pipe(
           Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetchDescriptor)),
         ),
-        environmentLayer(baseDir),
+        configLayer(baseDir),
         NodeServices.layer,
       ),
     ),
@@ -209,7 +214,7 @@ function layer(harness: Harness, baseDir: string) {
 
 const withSandboxes = <A, E>(
   test: (
-    sandboxes: DesktopAgentctlSandboxes.DesktopAgentctlSandboxes["Service"],
+    sandboxes: AgentctlSandboxes.AgentctlSandboxes["Service"],
     harness: Harness,
     stateDir: string,
   ) => Effect.Effect<A, E>,
@@ -222,12 +227,12 @@ const withSandboxes = <A, E>(
     const baseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-agentctl-test-" });
     const harness = yield* makeHarness;
     const stateDir = yield* Effect.provide(
-      Effect.map(DesktopEnvironment.DesktopEnvironment, (environment) => environment.stateDir),
-      environmentLayer(baseDir),
+      Effect.map(ServerConfig.ServerConfig, (config) => config.stateDir),
+      configLayer(baseDir),
     );
     if (prepare) yield* prepare(stateDir);
     return yield* Effect.gen(function* () {
-      const sandboxes = yield* DesktopAgentctlSandboxes.DesktopAgentctlSandboxes;
+      const sandboxes = yield* AgentctlSandboxes.AgentctlSandboxes;
       yield* sandboxes.startPolling;
       return yield* test(sandboxes, harness, stateDir);
     }).pipe(Effect.provide(layer(harness, baseDir)));
@@ -235,7 +240,7 @@ const withSandboxes = <A, E>(
 
 /** Waits for the snapshot to reach a state; the stream replays the current one first. */
 const until = (
-  sandboxes: DesktopAgentctlSandboxes.DesktopAgentctlSandboxes["Service"],
+  sandboxes: AgentctlSandboxes.AgentctlSandboxes["Service"],
   predicate: (snapshot: AgentctlSandboxesSnapshot) => boolean,
 ) =>
   sandboxes.changes.pipe(Stream.filter(predicate), Stream.runHead, Effect.map(Option.getOrThrow));
@@ -243,16 +248,101 @@ const until = (
 const discovered = (environmentId: string) => (snapshot: AgentctlSandboxesSnapshot) =>
   snapshot.sandboxes[0]?.environmentId === environmentId;
 
-describe("DesktopAgentctlSandboxes", () => {
+describe("AgentctlSandboxes", () => {
   it.effect("reaches a running Sandbox once and records its environment", () =>
     withSandboxes((sandboxes, harness) =>
       Effect.gen(function* () {
         const snapshot = yield* until(sandboxes, discovered("env-1"));
-        assert.deepStrictEqual(snapshot.sandboxes[0]?.sshTarget?.username, "agent");
         assert.strictEqual(snapshot.sandboxes[0]?.workingDirectory, "/home/agent/code");
         yield* sandboxes.refresh;
         yield* sandboxes.refresh;
         assert.strictEqual(yield* Ref.get(harness.ensured), 1);
+      }),
+    ),
+  );
+
+  it.effect("relays and pairs only a Sandbox that is running", () =>
+    withSandboxes((sandboxes) =>
+      Effect.gen(function* () {
+        yield* until(sandboxes, discovered("env-1"));
+        assert.deepStrictEqual(
+          yield* sandboxes.relayUpstream(NAME),
+          Option.some("http://127.0.0.1:4010/"),
+        );
+        assert.deepStrictEqual(yield* sandboxes.pair(NAME), {
+          environmentId: EnvironmentId.make("env-1"),
+          pairingToken: "pairing-code",
+        });
+        assert.strictEqual((yield* Effect.flip(sandboxes.pair("other"))).reason, "not-found");
+
+        yield* sandboxes.stop(NAME);
+        assert.deepStrictEqual(yield* sandboxes.relayUpstream(NAME), Option.none());
+        assert.strictEqual((yield* Effect.flip(sandboxes.pair(NAME))).reason, "not-running");
+      }),
+    ),
+  );
+
+  it.effect("opens the forward again once the relay could not reach it", () =>
+    withSandboxes((sandboxes, harness) =>
+      Effect.gen(function* () {
+        yield* until(sandboxes, discovered("env-1"));
+        yield* Queue.take(harness.ensures);
+        yield* sandboxes.reportUnreachable(NAME);
+        assert.deepStrictEqual(yield* sandboxes.relayUpstream(NAME), Option.none());
+        yield* sandboxes.refresh;
+        yield* Queue.take(harness.ensures);
+      }),
+    ),
+  );
+
+  it.effect("ignores a check that ends after the Sandbox stopped", () =>
+    withSandboxes((sandboxes, harness) =>
+      Effect.gen(function* () {
+        yield* until(sandboxes, discovered("env-1"));
+        yield* sandboxes.stop(NAME);
+        yield* sandboxes.refresh;
+        yield* Ref.set(harness.holdChecks, true);
+        yield* sandboxes.start(NAME);
+        // This check learned env-1, then the Sandbox stopped and its T3 home was reset.
+        const stale = yield* Queue.take(harness.heldChecks);
+        yield* sandboxes.stop(NAME);
+        yield* sandboxes.refresh;
+        harness.environment.id = "env-2";
+        yield* sandboxes.start(NAME);
+        yield* Deferred.succeed(yield* Queue.take(harness.heldChecks), undefined);
+        yield* until(sandboxes, discovered("env-2"));
+        yield* Deferred.succeed(stale, undefined);
+        yield* sandboxes.refresh;
+        assert.strictEqual((yield* sandboxes.snapshot).sandboxes[0]?.environmentId, "env-2");
+      }),
+    ),
+  );
+
+  it.effect("ignores a check of a deleted Sandbox once another takes its name", () =>
+    withSandboxes((sandboxes, harness) =>
+      Effect.gen(function* () {
+        yield* until(sandboxes, discovered("env-1"));
+        yield* sandboxes.stop(NAME);
+        yield* sandboxes.refresh;
+        yield* Ref.set(harness.holdChecks, true);
+        yield* sandboxes.start(NAME);
+        const stale = yield* Queue.take(harness.heldChecks);
+        yield* sandboxes.remove(NAME);
+        // A new Sandbox of the same name, stopped and started as often as the deleted one.
+        harness.environment.id = "env-2";
+        yield* Ref.set(harness.holdChecks, false);
+        yield* Ref.set(harness.agents, [agent("ready")]);
+        yield* sandboxes.refresh;
+        yield* until(sandboxes, discovered("env-2"));
+        yield* sandboxes.stop(NAME);
+        yield* sandboxes.refresh;
+        yield* Ref.set(harness.holdChecks, true);
+        yield* sandboxes.start(NAME);
+        yield* Deferred.succeed(yield* Queue.take(harness.heldChecks), undefined);
+        yield* until(sandboxes, discovered("env-2"));
+        yield* Deferred.succeed(stale, undefined);
+        yield* sandboxes.refresh;
+        assert.strictEqual((yield* sandboxes.snapshot).sandboxes[0]?.environmentId, "env-2");
       }),
     ),
   );
@@ -391,6 +481,22 @@ describe("DesktopAgentctlSandboxes", () => {
     ),
   );
 
+  it.effect("finishes a start whose request went away", () =>
+    withSandboxes((sandboxes, harness) =>
+      Effect.gen(function* () {
+        yield* until(sandboxes, discovered("env-1"));
+        yield* sandboxes.stop(NAME);
+        yield* Ref.set(harness.holdStarts, true);
+        // Like a client that disconnects while agentctl starts the Sandbox.
+        const starting = yield* Effect.forkChild(sandboxes.start(NAME));
+        const gate = yield* Queue.take(harness.heldStarts);
+        yield* Fiber.interrupt(starting);
+        yield* Deferred.succeed(gate, undefined);
+        yield* until(sandboxes, (snapshot) => snapshot.sandboxes[0]?.action === null);
+      }),
+    ),
+  );
+
   it.effect("keeps a start shown until the last of two overlapping starts ends", () =>
     withSandboxes((sandboxes, harness) =>
       Effect.gen(function* () {
@@ -423,18 +529,20 @@ describe("DesktopAgentctlSandboxes", () => {
         yield* fileSystem.writeFileString(file!, "not a folder\n");
         yield* sandboxes.addManifestRoot(a!);
         yield* sandboxes.addManifestRoot(`${b}/`);
+        // Adding a folder again keeps it once, without an error.
         yield* sandboxes.addManifestRoot(`${a}/`);
-        // A file would be opened, and on Windows run, by Open folder.
-        yield* sandboxes.addManifestRoot(file!);
+        // A file would be opened, and on Windows run, by a desktop client's Open folder.
+        const refused = yield* Effect.flip(sandboxes.addManifestRoot(file!));
+        assert.strictEqual(refused._tag, "AgentctlManifestRootError");
+        assert.strictEqual(
+          (yield* Effect.flip(sandboxes.addManifestRoot("relative/agents")))._tag,
+          "AgentctlManifestRootError",
+        );
         const settings = yield* sandboxes.removeManifestRoot(a!);
         assert.deepStrictEqual(settings.manifestRoots, [b!]);
         assert.deepStrictEqual(yield* sandboxes.listManifestRoots, [
           { directory: b!, exists: true, manifests: 0, repositories: [] },
         ]);
-        assert.isTrue(yield* sandboxes.isManifestRootDirectory(b!));
-        assert.isFalse(yield* sandboxes.isManifestRootDirectory(file!));
-        yield* fileSystem.remove(b!, { recursive: true });
-        assert.isFalse(yield* sandboxes.isManifestRootDirectory(b!));
       }).pipe(Effect.provide(NodeServices.layer)),
     ),
   );
@@ -444,7 +552,6 @@ describe("DesktopAgentctlSandboxes", () => {
       Effect.gen(function* () {
         const result = yield* sandboxes.pullManifestRoots(["/not-configured"]);
         assert.strictEqual(result.error, "This manifest folder is no longer configured.");
-        assert.isFalse(yield* sandboxes.isManifestRootDirectory("/not-configured"));
       }),
     ),
   );

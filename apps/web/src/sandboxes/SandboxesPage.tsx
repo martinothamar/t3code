@@ -1,6 +1,7 @@
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
+import type { HostedSandbox, SandboxHost } from "@t3tools/client-runtime/state/sandboxes";
 import { EnvironmentId, type AgentctlSandbox, type AgentctlManifestRoot } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
 import {
@@ -8,12 +9,12 @@ import {
   FolderGit2Icon,
   FolderIcon,
   FolderOpenIcon,
-  FolderPlusIcon,
   GitBranchIcon,
   PlusIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { SettingsRow, SettingsSection } from "../components/settings/settingsLayout";
 import { Badge } from "../components/ui/badge";
@@ -29,13 +30,19 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { sortThreads } from "../lib/threadSort";
 import { useProjects, useThreadShells } from "../state/entities";
 import { useEnvironmentPresentation } from "../state/presentation";
+import { sandboxEnvironment } from "../state/sandboxes";
+import { serverEnvironment } from "../state/server";
+import { shellEnvironment } from "../state/shell";
+import { useAtomCommand } from "../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../timestampFormat";
+import { ManifestFolderInput } from "./ManifestFolderInput";
 import { openNewSandboxDialog } from "./NewSandboxDialog";
 import {
   canDeleteSandbox,
   canStartSandbox,
   canStopSandbox,
   deleteSandbox,
+  runOnHost,
   sandboxStatus,
   sandboxStatusDetail,
   startSandbox,
@@ -43,8 +50,7 @@ import {
   type SandboxTone,
 } from "./sandboxActions";
 import { folderName, pullToast, repositoryBadges, tildePath } from "./manifestFolders";
-import { readAgentctlBridge } from "./sandboxConnections";
-import { useSandboxSnapshot } from "./useSandboxes";
+import { useSandboxHosts } from "./useSandboxes";
 
 const TONE_VARIANT = {
   success: "success",
@@ -59,7 +65,7 @@ const RECENT_THREADS = 3;
 
 /** Manages agentctl Sandboxes and where new ones come from, opened from the sidebar footer. */
 export function SandboxesPage() {
-  const snapshot = useSandboxSnapshot();
+  const hosts = useSandboxHosts();
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
@@ -75,56 +81,80 @@ export function SandboxesPage() {
         </WorkspacePageHeader>
         <ScrollArea className="min-h-0 flex-1">
           <WorkspacePageContainer>
-            {readAgentctlBridge() === null ? (
+            {hosts.length === 0 ? (
               <p className="text-muted-foreground text-sm">
-                agentctl Sandboxes are available in the desktop app.
+                No connected environment manages agentctl Sandboxes.
               </p>
-            ) : snapshot.status === "unavailable" ? (
-              <SettingsSection title="agentctl">
-                <SettingsRow
-                  title="agentctl is not available"
-                  description={snapshot.error ?? "Install agentctl to run agents in Sandboxes."}
-                />
-              </SettingsSection>
-            ) : snapshot.status === "loading" ? (
-              <p className="text-muted-foreground text-sm">Looking for Sandboxes…</p>
             ) : (
-              <>
-                <SettingsSection
-                  title="Sandboxes"
-                  headerAction={
-                    <Button size="xs" variant="ghost-muted" onClick={() => openNewSandboxDialog()}>
-                      <PlusIcon className="size-3" />
-                      New Sandbox
-                    </Button>
-                  }
-                >
-                  {snapshot.error !== null ? (
-                    // The Sandboxes below are as agentctl last reported them.
-                    <SettingsRow title="agentctl is not responding" description={snapshot.error} />
-                  ) : null}
-                  {snapshot.sandboxes.length === 0 ? (
-                    <SettingsRow
-                      title="No Sandboxes"
-                      description="Create one from a manifest, or with agentctl apply."
-                    />
-                  ) : (
-                    snapshot.sandboxes.map((sandbox) => (
-                      <SandboxRow
-                        key={sandbox.name}
-                        sandbox={sandbox}
-                        homeDirectory={snapshot.homeDirectory}
-                      />
-                    ))
-                  )}
-                </SettingsSection>
-                <ManifestFolders homeDirectory={snapshot.homeDirectory} />
-              </>
+              hosts.map((host) => (
+                <HostSandboxes key={host.hostEnvironmentId} host={host} named={hosts.length > 1} />
+              ))
             )}
           </WorkspacePageContainer>
         </ScrollArea>
       </div>
     </SidebarInset>
+  );
+}
+
+/** One host's Sandboxes and manifest folders, named when the client has several hosts. */
+function HostSandboxes({ host, named }: { readonly host: SandboxHost; readonly named: boolean }) {
+  const { presentation } = useEnvironmentPresentation(host.hostEnvironmentId);
+  const { snapshot, hostEnvironmentId } = host;
+  const on = named ? ` on ${presentation?.entry.target.label ?? "host"}` : "";
+  if (snapshot.status === "unavailable") {
+    return (
+      <SettingsSection title={`agentctl${on}`}>
+        <SettingsRow
+          title="agentctl is not available"
+          description={snapshot.error ?? "Install agentctl to run agents in Sandboxes."}
+        />
+      </SettingsSection>
+    );
+  }
+  if (snapshot.status === "loading") {
+    return <p className="text-muted-foreground text-sm">Looking for Sandboxes{on}…</p>;
+  }
+  return (
+    <>
+      <SettingsSection
+        title={`Sandboxes${on}`}
+        headerAction={
+          <Button
+            size="xs"
+            variant="ghost-muted"
+            onClick={() => openNewSandboxDialog(hostEnvironmentId)}
+          >
+            <PlusIcon className="size-3" />
+            New Sandbox
+          </Button>
+        }
+      >
+        {snapshot.error !== null ? (
+          // The Sandboxes below are as agentctl last reported them.
+          <SettingsRow title="agentctl is not responding" description={snapshot.error} />
+        ) : null}
+        {snapshot.sandboxes.length === 0 ? (
+          <SettingsRow
+            title="No Sandboxes"
+            description="Create one from a manifest, or with agentctl apply."
+          />
+        ) : (
+          snapshot.sandboxes.map((sandbox) => (
+            <SandboxRow
+              key={sandbox.name}
+              sandbox={{ ...sandbox, hostEnvironmentId }}
+              homeDirectory={snapshot.homeDirectory}
+            />
+          ))
+        )}
+      </SettingsSection>
+      <ManifestFolders
+        hostEnvironmentId={hostEnvironmentId}
+        homeDirectory={snapshot.homeDirectory}
+        title={`Manifest folders${on}`}
+      />
+    </>
   );
 }
 
@@ -143,7 +173,7 @@ function SandboxRow({
   sandbox,
   homeDirectory,
 }: {
-  readonly sandbox: AgentctlSandbox;
+  readonly sandbox: HostedSandbox;
   readonly homeDirectory: string;
 }) {
   const environmentId =
@@ -224,7 +254,7 @@ function SandboxRow({
             </Button>
           ) : null}
           {canStartSandbox(sandbox) ? (
-            <Button size="xs" variant="outline" onClick={() => void startSandbox(sandbox.name)}>
+            <Button size="xs" variant="outline" onClick={() => void startSandbox(sandbox)}>
               Start
             </Button>
           ) : null}
@@ -249,78 +279,95 @@ function SandboxRow({
 }
 
 /** Where "New Sandbox" looks for manifests, and whether their repositories are current. */
-function ManifestFolders({ homeDirectory }: { homeDirectory: string }) {
+function ManifestFolders({
+  hostEnvironmentId,
+  homeDirectory,
+  title,
+}: {
+  readonly hostEnvironmentId: EnvironmentId;
+  readonly homeDirectory: string;
+  readonly title: string;
+}) {
   const [roots, setRoots] = useState<ReadonlyArray<AgentctlManifestRoot> | null>(null);
   // The folders being pulled, so their rows show it and nothing pulls twice.
   const [pulling, setPulling] = useState<ReadonlyArray<string>>([]);
+  const openInEditor = useAtomCommand(shellEnvironment.openInEditor, { reportFailure: false });
+  const hostConfig = useAtomValue(serverEnvironment.configValueAtom(hostEnvironmentId));
+  const canOpen = hostConfig?.availableEditors.includes("file-manager") === true;
   // Bumped by every read, so a slow fetch cannot overwrite a newer add or remove.
   const generation = useRef(0);
-  const load = (read: Promise<ReadonlyArray<AgentctlManifestRoot>>) => {
-    const current = ++generation.current;
-    return read.then(
-      (next) => {
-        if (generation.current === current) setRoots(next);
-      },
-      () => undefined,
+  const readRoots = (command: typeof sandboxEnvironment.listManifestRoots) =>
+    runOnHost(command, hostEnvironmentId, {}).then((outcome) =>
+      "error" in outcome ? null : outcome.value,
     );
+  const load = (read: Promise<ReadonlyArray<AgentctlManifestRoot> | null>) => {
+    const current = ++generation.current;
+    return read.then((next) => {
+      if (next !== null && generation.current === current) setRoots(next);
+    });
   };
 
-  useEffect(() => {
-    const bridge = readAgentctlBridge();
-    if (bridge === null) return;
+  const loadInitial = useEffectEvent(() => {
     // Local state first, then again once each repository has fetched; the fetch
     // is ignored if the list changed meanwhile or the page closed.
-    void bridge
-      .listManifestRoots()
-      .then((next) => setRoots((current) => current ?? next))
-      .catch(() => undefined);
-    const current = ++generation.current;
-    void bridge.refreshManifestRoots().then(
-      (next) => {
-        if (generation.current === current) setRoots(next);
-      },
-      () => undefined,
+    void readRoots(sandboxEnvironment.listManifestRoots).then((next) =>
+      setRoots((current) => current ?? next),
     );
+    const current = ++generation.current;
+    void readRoots(sandboxEnvironment.refreshManifestRoots).then((next) => {
+      if (next !== null && generation.current === current) setRoots(next);
+    });
+  });
+  useEffect(() => {
+    loadInitial();
     return () => {
       generation.current += 1;
     };
   }, []);
 
   if (roots === null) return null;
-  const addRoot = async () => {
-    const folder = await window.desktopBridge?.pickFolder();
-    if (!folder) return;
-    const bridge = readAgentctlBridge();
-    if (bridge === null) return;
-    await bridge.addManifestRoot(folder);
-    await load(bridge.listManifestRoots());
+  const addRoot = async (folder: string) => {
+    const added = await runOnHost(sandboxEnvironment.addManifestRoot, hostEnvironmentId, {
+      folder,
+    });
+    if ("error" in added) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not add folder",
+          description: added.error,
+        }),
+      );
+    }
+    await load(readRoots(sandboxEnvironment.listManifestRoots));
   };
   const removeRoot = async (folder: string) => {
-    const bridge = readAgentctlBridge();
-    if (bridge === null) return;
-    await bridge.removeManifestRoot(folder);
-    await load(bridge.listManifestRoots());
+    await runOnHost(sandboxEnvironment.removeManifestRoot, hostEnvironmentId, { folder });
+    await load(readRoots(sandboxEnvironment.listManifestRoots));
   };
   const pullRoots = async (folders: ReadonlyArray<string>) => {
-    const bridge = readAgentctlBridge();
-    if (bridge === null || pulling.length > 0) return;
+    if (pulling.length > 0) return;
     setPulling(folders);
-    // Promise handlers rather than try/catch/finally, which the React Compiler cannot compile.
-    await bridge.pullManifestRoots(folders).then(
-      (result) => toastManager.add(stackedThreadToast(pullToast(result))),
-      () =>
-        toastManager.add(
-          stackedThreadToast({ type: "error", title: "Could not pull repositories" }),
-        ),
+    const pulled = await runOnHost(sandboxEnvironment.pullManifestRoots, hostEnvironmentId, {
+      folders,
+    });
+    toastManager.add(
+      stackedThreadToast(
+        "error" in pulled
+          ? { type: "error", title: "Could not pull repositories", description: pulled.error }
+          : pullToast(pulled.value),
+      ),
     );
-    await load(bridge.listManifestRoots());
+    await load(readRoots(sandboxEnvironment.listManifestRoots));
     setPulling([]);
   };
+  // The host opens it, in its own file manager.
   const openRoot = async (folder: string) => {
-    const opened = await readAgentctlBridge()
-      ?.openManifestRoot(folder)
-      .catch(() => false);
-    if (!opened) {
+    const result = await openInEditor({
+      environmentId: hostEnvironmentId,
+      input: { cwd: folder, editor: "file-manager" },
+    });
+    if (result._tag === "Failure") {
       toastManager.add(
         stackedThreadToast({ type: "error", title: "Could not open folder", description: folder }),
       );
@@ -332,7 +379,7 @@ function ManifestFolders({ homeDirectory }: { homeDirectory: string }) {
 
   return (
     <SettingsSection
-      title="Manifest folders"
+      title={title}
       headerAction={
         <span className="flex items-center gap-1">
           {pullable.length > 1 ? (
@@ -346,10 +393,7 @@ function ManifestFolders({ homeDirectory }: { homeDirectory: string }) {
               {pulling.length > 1 ? "Pulling…" : "Pull all"}
             </Button>
           ) : null}
-          <Button size="xs" variant="ghost-muted" onClick={() => void addRoot()}>
-            <FolderPlusIcon className="size-3" />
-            Add folder
-          </Button>
+          <ManifestFolderInput hostEnvironmentId={hostEnvironmentId} onAdd={addRoot} />
         </span>
       }
     >
@@ -367,7 +411,7 @@ function ManifestFolders({ homeDirectory }: { homeDirectory: string }) {
             pulling={pulling.includes(root.directory)}
             busy={pulling.length > 0}
             onPull={() => void pullRoots([root.directory])}
-            onOpen={() => void openRoot(root.directory)}
+            onOpen={canOpen ? () => void openRoot(root.directory) : null}
             onRemove={() => void removeRoot(root.directory)}
           />
         ))
@@ -390,7 +434,8 @@ function ManifestFolderRow({
   pulling: boolean;
   busy: boolean;
   onPull: () => void;
-  onOpen: () => void;
+  /** Null when the host has no file manager to open it in. */
+  onOpen: (() => void) | null;
   onRemove: () => void;
 }) {
   const path = tildePath(root.directory, homeDirectory);
@@ -457,7 +502,7 @@ function ManifestFolderRow({
               {pulling ? "Pulling…" : "Pull"}
             </Button>
           ) : null}
-          {root.exists ? (
+          {root.exists && onOpen !== null ? (
             <Button
               size="icon-xs"
               variant="ghost-muted"

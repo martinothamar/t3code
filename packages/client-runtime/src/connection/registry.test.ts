@@ -30,7 +30,6 @@ import {
   type ConnectionCatalogEntry,
   type ConnectionRegistration,
   type ConnectionRoute,
-  PlatformSshConnectionRegistration,
   PrimaryConnectionRegistration,
   RelayConnectionRegistration,
   SshConnectionProfile,
@@ -1858,43 +1857,6 @@ describe("EnvironmentRegistry", () => {
         );
         expect(yield* Ref.get(harness.disconnectedSshTargets)).toEqual([SSH_TARGET]);
       }).pipe(Effect.provide(harness.layer));
-    }),
-  );
-
-  it.effect("keeps a platform SSH environment unsaved and clears it when the host drops it", () =>
-    Effect.gen(function* () {
-      // The profile and pairing token the SSH broker records while connecting.
-      const harness = yield* makeHarness(
-        [],
-        [SSH_PROFILE],
-        [[SSH_CONNECTION.connectionId, new BearerConnectionCredential({ token: "ssh-token" })]],
-      );
-
-      yield* Effect.gen(function* () {
-        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-        yield* registry.reconcilePlatform([
-          new PlatformSshConnectionRegistration({ target: SSH_CONNECTION, profile: SSH_PROFILE }),
-        ]);
-
-        expect(
-          (yield* SubscriptionRef.get(registry.entries)).has(SSH_CONNECTION.environmentId),
-        ).toBe(true);
-        expect(yield* Ref.get(harness.storedTargets)).toEqual([]);
-        const error = yield* Effect.flip(registry.remove(SSH_CONNECTION.environmentId));
-        expect(error._tag).toBe("PlatformEnvironmentRemovalError");
-
-        yield* registry.reconcilePlatform([]);
-
-        expect(
-          (yield* SubscriptionRef.get(registry.entries)).has(SSH_CONNECTION.environmentId),
-        ).toBe(false);
-        expect((yield* Ref.get(harness.storedProfiles)).has(SSH_CONNECTION.connectionId)).toBe(
-          false,
-        );
-        expect((yield* Ref.get(harness.storedCredentials)).has(SSH_CONNECTION.connectionId)).toBe(
-          false,
-        );
-      }).pipe(Effect.provide(harness.layer), Effect.scoped);
     }),
   );
 });

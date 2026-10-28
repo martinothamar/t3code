@@ -7,8 +7,6 @@ import {
   sandboxStatus,
   suggestSandboxName,
 } from "./sandboxActions";
-import { sandboxNameForTarget, sandboxRegistrations } from "./sandboxConnections";
-import { ensureSandboxProject } from "./sandboxProjects";
 
 function sandbox(overrides: Partial<AgentctlSandbox> = {}): AgentctlSandbox {
   return {
@@ -21,7 +19,6 @@ function sandbox(overrides: Partial<AgentctlSandbox> = {}): AgentctlSandbox {
     disk: null,
     network: null,
     sshAccess: true,
-    sshTarget: { alias: "agentctl-worker", hostname: "worker", username: "agent", port: 22 },
     environmentId: EnvironmentId.make("env-worker"),
     settingsSeeded: false,
     harnesses: [],
@@ -34,35 +31,6 @@ function sandbox(overrides: Partial<AgentctlSandbox> = {}): AgentctlSandbox {
     ...overrides,
   };
 }
-
-describe("sandboxRegistrations", () => {
-  it("registers every Sandbox T3 has reached, running or not", () => {
-    const registrations = sandboxRegistrations([
-      sandbox(),
-      sandbox({
-        name: "stopped",
-        phase: "stopped",
-        environmentId: EnvironmentId.make("env-stopped"),
-      }),
-      sandbox({ name: "new", environmentId: null, sshTarget: null }),
-      sandbox({ name: "no-ssh", sshAccess: false }),
-    ]);
-    expect(registrations.map((registration) => registration.target.label)).toEqual([
-      "worker",
-      "stopped",
-    ]);
-    expect(sandboxNameForTarget(registrations[0]!.target)).toBe("worker");
-  });
-
-  it("drops a Sandbox as soon as it is being deleted", () => {
-    const registrations = sandboxRegistrations([
-      sandbox({ name: "deleting", action: "deleting" }),
-      sandbox({ name: "terminating", phase: "terminating" }),
-      sandbox({ name: "stopping", action: "stopping" }),
-    ]);
-    expect(registrations.map((registration) => registration.target.label)).toEqual(["stopping"]);
-  });
-});
 
 describe("sandboxStatus", () => {
   it("does not call a Sandbox running before T3 can reach it", () => {
@@ -96,57 +64,6 @@ describe("suggestSandboxName", () => {
 
   it("treats the name literally", () => {
     expect(suggestSandboxName("a.b", named("axb-4"))).toBe("a.b-1");
-  });
-});
-
-describe("ensureSandboxProject", () => {
-  const environmentId = EnvironmentId.make("env-worker");
-  const input = { name: "worker", environmentId, workingDirectory: "/home/agent/code" };
-
-  function dependencies(options: {
-    readonly existing?: boolean;
-    readonly createError?: string;
-    /** Another window made the project meanwhile, so this create fails. */
-    readonly madeElsewhere?: boolean;
-  }) {
-    let exists = options.existing === true;
-    const created: string[] = [];
-    return {
-      created,
-      dependencies: {
-        hasProjectAt: () => exists,
-        createProject: async (project: {
-          readonly title: string;
-          readonly workspaceRoot: string;
-        }) => {
-          created.push(`${project.title} at ${project.workspaceRoot}`);
-          if (options.madeElsewhere) exists = true;
-          return options.createError ?? null;
-        },
-      },
-    };
-  }
-
-  it("makes one project at the working directory, named after the Agent", async () => {
-    const deps = dependencies({});
-    expect(await ensureSandboxProject(deps.dependencies, input)).toBeNull();
-    expect(deps.created).toEqual(["worker at /home/agent/code"]);
-  });
-
-  it("leaves an existing project alone", async () => {
-    const deps = dependencies({ existing: true });
-    expect(await ensureSandboxProject(deps.dependencies, input)).toBeNull();
-    expect(deps.created).toEqual([]);
-  });
-
-  it("succeeds when another window made the project first", async () => {
-    const deps = dependencies({ createError: "workspace in use", madeElsewhere: true });
-    expect(await ensureSandboxProject(deps.dependencies, input)).toBeNull();
-  });
-
-  it("reports a create that failed for another reason", async () => {
-    const deps = dependencies({ createError: "no such directory" });
-    expect(await ensureSandboxProject(deps.dependencies, input)).toBe("no such directory");
   });
 });
 

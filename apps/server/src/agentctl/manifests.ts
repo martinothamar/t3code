@@ -27,7 +27,7 @@ export function manifestFileNames(entries: ReadonlyArray<string>): string[] {
   );
 }
 
-export const discoverManifests = Effect.fn("desktop.agentctl.discoverManifests")(function* (
+export const discoverManifests = Effect.fn("AgentctlSandboxes.discoverManifests")(function* (
   roots: ReadonlyArray<string>,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;

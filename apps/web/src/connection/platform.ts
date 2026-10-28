@@ -55,8 +55,6 @@ import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { randomUUID } from "../lib/utils";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
-import { sandboxRegistrations } from "../sandboxes/sandboxConnections";
-import { readSandboxSnapshot } from "../sandboxes/useSandboxes";
 import {
   desktopLocalConnectionId,
   readDesktopSecondaryBootstrapsResult,
@@ -630,12 +628,7 @@ const layerPlatformConnectionSource = Layer.effect(
   Effect.gen(function* () {
     if (isHostedStaticApp() || isLocalEnvironmentDisabled()) {
       return PlatformConnectionSource.PlatformConnectionSource.of({
-        // agentctl Sandboxes are remote, so they stay without a local environment.
-        registrations: isHostedStaticApp()
-          ? Stream.empty
-          : Stream.tick(PLATFORM_POLL_INTERVAL).pipe(
-              Stream.map(() => sandboxRegistrations(readSandboxSnapshot().sandboxes)),
-            ),
+        registrations: Stream.empty,
       });
     }
     const cacheRef = yield* Ref.make(new Map<string, CachedPlatformRegistration>());
@@ -784,9 +777,6 @@ const layerPlatformConnectionSource = Layer.effect(
         }
         yield* Ref.set(rejectedRef, nextRejected);
       }
-
-      // agentctl Sandboxes connect through the SSH gateway on every attempt.
-      registrations.push(...sandboxRegistrations(readSandboxSnapshot().sandboxes));
 
       yield* Ref.set(cacheRef, next);
       return registrations as ReadonlyArray<PlatformConnectionRegistration>;

@@ -1,12 +1,18 @@
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
-import type { AgentctlActionResult, AgentctlSandbox } from "@t3tools/contracts";
+import {
+  runAtomCommand,
+  squashAtomCommandFailure,
+  type AtomCommand,
+  type AtomCommandResult,
+} from "@t3tools/client-runtime/state/runtime";
+import type { HostedSandbox } from "@t3tools/client-runtime/state/sandboxes";
+import type { AgentctlActionResult, AgentctlSandbox, EnvironmentId } from "@t3tools/contracts";
 
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { requestConfirmDialog } from "../confirmDialog";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { sandboxEnvironment } from "../state/sandboxes";
 import { environmentThreadShells } from "../state/threads";
-import { readAgentctlBridge } from "./sandboxConnections";
-import { refreshSandboxSnapshot } from "./useSandboxes";
 
 export type SandboxTone = "success" | "info" | "warning" | "error" | "muted";
 
@@ -75,10 +81,40 @@ export const canStopSandbox = (sandbox: AgentctlSandbox) =>
 
 export const canDeleteSandbox = (sandbox: AgentctlSandbox) => !isLeaving(sandbox);
 
-function reportResult(title: string, result: AgentctlActionResult) {
-  refreshSandboxSnapshot();
-  if (result.error === null) return true;
-  toastManager.add(stackedThreadToast({ type: "error", title, description: result.error }));
+/** A command's value, or why it failed, such as a host that is not connected. */
+function commandOutcome<A, E>(
+  result: AtomCommandResult<A, E>,
+): { readonly value: A } | { readonly error: string } {
+  if (result._tag === "Success") return { value: result.value };
+  const failure = squashAtomCommandFailure(result);
+  return { error: failure instanceof Error ? failure.message : String(failure) };
+}
+
+/** Runs one of the host's Sandbox commands, as the page, palette and banners all do. */
+export async function runOnHost<Input, A, E>(
+  command: AtomCommand<{ readonly environmentId: EnvironmentId; readonly input: Input }, A, E>,
+  hostEnvironmentId: EnvironmentId,
+  input: Input,
+) {
+  return commandOutcome(
+    await runAtomCommand(
+      appAtomRegistry,
+      command,
+      { environmentId: hostEnvironmentId, input },
+      { reportFailure: false },
+    ),
+  );
+}
+
+async function runAction(
+  title: string,
+  command: typeof sandboxEnvironment.start,
+  sandbox: HostedSandbox,
+) {
+  const outcome = await runOnHost(command, sandbox.hostEnvironmentId, { name: sandbox.name });
+  const error = "error" in outcome ? outcome.error : (outcome.value as AgentctlActionResult).error;
+  if (error === null) return true;
+  toastManager.add(stackedThreadToast({ type: "error", title, description: error }));
   return false;
 }
 
@@ -86,7 +122,8 @@ function reportResult(title: string, result: AgentctlActionResult) {
 // run it twice; a pending start does not block a stop or delete.
 const inFlight = new Set<string>();
 
-async function once(key: string, run: () => Promise<boolean>): Promise<boolean> {
+async function once(sandbox: HostedSandbox, kind: string, run: () => Promise<boolean>) {
+  const key = `${kind}:${sandbox.hostEnvironmentId}:${sandbox.name}`;
   if (inFlight.has(key)) return false;
   inFlight.add(key);
   try {
@@ -120,51 +157,37 @@ async function confirm(message: string, destructive: boolean) {
   );
 }
 
-export function startSandbox(name: string): Promise<boolean> {
-  return once(`start:${name}`, () => runStart(name));
+export function startSandbox(sandbox: HostedSandbox): Promise<boolean> {
+  return once(sandbox, "start", () =>
+    runAction(`Could not start ${sandbox.name}`, sandboxEnvironment.start, sandbox),
+  );
 }
 
-async function runStart(name: string): Promise<boolean> {
-  const bridge = readAgentctlBridge();
-  if (bridge === null) return false;
-  const pending = bridge.start(name);
-  refreshSandboxSnapshot();
-  return reportResult(`Could not start ${name}`, await pending);
+export function stopSandbox(sandbox: HostedSandbox): Promise<boolean> {
+  return once(sandbox, "stop", () => runStop(sandbox));
 }
 
-export function stopSandbox(sandbox: AgentctlSandbox): Promise<boolean> {
-  return once(`stop:${sandbox.name}`, () => runStop(sandbox));
-}
-
-async function runStop(sandbox: AgentctlSandbox): Promise<boolean> {
-  const bridge = readAgentctlBridge();
-  if (bridge === null) return false;
+async function runStop(sandbox: HostedSandbox): Promise<boolean> {
   const busy = runningWarning(sandbox);
   const confirmed = await confirm(
     `Stop ${sandbox.name}?\nIts disk is kept, so you can start it again. Agents running in it stop with it.${busy}`,
     busy !== "",
   );
   if (!confirmed) return false;
-  const pending = bridge.stop(sandbox.name);
-  refreshSandboxSnapshot();
-  return reportResult(`Could not stop ${sandbox.name}`, await pending);
+  return runAction(`Could not stop ${sandbox.name}`, sandboxEnvironment.stop, sandbox);
 }
 
-export function deleteSandbox(sandbox: AgentctlSandbox): Promise<boolean> {
-  return once(`delete:${sandbox.name}`, () => runDelete(sandbox));
+export function deleteSandbox(sandbox: HostedSandbox): Promise<boolean> {
+  return once(sandbox, "delete", () => runDelete(sandbox));
 }
 
-async function runDelete(sandbox: AgentctlSandbox): Promise<boolean> {
-  const bridge = readAgentctlBridge();
-  if (bridge === null) return false;
+async function runDelete(sandbox: HostedSandbox): Promise<boolean> {
   const confirmed = await confirm(
     `Delete ${sandbox.name}?\nThe Sandbox and its disk are deleted, including work that was not pushed. Its project and threads leave T3 Code.${runningWarning(sandbox)}`,
     true,
   );
   if (!confirmed) return false;
-  const pending = bridge.remove(sandbox.name);
-  refreshSandboxSnapshot();
-  return reportResult(`Could not delete ${sandbox.name}`, await pending);
+  return runAction(`Could not delete ${sandbox.name}`, sandboxEnvironment.remove, sandbox);
 }
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

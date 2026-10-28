@@ -52,6 +52,14 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,
   // A guest link hands thread access to someone outside, like a pairing link.
   [WS_METHODS.guestShareCreate]: AuthAccessWriteScope,
+  [WS_METHODS.agentctlStartSandbox]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentctlStopSandbox]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentctlDeleteSandbox]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentctlCreateSandbox]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentctlMarkSettingsSeeded]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentctlAddManifestRoot]: AuthSettingsWriteScope,
+  [WS_METHODS.agentctlRemoveManifestRoot]: AuthSettingsWriteScope,
+  [WS_METHODS.agentctlPullManifestRoots]: AuthSettingsWriteScope,
 } as const;
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
 

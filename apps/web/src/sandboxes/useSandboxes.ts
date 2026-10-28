@@ -1,76 +1,44 @@
-import type { AgentctlSandbox, AgentctlSandboxesSnapshot } from "@t3tools/contracts";
-import { useSyncExternalStore } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import type { HostedSandbox, SandboxHost } from "@t3tools/client-runtime/state/sandboxes";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { Atom } from "effect/reactivity";
 
-import { EMPTY_SANDBOX_SNAPSHOT, readAgentctlBridge } from "./sandboxConnections";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { sandboxEnvironment } from "../state/sandboxes";
 
-// The bridge has no change event, so one shared poller reads the desktop's snapshot (a cheap sync
-// IPC) while anything is subscribed. Desktop main keeps the last Sandboxes when agentctl fails, so
-// a read never drops them, and refreshes every 3 seconds, so reading more often finds nothing new.
-const POLL_MS = 3_000;
-const UNAVAILABLE_POLL_MS = 15_000;
+const offersSandboxesAtom = Atom.make((get) =>
+  get(sandboxEnvironment.hostsValueAtom).some((host) => host.snapshot.status === "available"),
+).pipe(Atom.withLabel("sandboxes:offered"));
 
-let current: AgentctlSandboxesSnapshot = EMPTY_SANDBOX_SNAPSHOT;
-let currentKey = "";
-const listeners = new Set<() => void>();
+/** Where New Sandbox goes when nothing names a host: the first that can reach agentctl. */
+const defaultHostAtom = Atom.make(
+  (get) =>
+    get(sandboxEnvironment.hostsValueAtom).find((host) => host.snapshot.status === "available")
+      ?.hostEnvironmentId ?? null,
+).pipe(Atom.withLabel("sandboxes:default-host"));
 
-function read() {
-  const next = readAgentctlBridge()?.getSnapshot() ?? EMPTY_SANDBOX_SNAPSHOT;
-  const key = JSON.stringify(next);
-  if (key === currentKey) return;
-  current = next;
-  currentKey = key;
-  for (const listener of listeners) listener();
+export function useSandboxHosts(): ReadonlyArray<SandboxHost> {
+  return useAtomValue(sandboxEnvironment.hostsValueAtom);
 }
 
-let timer: ReturnType<typeof setTimeout> | null = null;
-
-function poll() {
-  read();
-  timer = setTimeout(poll, current.status === "unavailable" ? UNAVAILABLE_POLL_MS : POLL_MS);
+export function useSandboxHost(hostEnvironmentId: EnvironmentId | null): SandboxHost | null {
+  return useSandboxHosts().find((host) => host.hostEnvironmentId === hostEnvironmentId) ?? null;
 }
 
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  if (timer === null && readAgentctlBridge() !== null) poll();
-  return () => {
-    listeners.delete(listener);
-    if (listeners.size === 0 && timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
-  };
+export function useSandboxes(): ReadonlyArray<HostedSandbox> {
+  return useAtomValue(sandboxEnvironment.sandboxesAtom);
 }
 
-/** The current snapshot, read through the poller when it runs, for code outside React. */
-export function readSandboxSnapshot(): AgentctlSandboxesSnapshot {
-  if (timer === null) read();
-  return current;
+/** Every host's Sandboxes now, for code outside React. */
+export function readSandboxes(): ReadonlyArray<HostedSandbox> {
+  return appAtomRegistry.get(sandboxEnvironment.sandboxesAtom);
 }
 
-/** Re-reads right away, such as after a lifecycle request changed the snapshot. */
-export function refreshSandboxSnapshot() {
-  read();
+export function readDefaultSandboxHost(): EnvironmentId | null {
+  return appAtomRegistry.get(defaultHostAtom);
 }
 
-export function useSandboxSnapshot(): AgentctlSandboxesSnapshot {
-  return useSyncExternalStore(subscribe, () => current);
-}
-
-/**
- * Subscribes to one derived value. Return a primitive, so a component only
- * re-renders when that value changes rather than on every snapshot.
- */
-export function useSandboxSelector<T extends string | number | boolean | null>(
-  select: (snapshot: AgentctlSandboxesSnapshot) => T,
-): T {
-  return useSyncExternalStore(subscribe, () => select(current));
-}
-
-export function useSandboxes(): ReadonlyArray<AgentctlSandbox> {
-  return useSandboxSnapshot().sandboxes;
-}
-
-/** Whether this desktop build can reach agentctl, so Sandbox actions are worth offering. */
+/** Whether a connected host can reach agentctl, so Sandbox actions are worth offering. */
 export function useOffersSandboxes(): boolean {
-  return useSandboxSelector((snapshot) => snapshot.status === "available");
+  return useAtomValue(offersSandboxesAtom);
 }

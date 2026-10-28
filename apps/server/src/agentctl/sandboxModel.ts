@@ -22,7 +22,7 @@ import {
 export const SandboxRecord = Schema.Struct({
   environmentId: EnvironmentId,
   sshTarget: DesktopSshEnvironmentTargetSchema,
-  /** The user's preference settings were copied into this environment once; see the web coordinator. */
+  /** The user's preference settings were copied into this environment once, by a client. */
   settingsSeeded: Schema.optionalKey(Schema.Boolean),
 });
 export type SandboxRecord = typeof SandboxRecord.Type;
@@ -51,10 +51,17 @@ export interface SandboxRuntime {
    */
   readonly verified: boolean;
   readonly discovering: boolean;
+  /**
+   * The check whose result may still be recorded, unique across Sandboxes of every name; 0 once it
+   * stopped being reachable, so a check from before then is dropped.
+   */
+  readonly check: number;
   /** When a failed check may run again, in epoch milliseconds. */
   readonly retryAt: number;
   /** Where its agents work, from `agentctl ssh-info`, once T3 reached it. */
   readonly workingDirectory: string | null;
+  /** Its T3 server, forwarded to loopback, while it is reachable. */
+  readonly relayUpstream: string | null;
 }
 
 export const IDLE_RUNTIME: SandboxRuntime = {
@@ -64,8 +71,10 @@ export const IDLE_RUNTIME: SandboxRuntime = {
   connectError: null,
   verified: false,
   discovering: false,
+  check: 0,
   retryAt: 0,
   workingDirectory: null,
+  relayUpstream: null,
 };
 
 /** Drops records for Sandboxes that are gone or being deleted. */
@@ -100,7 +109,6 @@ export function buildSandbox(
     disk: resources?.rootFilesystem?.capacity ?? null,
     network: agent.spec.network?.mode ?? null,
     sshAccess: hasSshAccess(agent),
-    sshTarget: record?.sshTarget ?? null,
     environmentId: record?.environmentId ?? null,
     settingsSeeded: record?.settingsSeeded ?? false,
     harnesses: agent.status?.sandbox?.harnesses ?? [],
