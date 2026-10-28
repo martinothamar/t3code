@@ -5,6 +5,7 @@ import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import {
+  FetchHttpClient,
   HttpClient,
   HttpClientRequest,
   HttpRouter,
@@ -112,7 +113,10 @@ const relayHttp = Effect.fn("AgentctlSandboxRelay.relayHttp")(function* (
           contentType: request.headers["content-type"],
         }),
   );
-  const response = yield* httpClient.execute(upstreamRequest);
+  // The client follows redirects itself, so none leads this server elsewhere.
+  const response = yield* httpClient
+    .execute(upstreamRequest)
+    .pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }));
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(response.headers)) {
     if (DROPPED_RESPONSE_HEADERS.has(name) || value === undefined) continue;
@@ -138,7 +142,10 @@ const handler = Effect.gen(function* () {
   if (Option.isNone(upstream)) {
     return HttpServerResponse.text(`${target.name} is not reachable`, { status: 503 });
   }
-  const upstreamUrl = new URL(`${target.path.slice(1)}${url.value.search}`, upstream.value);
+  // Only the path and query come from the client, so no path can name another origin.
+  const upstreamUrl = new URL(upstream.value);
+  upstreamUrl.pathname = target.path;
+  upstreamUrl.search = url.value.search;
   const unreachable = (error: unknown) =>
     sandboxes
       .reportUnreachable(target.name)

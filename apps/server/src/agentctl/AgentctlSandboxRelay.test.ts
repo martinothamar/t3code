@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, it } from "vite-plus/test";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { HttpClient, HttpClientError, HttpClientResponse, HttpRouter } from "effect/http";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientError,
+  HttpClientResponse,
+  HttpRouter,
+} from "effect/http";
 
 import * as AgentctlSandboxes from "./AgentctlSandboxes.ts";
 import * as AgentctlSandboxRelay from "./AgentctlSandboxRelay.ts";
@@ -13,11 +20,19 @@ afterEach(async () => {
 });
 
 const fixture = (options: { readonly reachable?: boolean; readonly fail?: boolean } = {}) => {
-  const requests: Array<{ url: string; headers: Readonly<Record<string, string>> }> = [];
+  const requests: Array<{
+    url: string;
+    headers: Readonly<Record<string, string>>;
+    redirect: string | undefined;
+  }> = [];
   const unreachable: string[] = [];
-  const client = HttpClient.make((request) =>
+  const client = HttpClient.make((request, _url, _signal, fiber) =>
     Effect.gen(function* () {
-      requests.push({ url: request.url, headers: request.headers });
+      requests.push({
+        url: request.url,
+        headers: request.headers,
+        redirect: Context.getOrUndefined(fiber.context, FetchHttpClient.RequestInit)?.redirect,
+      });
       if (options.fail) {
         return yield* new HttpClientError.HttpClientError({
           reason: new HttpClientError.TransportError({ request, description: "ECONNREFUSED" }),
@@ -99,6 +114,24 @@ describe("Sandbox relay", () => {
     expect(requests[0]?.headers.authorization).toBe("Bearer sandbox-token");
     expect(requests[0]?.headers.cookie).toBeUndefined();
     expect(requests[0]?.headers["x-forwarded-host"]).toBeUndefined();
+  });
+
+  it.each([
+    [
+      "/sandbox/worker-1/http://127.0.0.1:9000/private",
+      "http://127.0.0.1:4010/http://127.0.0.1:9000/private",
+    ],
+    ["/sandbox/worker-1//evil.test/x", "http://127.0.0.1:4010//evil.test/x"],
+  ])("keeps %s on the Sandbox's server", async (path, upstream) => {
+    const { handler, requests } = fixture();
+    await handler(new Request(`http://host.test${path}`));
+    expect(requests.map((request) => request.url)).toEqual([upstream]);
+  });
+
+  it("leaves redirects to the client", async () => {
+    const { handler, requests } = fixture();
+    await handler(new Request("http://host.test/sandbox/worker-1/api/auth/session"));
+    expect(requests[0]?.redirect).toBe("manual");
   });
 
   it("answers 503 for a Sandbox that is not reachable", async () => {
