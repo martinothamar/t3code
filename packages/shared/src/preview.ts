@@ -12,13 +12,17 @@ export function previewPdfAssetUrl(rawUrl: string, httpBaseUrl: string | null): 
   try {
     const url = new URL(rawUrl);
     const baseUrl = new URL(httpBaseUrl);
-    if (
-      (url.protocol !== "http:" && url.protocol !== "https:") ||
-      !url.pathname.startsWith("/api/assets/") ||
-      !/\.pdf$/i.test(url.pathname)
-    ) {
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || !/\.pdf$/i.test(url.pathname)) {
       return null;
     }
+    // Already below this environment's base path, as a relayed environment's assets are.
+    if (
+      url.origin === baseUrl.origin &&
+      url.pathname.startsWith(`${new URL(".", baseUrl).pathname}api/assets/`)
+    ) {
+      return url.href;
+    }
+    if (!url.pathname.startsWith("/api/assets/")) return null;
     if (
       url.origin !== baseUrl.origin &&
       !isLocalLoopbackHost(url.hostname) &&
