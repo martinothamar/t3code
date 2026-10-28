@@ -57,6 +57,12 @@ interface Harness {
   /** What the Sandbox's T3 server reports; plain, because fetch reads it. */
   readonly environment: { id: string };
   readonly disconnected: Deferred.Deferred<void>;
+  /**
+   * While set, each check hands its gate to `heldChecks` once it has the environment id, and
+   * waits for it.
+   */
+  readonly holdChecks: Ref.Ref<boolean>;
+  readonly heldChecks: Queue.Queue<Deferred.Deferred<void>>;
   /** The next SSH reach fails, like a Sandbox still booting. */
   readonly ensureFails: Ref.Ref<boolean>;
   /**
@@ -77,6 +83,8 @@ const makeHarness = Effect.gen(function* () {
     environment: { id: "env-1" },
     disconnected: yield* Deferred.make<void>(),
     ensureFails: yield* Ref.make(false),
+    holdChecks: yield* Ref.make(false),
+    heldChecks: yield* Queue.unbounded<Deferred.Deferred<void>>(),
     holdStarts: yield* Ref.make(false),
     heldStarts: yield* Queue.unbounded<Deferred.Deferred<void>>(),
     applyFails: yield* Ref.make(false),
@@ -101,7 +109,20 @@ function layer(harness: Harness, baseDir: string) {
           : Ref.get(harness.agents),
       ),
     ),
-    sshInfo: () => Effect.succeed({ workingDirectory: "/home/agent/code" }),
+    // Runs after the check fetched the environment id.
+    sshInfo: () =>
+      Ref.get(harness.holdChecks).pipe(
+        Effect.flatMap((hold) =>
+          hold
+            ? Effect.gen(function* () {
+                const gate = yield* Deferred.make<void>();
+                yield* Queue.offer(harness.heldChecks, gate);
+                yield* Deferred.await(gate);
+              })
+            : Effect.void,
+        ),
+        Effect.as({ workingDirectory: "/home/agent/code" }),
+      ),
     start: () =>
       Ref.get(harness.holdStarts).pipe(
         Effect.flatMap((hold) =>
@@ -146,6 +167,7 @@ function layer(harness: Harness, baseDir: string) {
     ensure: (_target, options) =>
       Ref.update(harness.ensured, (count) => count + 1).pipe(
         Effect.andThen(Queue.offer(harness.ensures, undefined)),
+
         Effect.andThen(Ref.getAndSet(harness.ensureFails, false)),
         Effect.flatMap((fails) =>
           fails
@@ -269,6 +291,58 @@ describe("AgentctlSandboxes", () => {
         assert.deepStrictEqual(yield* sandboxes.relayUpstream(NAME), Option.none());
         yield* sandboxes.refresh;
         yield* Queue.take(harness.ensures);
+      }),
+    ),
+  );
+
+  it.effect("ignores a check that ends after the Sandbox stopped", () =>
+    withSandboxes((sandboxes, harness) =>
+      Effect.gen(function* () {
+        yield* until(sandboxes, discovered("env-1"));
+        yield* sandboxes.stop(NAME);
+        yield* sandboxes.refresh;
+        yield* Ref.set(harness.holdChecks, true);
+        yield* sandboxes.start(NAME);
+        // This check learned env-1, then the Sandbox stopped and its T3 home was reset.
+        const stale = yield* Queue.take(harness.heldChecks);
+        yield* sandboxes.stop(NAME);
+        yield* sandboxes.refresh;
+        harness.environment.id = "env-2";
+        yield* sandboxes.start(NAME);
+        yield* Deferred.succeed(yield* Queue.take(harness.heldChecks), undefined);
+        yield* until(sandboxes, discovered("env-2"));
+        yield* Deferred.succeed(stale, undefined);
+        yield* sandboxes.refresh;
+        assert.strictEqual((yield* sandboxes.snapshot).sandboxes[0]?.environmentId, "env-2");
+      }),
+    ),
+  );
+
+  it.effect("ignores a check of a deleted Sandbox once another takes its name", () =>
+    withSandboxes((sandboxes, harness) =>
+      Effect.gen(function* () {
+        yield* until(sandboxes, discovered("env-1"));
+        yield* sandboxes.stop(NAME);
+        yield* sandboxes.refresh;
+        yield* Ref.set(harness.holdChecks, true);
+        yield* sandboxes.start(NAME);
+        const stale = yield* Queue.take(harness.heldChecks);
+        yield* sandboxes.remove(NAME);
+        // A new Sandbox of the same name, stopped and started as often as the deleted one.
+        harness.environment.id = "env-2";
+        yield* Ref.set(harness.holdChecks, false);
+        yield* Ref.set(harness.agents, [agent("ready")]);
+        yield* sandboxes.refresh;
+        yield* until(sandboxes, discovered("env-2"));
+        yield* sandboxes.stop(NAME);
+        yield* sandboxes.refresh;
+        yield* Ref.set(harness.holdChecks, true);
+        yield* sandboxes.start(NAME);
+        yield* Deferred.succeed(yield* Queue.take(harness.heldChecks), undefined);
+        yield* until(sandboxes, discovered("env-2"));
+        yield* Deferred.succeed(stale, undefined);
+        yield* sandboxes.refresh;
+        assert.strictEqual((yield* sandboxes.snapshot).sandboxes[0]?.environmentId, "env-2");
       }),
     ),
   );
@@ -403,6 +477,22 @@ describe("AgentctlSandboxes", () => {
         const sandbox = (yield* sandboxes.snapshot).sandboxes[0];
         assert.strictEqual(sandbox?.action, null);
         assert.strictEqual(sandbox?.actionError, null);
+      }),
+    ),
+  );
+
+  it.effect("finishes a start whose request went away", () =>
+    withSandboxes((sandboxes, harness) =>
+      Effect.gen(function* () {
+        yield* until(sandboxes, discovered("env-1"));
+        yield* sandboxes.stop(NAME);
+        yield* Ref.set(harness.holdStarts, true);
+        // Like a client that disconnects while agentctl starts the Sandbox.
+        const starting = yield* Effect.forkChild(sandboxes.start(NAME));
+        const gate = yield* Queue.take(harness.heldStarts);
+        yield* Fiber.interrupt(starting);
+        yield* Deferred.succeed(gate, undefined);
+        yield* until(sandboxes, (snapshot) => snapshot.sandboxes[0]?.action === null);
       }),
     ),
   );

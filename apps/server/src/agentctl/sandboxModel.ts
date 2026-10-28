@@ -51,6 +51,11 @@ export interface SandboxRuntime {
    */
   readonly verified: boolean;
   readonly discovering: boolean;
+  /**
+   * The check whose result may still be recorded, unique across Sandboxes of every name; 0 once it
+   * stopped being reachable, so a check from before then is dropped.
+   */
+  readonly check: number;
   /** When a failed check may run again, in epoch milliseconds. */
   readonly retryAt: number;
   /** Where its agents work, from `agentctl ssh-info`, once T3 reached it. */
@@ -66,6 +71,7 @@ export const IDLE_RUNTIME: SandboxRuntime = {
   connectError: null,
   verified: false,
   discovering: false,
+  check: 0,
   retryAt: 0,
   workingDirectory: null,
   relayUpstream: null,

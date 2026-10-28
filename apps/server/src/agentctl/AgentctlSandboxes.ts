@@ -18,6 +18,7 @@ import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -189,6 +190,7 @@ export const make = Effect.gen(function* () {
     homeDirectory,
   });
   const refreshLock = yield* Semaphore.make(1);
+  const nextCheck = yield* Ref.make(0);
 
   const closeTunnelSoon = (name: string) =>
     tunnels
@@ -235,7 +237,7 @@ export const make = Effect.gen(function* () {
   // the first time in each run of the server, and again each time it becomes
   // reachable, in case it was recreated or its T3 home reset. The forward then
   // stays open for the relay until the Sandbox stops.
-  const discover = Effect.fn("AgentctlSandboxes.discover")(function* (name: string) {
+  const discover = Effect.fn("AgentctlSandboxes.discover")(function* (name: string, check: number) {
     const result = yield* Effect.all([
       tunnels.ensure(sandboxTarget(name)).pipe(
         Effect.flatMap((tunnel) =>
@@ -250,49 +252,55 @@ export const make = Effect.gen(function* () {
       ),
       cli.sshInfo(name),
     ]).pipe(Effect.result);
-    const now = yield* Clock.currentTimeMillis;
-    if (result._tag === "Failure") {
-      yield* Effect.logWarning("Could not reach an agentctl Sandbox.", {
-        name,
-        error: result.failure,
-      });
-      // A known Sandbox keeps its environment; its live connection reports trouble.
-      const known = (yield* Ref.get(store)).sandboxes?.[name] !== undefined;
-      yield* updateRuntime(name, (runtime) => ({
-        ...runtime,
-        discovering: false,
-        retryAt: now + DISCOVERY_RETRY_MS,
-        connectError: known ? runtime.connectError : discoveryErrorMessage(result.failure),
-      }));
-    } else {
-      const [{ environmentId, sshTarget, httpBaseUrl }, sshInfo] = result.success;
-      yield* updateStore((document) => ({
-        ...document,
-        sandboxes: {
-          ...document.sandboxes,
-          // Registering the resolved target keeps the SSH connection from
-          // recording a changed profile on every connect. A recreated
-          // Sandbox has a new environment, which is seeded again.
-          [name]: {
-            environmentId,
-            sshTarget,
-            ...(document.sandboxes?.[name]?.environmentId === environmentId &&
-            document.sandboxes[name].settingsSeeded === true
-              ? { settingsSeeded: true }
-              : {}),
-          },
-        },
-      }));
-      yield* updateRuntime(name, (runtime) => ({
-        ...runtime,
-        discovering: false,
-        connectError: null,
-        verified: true,
-        workingDirectory: sshInfo.workingDirectory,
-        relayUpstream: httpBaseUrl,
-      }));
-    }
-    yield* publish;
+    // Under the refresh lock, which a stop or deletion takes to drop this check.
+    yield* refreshLock.withPermits(1)(
+      Effect.gen(function* () {
+        if ((yield* Ref.get(runtimes)).get(name)?.check !== check) return;
+        const now = yield* Clock.currentTimeMillis;
+        if (result._tag === "Failure") {
+          yield* Effect.logWarning("Could not reach an agentctl Sandbox.", {
+            name,
+            error: result.failure,
+          });
+          // A known Sandbox keeps its environment; its live connection reports trouble.
+          const known = (yield* Ref.get(store)).sandboxes?.[name] !== undefined;
+          yield* updateRuntime(name, (runtime) => ({
+            ...runtime,
+            discovering: false,
+            retryAt: now + DISCOVERY_RETRY_MS,
+            connectError: known ? runtime.connectError : discoveryErrorMessage(result.failure),
+          }));
+        } else {
+          const [{ environmentId, sshTarget, httpBaseUrl }, sshInfo] = result.success;
+          yield* updateStore((document) => ({
+            ...document,
+            sandboxes: {
+              ...document.sandboxes,
+              // Registering the resolved target keeps the SSH connection from
+              // recording a changed profile on every connect. A recreated
+              // Sandbox has a new environment, which is seeded again.
+              [name]: {
+                environmentId,
+                sshTarget,
+                ...(document.sandboxes?.[name]?.environmentId === environmentId &&
+                document.sandboxes[name].settingsSeeded === true
+                  ? { settingsSeeded: true }
+                  : {}),
+              },
+            },
+          }));
+          yield* updateRuntime(name, (runtime) => ({
+            ...runtime,
+            discovering: false,
+            connectError: null,
+            verified: true,
+            workingDirectory: sshInfo.workingDirectory,
+            relayUpstream: httpBaseUrl,
+          }));
+        }
+        yield* publish;
+      }),
+    );
   });
 
   const refreshBody = Effect.gen(function* () {
@@ -352,10 +360,17 @@ export const make = Effect.gen(function* () {
       const state = states.get(name) ?? IDLE_RUNTIME;
       if (!isConnectable(agent)) {
         // Check again, without waiting out the throttle, once it is back.
-        if (state.verified || state.retryAt !== 0 || state.relayUpstream !== null) {
+        if (
+          state.verified ||
+          state.discovering ||
+          state.retryAt !== 0 ||
+          state.relayUpstream !== null
+        ) {
           yield* updateRuntime(name, (current) => ({
             ...current,
             verified: false,
+            discovering: false,
+            check: 0,
             retryAt: 0,
             relayUpstream: null,
           }));
@@ -363,8 +378,9 @@ export const make = Effect.gen(function* () {
         continue;
       }
       if (state.verified || state.discovering || now < state.retryAt) continue;
-      yield* updateRuntime(name, (current) => ({ ...current, discovering: true }));
-      yield* Effect.forkIn(discover(name), scope);
+      const check = yield* Ref.updateAndGet(nextCheck, (id) => id + 1);
+      yield* updateRuntime(name, (current) => ({ ...current, discovering: true, check }));
+      yield* Effect.forkIn(discover(name, check), scope);
     }
     yield* publish;
   });
@@ -375,7 +391,7 @@ export const make = Effect.gen(function* () {
     .withPermits(1)(refreshBody)
     .pipe(Effect.andThen(SubscriptionRef.get(snapshotRef)));
 
-  const runAction = Effect.fn("AgentctlSandboxes.runAction")(function* (
+  const performAction = Effect.fn("AgentctlSandboxes.runAction")(function* (
     name: string,
     action: AgentctlSandboxAction,
     run: Effect.Effect<void, AgentctlCli.AgentctlError>,
@@ -399,6 +415,12 @@ export const make = Effect.gen(function* () {
     yield* refresh;
     return { error: superseded ? null : error } satisfies AgentctlActionResult;
   });
+  // agentctl carries on when the request that asked is interrupted, so the action does too.
+  const runAction = (
+    name: string,
+    action: AgentctlSandboxAction,
+    run: Effect.Effect<void, AgentctlCli.AgentctlError>,
+  ) => performAction(name, action, run).pipe(Effect.forkIn(scope), Effect.flatMap(Fiber.join));
 
   const getSettings = Ref.get(store).pipe(
     Effect.map((document) => document.settings ?? DEFAULT_SANDBOX_SETTINGS),
