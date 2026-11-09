@@ -87,6 +87,14 @@ export class PeerLinks extends Context.Service<
     readonly get: (
       environmentId: EnvironmentId,
     ) => Effect.Effect<Option.Option<PeerLink>, PeerLinkError>;
+    /**
+     * Moves a link to the addresses among `urls` that answer as its peer, keeping its token.
+     * False when there is no link to move.
+     */
+    readonly relocate: (
+      environmentId: EnvironmentId,
+      urls: ReadonlyArray<string>,
+    ) => Effect.Effect<boolean, PeerLinkError>;
     /** Forgets the link here. The peer still lists the session until it is revoked there. */
     readonly unlink: (environmentId: EnvironmentId) => Effect.Effect<boolean, PeerLinkError>;
     /** An address that answers as the linked peer, with its token, ready to call. */
@@ -543,6 +551,20 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  const relocate: PeerLinks["Service"]["relocate"] = Effect.fn("PeerLinks.relocate")(
+    function* (environmentId, urls) {
+      const link = yield* get(environmentId);
+      if (Option.isNone(link)) return false;
+      const { origins } = yield* answeringAs(urls, environmentId, link.value.label);
+      const urlsJson = yield* encodeUrls(origins).pipe(Effect.catch(failStorage));
+      yield* sql`
+        UPDATE peer_environment_links SET urls_json = ${urlsJson}
+        WHERE environment_id = ${environmentId}
+      `.pipe(Effect.catch(failStorage));
+      return true;
+    },
+  );
+
   const unlink: PeerLinks["Service"]["unlink"] = Effect.fn("PeerLinks.unlink")(
     function* (environmentId) {
       const deleted = yield* sql<{ secret_name: string }>`
@@ -639,6 +661,7 @@ const make = Effect.gen(function* () {
     describe: describeUrl,
     list,
     get,
+    relocate,
     unlink,
     resolve,
     recordOutcome,

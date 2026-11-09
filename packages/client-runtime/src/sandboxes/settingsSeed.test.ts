@@ -77,6 +77,21 @@ describe("sandboxSettingsSeed", () => {
     expect(seed).toEqual({ patch: { sidebarAutoSettleOnMerge: false } });
   });
 
+  it("turns on Linked environments when it is on here, so this computer can link the Sandbox", () => {
+    const patch = (local: boolean, sandboxPolicy?: { lockedSettings: Array<string> }) =>
+      sandboxSettingsSeedPatch({
+        local: settings({ linkedEnvironmentsEnabled: local }),
+        sandbox: settings({}),
+        sandboxProviderInstanceIds: providers,
+        ...(sandboxPolicy === undefined
+          ? {}
+          : { sandboxPolicy: { organization: "Example Corp", ...sandboxPolicy } }),
+      });
+    expect(patch(true)).toEqual({ linkedEnvironmentsEnabled: true });
+    expect(patch(false)).toEqual({});
+    expect(patch(true, { lockedSettings: ["linkedEnvironmentsEnabled"] })).toEqual({});
+  });
+
   it("compares structurally, so equal objects produce an empty patch", () => {
     const local = settings({
       defaultProjectScripts: structuredClone(DEFAULT_SERVER_SETTINGS.defaultProjectScripts),
