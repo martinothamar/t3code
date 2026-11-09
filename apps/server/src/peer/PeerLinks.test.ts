@@ -531,6 +531,29 @@ it.effect("tells the agent to link again once the peer revokes the link or it ex
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
+const tailscale0 = {
+  tailscale0: [
+    {
+      address: "100.101.102.103",
+      netmask: "255.192.0.0",
+      family: "IPv4" as const,
+      mac: "00:00:00:00:00:00",
+      internal: false,
+      cidr: "100.101.102.103/10",
+    },
+  ],
+};
+
+it.each([
+  ["loopback", "127.0.0.1", {}, true],
+  ["a MagicDNS name", "box.tailnet.ts.net", {}, true],
+  ["a Tailscale IPv4 address from a machine on the tailnet", "100.83.126.39", tailscale0, true],
+  ["a 100.64.0.0/10 address from a machine off the tailnet", "100.83.126.39", {}, false],
+  ["a LAN address from a machine on the tailnet", "192.168.0.193", tailscale0, false],
+] as const)("judges plain http to %s", (_name, host, interfaces, expected) => {
+  expect(PeerLinks.plainHttpStaysEncrypted(host, interfaces)).toBe(expected);
+});
+
 it.effect(
   "refuses to link itself, plain http off this machine and the tailnet, or a peer that cannot hold a linked agent to its limits",
   () =>

@@ -354,6 +354,10 @@ and the access, then approve.
   outside agent. Revoke it there to end it. **Forget** on this machine only
   removes it here.
 - Links last 30 days. Link again with a new pairing code to renew one.
+- The pairing code and the link's token travel to the address, so plain `http`
+  works only for this machine itself and over Tailscale: a `*.ts.net` name, or
+  a `100.x` Tailscale address while this machine is on the tailnet. Use `https`
+  for any other address.
 
 An agent can also hand a task to a linked machine with `delegate_task`: it runs
 there as an ordinary thread, in the project with the same repository (or the

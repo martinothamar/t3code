@@ -45,7 +45,7 @@ const isAdvertisableAddress = (address: string): boolean =>
   NodeNet.isIPv4(address) && !address.startsWith("127.") && isPrivateNetworkAddress(address);
 
 // macOS utun names need Tailscale's IPv6 range to identify them; WARP shares its IPv4 range.
-const isTailscaleInterface = (
+export const isTailscaleInterface = (
   name: string,
   entries: ReadonlyArray<NodeOS.NetworkInterfaceInfo>,
 ): boolean =>
