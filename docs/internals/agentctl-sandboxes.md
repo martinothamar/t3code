@@ -22,12 +22,28 @@ last list for Sandboxes to reach again, which the polling did on each read.
 The relay passes the client's own credentials through and drops the host's cookies and forwarding
 headers. Each client pairs with each Sandbox once: it asks the host for a one-time code
 (`agentctl.pairSandbox`, which the host gets from the Sandbox over SSH) and redeems it with the
-Sandbox's server through the relay. The host never holds a Sandbox session, and a client gets no
-access to a Sandbox it could not get by asking the host.
+Sandbox's server through the relay. A client gets no access to a Sandbox it could not get by
+asking the host. The host holds no client session of its own, only the link below.
 
 Pairing runs in the background in [client-runtime](../../packages/client-runtime/src/sandboxes/environments.ts),
 outside any UI command, where the client-side scope guard fails closed. So `agentctl.pairSandbox`
 is deliberately absent from `CLIENT_GUARDED_RPC_SCOPES`, and only the server checks it.
+
+## The host links through the forward
+
+While Linked environments is on, the host links each Sandbox it reaches at approval-required
+([AgentctlSandboxLinks](../../apps/server/src/agentctl/AgentctlSandboxLinks.ts)), with a pairing
+code it gets over SSH. It links at its SSH forward, not the relay: a link keeps only an origin, and
+the Sandbox issues tokens for the address a request reached it at, which the relay hides by
+dropping forwarding headers. The forward's port changes with every reconnect, so each reconnect
+moves the link (`PeerLinks.relocate`) rather than pairing again, which would add a session in the
+Sandbox each time. The Sandbox must have the beta on too, which the client's settings seed turns on
+when the host has it on.
+
+A Sandbox reports its own environment id, so a compromised one could claim another machine's and
+have that machine's link, and token, moved to its forward. The host therefore changes or forgets
+only links it made, recorded in the Sandbox state with when each was made, and kept after the
+Sandbox is gone so a link of one deleted while the host was down is still forgotten.
 
 ## Routes keep their base path
 

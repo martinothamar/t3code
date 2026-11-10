@@ -63,6 +63,14 @@ export function sandboxSettingsSeed(input: {
     }
     patch[key] = value;
   }
+  // Not project-scoped, but this computer can only link a Sandbox that has it on.
+  if (
+    input.local.linkedEnvironmentsEnabled &&
+    !input.sandbox.linkedEnvironmentsEnabled &&
+    !isManagedSettingPath(input.sandboxPolicy, "linkedEnvironmentsEnabled")
+  ) {
+    patch.linkedEnvironmentsEnabled = true;
+  }
   return {
     patch: patch as ServerSettingsPatch,
     ...(enablePi

@@ -23,6 +23,7 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -45,6 +46,7 @@ import {
   SandboxStoreDocument,
   buildSandbox,
   reconcileRecords,
+  type SandboxLinkRecord,
   type SandboxRuntime,
 } from "./sandboxModel.ts";
 
@@ -91,8 +93,22 @@ export class AgentctlSandboxes extends Context.Service<
     readonly reportUnreachable: (name: string) => Effect.Effect<void>;
     /** Starts watching agentctl. Later calls do nothing. */
     readonly startWatching: Effect.Effect<void>;
+    /** Each time this server reaches a Sandbox's server, at its forward, which moves each time. */
+    readonly reached: Stream.Stream<SandboxReached>;
+    /** The links this server made to its Sandboxes, by Sandbox name. */
+    readonly sandboxLinks: Effect.Effect<Readonly<Record<string, SandboxLinkRecord>>>;
+    readonly recordSandboxLink: (
+      name: string,
+      link: SandboxLinkRecord | null,
+    ) => Effect.Effect<void>;
   }
 >()("t3/agentctl/AgentctlSandboxes") {}
+
+export interface SandboxReached {
+  readonly name: string;
+  readonly environmentId: EnvironmentId;
+  readonly httpBaseUrl: string;
+}
 
 const POLL_INTERVAL = Duration.seconds(3);
 const UNAVAILABLE_POLL_INTERVAL = Duration.seconds(30);
@@ -135,6 +151,7 @@ export const make = Effect.gen(function* () {
   >();
   // Overlapping manifest folders can refer to the same repository.
   const pullLock = yield* Semaphore.make(1);
+  const reachedHub = yield* PubSub.unbounded<SandboxReached>();
   // Each Sandboxes page asks for a refresh when it opens; they share the one in flight.
   const refreshing = yield* Ref.make<Deferred.Deferred<ReadonlyArray<AgentctlManifestRoot>> | null>(
     null,
@@ -303,6 +320,7 @@ export const make = Effect.gen(function* () {
             workingDirectory: sshInfo.workingDirectory,
             relayUpstream: httpBaseUrl,
           }));
+          yield* PubSub.publish(reachedHub, { name, environmentId, httpBaseUrl });
         }
         yield* publish;
       }),
@@ -701,6 +719,14 @@ export const make = Effect.gen(function* () {
       );
     }),
     startWatching,
+    reached: Stream.fromPubSub(reachedHub),
+    sandboxLinks: Ref.get(store).pipe(Effect.map((document) => document.links ?? {})),
+    recordSandboxLink: Effect.fn("AgentctlSandboxes.recordSandboxLink")((name, link) =>
+      updateStore((document) => {
+        const { [name]: _previous, ...links } = document.links ?? {};
+        return { ...document, links: link === null ? links : { ...links, [name]: link } };
+      }),
+    ),
   });
 });
 
