@@ -2,6 +2,7 @@
 # and reapply them.
 # - Name `Fork CI`, concurrency group `fork-ci-`, and the final job named `Fork CI` for the ruleset.
 # - GitHub's `ubuntu-24.04` runners in place of Blacksmith's.
+# - `Test Web` has 20 minutes, not 10: it takes 8 to 10 on GitHub's runners.
 # - No `mobile_native_static_analysis` (a macOS runner), and no `mobile_native` gate for it in the
 #   final job.
 # - Pushes to `sync/**` run it too: a sync's review PR conflicts with main, so GitHub runs no PR
@@ -299,7 +300,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.test_web != 'false' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
