@@ -27,9 +27,18 @@ export const SandboxRecord = Schema.Struct({
 });
 export type SandboxRecord = typeof SandboxRecord.Type;
 
+/** A link this host made to a Sandbox: only a link still made at `linkedAt` is its to change. */
+export const SandboxLinkRecord = Schema.Struct({
+  environmentId: EnvironmentId,
+  linkedAt: Schema.String,
+});
+export type SandboxLinkRecord = typeof SandboxLinkRecord.Type;
+
 export const SandboxStoreDocument = Schema.Struct({
   settings: Schema.optionalKey(AgentctlSandboxSettings),
   sandboxes: Schema.optionalKey(Schema.Record(Schema.String, SandboxRecord)),
+  /** By Sandbox name, and kept after the Sandbox is gone so its link can be forgotten. */
+  links: Schema.optionalKey(Schema.Record(Schema.String, SandboxLinkRecord)),
 });
 export type SandboxStoreDocument = typeof SandboxStoreDocument.Type;
 

@@ -40,6 +40,11 @@ moves the link (`PeerLinks.relocate`) rather than pairing again, which would add
 Sandbox each time. The Sandbox must have the beta on too, which the client's settings seed turns on
 when the host has it on.
 
+A Sandbox reports its own environment id, so a compromised one could claim another machine's and
+have that machine's link, and token, moved to its forward. The host therefore changes or forgets
+only links it made, recorded in the Sandbox state with when each was made, and kept after the
+Sandbox is gone so a link of one deleted while the host was down is still forgotten.
+
 ## Routes keep their base path
 
 A Sandbox environment's base URL has a path, so client URL helpers resolve server paths below the

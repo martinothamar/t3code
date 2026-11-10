@@ -46,6 +46,7 @@ import {
   SandboxStoreDocument,
   buildSandbox,
   reconcileRecords,
+  type SandboxLinkRecord,
   type SandboxRuntime,
 } from "./sandboxModel.ts";
 
@@ -94,6 +95,12 @@ export class AgentctlSandboxes extends Context.Service<
     readonly startWatching: Effect.Effect<void>;
     /** Each time this server reaches a Sandbox's server, at its forward, which moves each time. */
     readonly reached: Stream.Stream<SandboxReached>;
+    /** The links this server made to its Sandboxes, by Sandbox name. */
+    readonly sandboxLinks: Effect.Effect<Readonly<Record<string, SandboxLinkRecord>>>;
+    readonly recordSandboxLink: (
+      name: string,
+      link: SandboxLinkRecord | null,
+    ) => Effect.Effect<void>;
   }
 >()("t3/agentctl/AgentctlSandboxes") {}
 
@@ -713,6 +720,13 @@ export const make = Effect.gen(function* () {
     }),
     startWatching,
     reached: Stream.fromPubSub(reachedHub),
+    sandboxLinks: Ref.get(store).pipe(Effect.map((document) => document.links ?? {})),
+    recordSandboxLink: Effect.fn("AgentctlSandboxes.recordSandboxLink")((name, link) =>
+      updateStore((document) => {
+        const { [name]: _previous, ...links } = document.links ?? {};
+        return { ...document, links: link === null ? links : { ...links, [name]: link } };
+      }),
+    ),
   });
 });
 
