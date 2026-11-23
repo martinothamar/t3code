@@ -23,28 +23,25 @@ spec:
     source: home
   instructions:
     - source: instructions.md
+    - source: improving.md
   skills:
     - source: skills/demo-video
   harnesses:
     - type: claudeCode
       auth: mediated
+      login: any
       default: true
       defaults:
         model: opus
     - type: codex
       auth: mediated
+      login: any
       optional: true
-  environment:
-    - name: GIT_USER_NAME
-    - name: GIT_USER_EMAIL
-  secrets:
-    - environment: GITHUB_TOKEN
-      placeholder: github_pat_AGENT_MEDIATED_GITHUB_TOKEN
-      allowedHosts:
-        - github.com
-        - api.github.com
-        - gist.github.com
-        - uploads.github.com
+  # A GitHub token for GitHub's hosts, and the account as Git's identity, from
+  # `agentctl github login default` on the host.
+  accounts:
+    - type: github
+      login: default
   access:
     - type: ssh
     - type: vnc

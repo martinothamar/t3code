@@ -69,12 +69,14 @@ An upstream sync also:
 
 To test a sync's build before `main` moves, against a nested Agent (see the `agentctl` skill):
 
-1. Copy the branch's `agents/dev` outside any checkout, with `~/nested.env` beside its manifests
-   as `.env`.
+1. Copy the branch's `agents/dev` outside any checkout. If `agentctl github list` lacks
+   `default`, sign in with your own token, which the host fills in:
+   `printf '%s' "$GITHUB_TOKEN" | agentctl github login default --from-stdin`.
 2. In the sync worktree, start `vp run dev:desktop` with `T3CODE_REMOTE_SERVER_VERSION` set to the
    build's version, from `node scripts/fork/seed-sandbox-server.ts --run <run id>`.
 3. On the Sandboxes page, add the copy as a manifest folder and create the `nested` variant with
-   New Sandbox. Once it is Ready, install the build's server in it with
+   New Sandbox, or `nested-build` when the branch changes the Dockerfile or `rootfs/`. Once it is
+   Ready, install the build's server in it with
    `node scripts/fork/seed-sandbox-server.ts --run <run id> --agent <name>`. It connects and gets
    its project.
 4. In it, start a thread with Codex and one with Claude, each on its cheapest model with the least

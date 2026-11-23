@@ -2,17 +2,13 @@ apiVersion: agents.platform/v1alpha1
 kind: AgentVariant
 extends: agent.yaml
 
-# The same Agent, built from this checkout's Dockerfile, reduced to fit inside the default one so
-# a Session can try changes to its own image and manifest.
+# The same Agent on the image CI publishes, reduced to fit inside the default one, so a Session can
+# try changes to its manifest, instructions and skills. agent.nested-build.yaml builds the image.
 metadata:
   name: t3code-dev-nested
 
 spec:
   sandbox:
-    image:
-      type: build
-      context: .
-      dockerfile: Dockerfile
     resources:
       cpu: "4"
       memory: "6Gi"

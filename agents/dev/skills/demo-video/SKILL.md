@@ -111,10 +111,10 @@ and this setup differ, as checked at fframes 1.2.0 (check again when bumping the
   A fresh T3 home starts with onboarding, a good clean first frame. Skip the project import.
 
 - **Sandboxes are nested Agents.** Log the nested `agentd` in as your instructions' Nested Agents
-  section describes, run `agentctl ssh-config install`, and keep manifests outside the checkout,
-  with `~/nested.env` beside them as `.env`. Size them for the demo: the Altinn desktop Agent with
-  localtest needed 4 CPUs and 6 GiB, more than the usual 2 CPUs and 3 GiB beside this Agent, so
-  ask the developer.
+  section describes, run `agentctl ssh-config install`, keep manifests outside the checkout, and
+  sign in the GitHub login `default` as the steps for testing a sync's build describe. Size them
+  for the demo: the Altinn desktop Agent with localtest needed 4 CPUs and 6 GiB, more than the
+  usual 2 CPUs and 3 GiB beside this Agent, so ask the developer.
 
 - **Dry-run every take unrecorded.** It finds what fails (an agent that picks another tool, a
   service that does not start) and warms image caches, so the real take is shorter. Then reset what

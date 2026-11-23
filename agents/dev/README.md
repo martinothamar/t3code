@@ -7,16 +7,21 @@ with the `desktop` helper and the `computer-use` skill, and adds Node 26, `vp`, 
 `agentctl`/`agentd` for nested Agents. It clones the fork into `/home/agent/code/t3code` at boot.
 The `demo-video` skill films that desktop into captioned demo videos with fframes.
 
-| Variant  | Checkout                                                |
-| -------- | ------------------------------------------------------- |
-| default  | Fresh clone of `martinothamar/t3code`, `upstream` added |
-| `nested` | Fresh clone, reduced to fit inside the default Agent    |
+| Variant        | Image and checkout                                                       |
+| -------------- | ------------------------------------------------------------------------ |
+| default        | Published image, fresh clone of `martinothamar/t3code`, `upstream` added |
+| `nested`       | Published image, reduced to fit inside the default Agent                 |
+| `nested-build` | `nested`, with the image built from this checkout's Dockerfile           |
 
-The manifest needs agentctl `0.1.0-preview.13` or later; earlier releases refuse its
-`nestedSandboxes`.
+The manifest needs agentctl `0.1.0-preview.15` or later; earlier releases refuse its `accounts` or
+merge its variants differently.
+The Agent pushes and opens pull requests as the GitHub login `default`. Its token needs Contents,
+Pull requests and Workflows read and write on `martinothamar/t3code`: upstream syncs change
+`.github/workflows`, which GitHub refuses without Workflows, so give a fine-grained token if a
+browser sign-in lacks it.
 
 ```sh
-cp agents/dev/.env.sample agents/dev/.env   # fill in GITHUB_TOKEN and Git identity
+agentctl github login default
 agentctl apply -f agents/dev/agent.yaml --wait
 agentctl attach session/s1 --agent t3code-dev   # creates the Session on first attach
 ```
