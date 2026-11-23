@@ -25,6 +25,7 @@
 - [Remote access](./user/remote-access.md)
 - [Guest links](./user/guest-links.md)
 - [T3 Connect troubleshooting](./user/t3-connect-troubleshooting.md)
+- [agentctl Sandboxes](./user/agentctl-sandboxes.md)
 - [Outside agents (MCP)](./user/outside-agents.md)
 - [Running in the background](./user/background-service.md)
 - [Updating T3 Code](./user/updating.md)
@@ -63,6 +64,7 @@ anything.
 - [15 · Testing](./internals/15_testing.md)
 - [16 · Performance regression checks](./internals/16_performance-regressions.md)
 - [17 · Scripts](./internals/17_scripts.md)
+- [agentctl Sandboxes](./internals/agentctl-sandboxes.md)
 
 ### Runbooks
 
