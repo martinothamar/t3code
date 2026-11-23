@@ -3,7 +3,7 @@
 # desktop with VNC access, the `desktop` helper and the computer-use skill. This image adds what
 # developing T3 Code needs.
 
-FROM ghcr.io/digdir/agentctl-base:ubuntu-26.04-desktop-v0.1.0-preview.14@sha256:06dc85479b87c77636c00c1317209c939e73a4be97aca6d61e76e962de71ad4b
+FROM ghcr.io/digdir/agentctl-base:ubuntu-26.04-desktop-v0.1.0-preview.15@sha256:9d5c648da1e5d829083522d9862ad3c47bc546b94bb8523c1a5e9bd9f7e0646e
 
 # The base ends as the unprivileged Agent user; installing packages needs root again.
 USER root
@@ -76,7 +76,7 @@ RUN case "${TARGETARCH}" in \
 # agentctl and agentd of the release the base image is from, for nested Agents: nested Sandboxes,
 # agentd's /dev/kvm and Podman setup, and the GitHub logins and secrets nested Agents take from
 # this one. The host needs that release or later. agentd downloads its runtime on first use.
-COPY --from=ghcr.io/digdir/agentctl:v0.1.0-preview.14@sha256:8f2334590d1363c1ae2041cf1e7983a2c81aa57f0d4956f2a27e97a0a3536a7d /agentctl /agentd /usr/local/bin/
+COPY --from=ghcr.io/digdir/agentctl:v0.1.0-preview.15@sha256:1bc767955b6740c4b65e402332e8099154a0da8a4a80ae8f778182647dcdf40e /agentctl /agentd /usr/local/bin/
 RUN agentctl --version
 
 COPY rootfs/ /

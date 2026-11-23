@@ -13,7 +13,8 @@ The `demo-video` skill films that desktop into captioned demo videos with fframe
 | `nested`       | Published image, reduced to fit inside the default Agent                 |
 | `nested-build` | `nested`, with the image built from this checkout's Dockerfile           |
 
-The manifest needs agentctl `0.1.0-preview.14` or later; earlier releases refuse its `accounts`.
+The manifest needs agentctl `0.1.0-preview.15` or later; earlier releases refuse its `accounts` or
+merge its variants differently.
 The Agent pushes and opens pull requests as the GitHub login `default`. Its token needs Contents,
 Pull requests and Workflows read and write on `martinothamar/t3code`: upstream syncs change
 `.github/workflows`, which GitHub refuses without Workflows, so give a fine-grained token if a
