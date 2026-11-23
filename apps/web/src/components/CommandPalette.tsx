@@ -237,6 +237,7 @@ import {
   reduceCommandPaletteSearchState,
   type SearchOverlayMode,
 } from "./CommandPalette.logic";
+import { useSandboxPaletteItems } from "../sandboxes/sandboxPaletteItems";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent, type PendingInputSelection } from "./CommandPaletteContent";
 import {
@@ -449,6 +450,7 @@ function OpenCommandPaletteDialog(props: {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
   const { openChildSearch, setOpen } = props;
+  const sandboxPaletteItems = useSandboxPaletteItems();
   // Keyed by palette session: the intent and restored search only seed this
   // mount, and closing must not change what the closing palette shows.
   const [initialSearch] = useState(
@@ -1694,6 +1696,8 @@ function OpenCommandPaletteDialog(props: {
     },
   };
   actionItems.push(addProjectAction);
+
+  actionItems.push(...sandboxPaletteItems);
 
   if (wslAddProjectEnvironmentOption) {
     actionItems.push({

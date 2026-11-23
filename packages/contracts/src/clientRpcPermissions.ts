@@ -105,6 +105,14 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.peerLinksPairLink]: AuthAccessWriteScope,
   // Send stores and sends a report from a thread's turn: the bar of running that thread.
   [WS_METHODS.agentFeedbackAnswerRequest]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentctlStartSandbox]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentctlStopSandbox]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentctlDeleteSandbox]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentctlCreateSandbox]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentctlMarkSettingsSeeded]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentctlAddManifestRoot]: AuthSettingsWriteScope,
+  [WS_METHODS.agentctlRemoveManifestRoot]: AuthSettingsWriteScope,
+  [WS_METHODS.agentctlPullManifestRoots]: AuthSettingsWriteScope,
 } as const;
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
 

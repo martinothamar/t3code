@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { cn } from "~/lib/utils";
+import { NewSandboxHeaderButton } from "~/sandboxes/SandboxSidebarButtons";
 import { Button } from "../ui/button";
 import { SidebarInput, SidebarMenuButton } from "../ui/sidebar";
 import { SharedTooltipTrigger } from "../ui/shared-tooltip";
@@ -97,7 +98,12 @@ export function SidebarThreadHeader({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center">
-        {hasProjects ? projectScope : null}
+        {hasProjects ? (
+          <>
+            {projectScope}
+            <NewSandboxHeaderButton />
+          </>
+        ) : null}
         <SidebarHeaderIconButton
           label={gt("New thread")}
           tooltip={

@@ -42,6 +42,7 @@ import { Tooltip, TooltipPopup, TooltipScrollDismissArea, TooltipTrigger } from 
 import { SharedTooltipTrigger } from "../ui/shared-tooltip";
 import { InlineButton } from "../ui/button";
 import { DraftProjectName } from "./DraftProjectName";
+import { SandboxHostLine } from "../../sandboxes/SandboxHostSuffix";
 import { DraftHeroProjectHeading } from "./DraftHeroProjectHeading";
 import { TriageDraftHero } from "./TriageDraftHero";
 
@@ -278,6 +279,9 @@ export function DraftHeroHeadline({
                   label={item.label}
                 >
                   <DraftProjectName value={item.label} />
+                  {entry?.group.memberProjects.length === 1 ? (
+                    <SandboxHostLine environmentId={entry.group.memberProjects[0]!.environmentId} />
+                  ) : null}
                 </SharedTooltipTrigger>
                 {entry && canPinProjectGroup(entry.group) ? (
                   <ProjectPinButton

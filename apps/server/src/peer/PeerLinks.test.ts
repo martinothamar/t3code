@@ -606,6 +606,77 @@ it.effect("reads one stored link without asking the peer", () =>
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
+it.effect("moves a link to the peer's new address, keeping its token, and only to that peer", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const b = yield* serveB(box);
+      const a = yield* makeA(laptop);
+      const pairing = yield* b.auth.issuePairingCredential();
+      // Loopback is this machine, unless this server forwarded it to the peer itself.
+      const forward = b.url.replace("127.0.0.1", "localhost");
+      yield* a.links.link(
+        {
+          url: forward,
+          pairingCode: pairing.credential,
+          access: "auto",
+          expectedEnvironmentId: box.environmentId,
+        },
+        { ownForward: true },
+      );
+      const before = Option.getOrThrow(yield* a.links.get(box.environmentId));
+      expect(before.urls).toEqual([new URL(forward).origin]);
+
+      expect(yield* a.links.relocate(box.environmentId, [b.url])).toBe(true);
+      const after = Option.getOrThrow(yield* a.links.get(box.environmentId));
+      expect(after.urls).toEqual([new URL(b.url).origin]);
+      expect(after.expiresAt).toEqual(before.expiresAt);
+      yield* probe(a);
+      const own = yield* a.links.relocate(box.environmentId, [forward]).pipe(Effect.flip);
+      expect(own.message).toContain("is this machine");
+
+      yield* Ref.set(b.descriptor, descriptorOf("environment-impostor", "Impostor"));
+      yield* a.links.relocate(box.environmentId, [b.url]).pipe(Effect.flip);
+      expect(Option.getOrThrow(yield* a.links.get(box.environmentId)).urls).toEqual(after.urls);
+      expect(yield* a.links.relocate(laptop.environmentId, [b.url])).toBe(false);
+
+      // Linking in the background replaces only the link it checked, so one made meanwhile stays.
+      yield* Ref.set(b.descriptor, box);
+      const current = Option.getOrThrow(yield* a.links.get(box.environmentId));
+      const again = yield* b.auth.issuePairingCredential();
+      const refused = yield* a.links
+        .link(
+          {
+            url: b.url,
+            pairingCode: again.credential,
+            access: "auto",
+            expectedEnvironmentId: box.environmentId,
+          },
+          { replacing: null },
+        )
+        .pipe(Effect.flip);
+      expect(refused.message).toContain("linked again meanwhile");
+      expect(Option.getOrThrow(yield* a.links.get(box.environmentId)).linkedAt).toEqual(
+        current.linkedAt,
+      );
+
+      // A caller that checked an earlier link changes nothing, as after the peer was re-paired.
+      const earlier = { linkedAt: DateTime.subtractDuration(before.linkedAt, Duration.seconds(1)) };
+      expect(
+        yield* a.links.relocate(box.environmentId, [forward], { ownForward: true, ...earlier }),
+      ).toBe(false);
+      expect(Option.getOrThrow(yield* a.links.get(box.environmentId)).urls).toEqual(after.urls);
+      expect(yield* a.links.unlink(box.environmentId, earlier)).toEqual({
+        removed: false,
+        endedThere: false,
+      });
+      expect(Option.isSome(yield* a.links.get(box.environmentId))).toBe(true);
+      expect(
+        (yield* a.links.unlink(box.environmentId, { linkedAt: before.linkedAt })).removed,
+      ).toBe(true);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
 it.effect("a linked peer that is renamed shows its new name", () =>
   Effect.scoped(
     Effect.gen(function* () {

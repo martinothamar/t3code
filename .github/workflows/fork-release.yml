@@ -4,7 +4,7 @@
 # The version is upstream's preview form, `<core>-preview.<date>.<run>`. The apps follow this
 # repository's releases as their update feed (scripts/build-desktop-artifact.ts), except unsigned
 # macOS builds, which macOS would refuse to update. The app installs the server archive of its own
-# version from these releases (apps/desktop/src/ssh/remoteServerOverrides.ts).
+# version from these releases (packages/ssh/src/remoteServerOverrides.ts).
 #
 # Packaging is upstream's release-desktop.yml, called once per target as release.yml does: it
 # needs only the `js-bundle` artifact built here, and skips signing without the secrets. macOS
