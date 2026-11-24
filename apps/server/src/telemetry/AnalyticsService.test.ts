@@ -23,6 +23,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import type { ManagedPolicyDocument } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
+import { layerProductAnalytics } from "../server.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import { getTelemetryIdentity } from "./Identify.ts";
 import * as AnalyticsService from "./AnalyticsService.ts";
@@ -120,8 +121,9 @@ const analyticsLayerWith = (
   telemetryEnv: { readonly T3CODE_TELEMETRY_ENABLED?: boolean } = {
     T3CODE_TELEMETRY_ENABLED: true,
   },
+  layer = AnalyticsService.layer,
 ) =>
-  AnalyticsService.layer.pipe(
+  layer.pipe(
     Layer.provideMerge(
       ServerConfig.ServerConfig.layerTest(process.cwd(), { prefix: "t3-telemetry-retry-" }),
     ),
@@ -457,6 +459,27 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("AnalyticsService
         ),
         true,
       );
+    }),
+  );
+
+  it.effect("the server analytics layer sends nothing with delivery explicitly enabled", () =>
+    Effect.gen(function* () {
+      const requests: Array<string> = [];
+      const client = HttpClient.make((request) =>
+        Effect.sync(() => {
+          requests.push(request.url);
+          return HttpClientResponse.fromWeb(request, new Response(null, { status: 204 }));
+        }),
+      );
+      yield* Effect.gen(function* () {
+        const analytics = yield* AnalyticsService.AnalyticsService;
+        yield* analytics.recordOwners([{ source: "device", ownerId: "a".repeat(64) }], "client");
+        yield* analytics.record("test.disabled");
+        yield* analytics.flush;
+      }).pipe(
+        Effect.provide(analyticsLayerWith(client, undefined, undefined, layerProductAnalytics)),
+      );
+      assert.deepEqual(requests, []);
     }),
   );
 

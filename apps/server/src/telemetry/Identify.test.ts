@@ -13,7 +13,6 @@ import * as References from "effect/References";
 
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import { CLOUD_LINKED_USER_ID } from "../cloud/config.ts";
 import * as ServerConfig from "../config.ts";
 import * as Identify from "./Identify.ts";
 
@@ -142,17 +141,4 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("telemetry identi
       assert.isUndefined(findIdentityLog(logs, "TelemetryAnonymousIdPersistenceError"));
     }).pipe(Effect.provide(layerIdentity("t3-telemetry-identify-read-", logs)));
   });
-
-  it.effect("reads only the linked Connect account as an owner", () =>
-    Effect.gen(function* () {
-      const secrets = yield* ServerSecretStore.ServerSecretStore;
-      assert.deepEqual(yield* Identify.getServerOwners, []);
-
-      yield* secrets.set(CLOUD_LINKED_USER_ID, new TextEncoder().encode("user_connect"));
-
-      assert.deepEqual(yield* Identify.getServerOwners, [
-        { source: "connect", ownerId: yield* sha256("user_connect") },
-      ]);
-    }).pipe(Effect.provide(layerIdentity("t3-telemetry-identify-owners-"))),
-  );
 });

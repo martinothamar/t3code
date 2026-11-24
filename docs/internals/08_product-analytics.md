@@ -1,5 +1,7 @@
 # Product analytics
 
+This describes upstream behavior. Fork servers use a disabled analytics service at runtime.
+
 The server owns analytics delivery, opt-out, and identity for every connected client. Clients never
 load the PostHog browser SDK, PostHog person profiles stay disabled, and visiting hosted web without
 an authenticated connection does not count as product use.
