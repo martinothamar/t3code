@@ -395,6 +395,29 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("AnalyticsService
     }),
   );
 
+  it.effect("drops fork analytics events with delivery explicitly enabled", () =>
+    Effect.gen(function* () {
+      const analytics = yield* AnalyticsService.AnalyticsService;
+      yield* analytics.recordOwners([{ source: "device", ownerId: "a".repeat(64) }], "client");
+      yield* analytics.record("test.disabled");
+      yield* analytics.flush;
+    }).pipe(
+      Effect.provide(
+        AnalyticsService.layerDisabled.pipe(
+          Layer.provide(
+            ConfigProvider.layer(
+              ConfigProvider.fromUnknown({
+                T3CODE_TELEMETRY_ENABLED: true,
+                T3CODE_POSTHOG_HOST: "https://telemetry.example.test",
+                T3CODE_POSTHOG_KEY: "test-key",
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
   it.effect("does not send batch requests when telemetry is disabled", () =>
     Effect.gen(function* () {
       const capturedPaths: Array<string> = [];

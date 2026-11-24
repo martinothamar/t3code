@@ -2,7 +2,8 @@
 
 Fork builds disable product usage analytics, T3 Connect diagnostic traces, and mobile crash and
 startup uploads. Local diagnostics and resource history are available in the app. Your provider
-CLI runs separately and has its own telemetry controls.
+CLI runs separately and has its own telemetry controls. If you connect through app.t3.codes or
+use an upstream mobile app, that client can still send its own telemetry.
 
 ## Agent activity for mobile notifications
 
