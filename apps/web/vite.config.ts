@@ -314,6 +314,15 @@ export default defineConfig(({ command }) => {
     },
     assetsInclude: ["**/*.wasm"],
     plugins: [
+      {
+        name: "fork-strip-relay-telemetry-config",
+        configResolved({ env }) {
+          // Dynamic import.meta.env reads embed Vite's whole public environment in the bundle.
+          delete env.VITE_RELAY_OTLP_TRACES_URL;
+          delete env.VITE_RELAY_OTLP_TRACES_DATASET;
+          delete env.VITE_RELAY_OTLP_TRACES_TOKEN;
+        },
+      },
       bootstrapTitlePlugin(),
       devCompressionPlugin(),
       chunkCycleGuardPlugin(),
