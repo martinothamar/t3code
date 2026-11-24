@@ -1207,13 +1207,70 @@ describe("source control tools", () => {
     }),
   );
 
+  it.effect(
+    "opens a PR from a workspace folder's checkout, and acts on its only one by number",
+    () =>
+      Effect.gen(function* () {
+        const checkout = (repository: string) => ({
+          canonicalKey: `github.com/${repository}`,
+          locator: {
+            source: "git-remote" as const,
+            remoteName: "origin",
+            remoteUrl: `https://github.com/${repository}.git`,
+          },
+          provider: SourceControlProviderKind.make("github"),
+          displayName: repository,
+          rootPath: `/workspace/${repository.split("/")[1]}`,
+        });
+        const opened: Array<string> = [];
+        const comments: Array<string> = [];
+        const folder = (...repositories: ReadonlyArray<string>) =>
+          makeHarness({
+            project: { ...makeProject(null), workspaceRepositories: repositories.map(checkout) },
+            git: {
+              createPullRequest: (input) =>
+                Effect.sync(() => opened.push(input.cwd)).pipe(
+                  Effect.as({
+                    status: "created" as const,
+                    url: "https://github.com/acme/infra/pull/7",
+                    number: 7,
+                    baseBranch: "main",
+                    headBranch: "tools",
+                    title: input.title,
+                  }),
+                ),
+            },
+            pullRequests: {
+              comment: (input) =>
+                Effect.sync(() => void comments.push(`${input.repository}#${input.number}`)),
+            },
+          });
+        const several = yield* folder("acme/app", "acme/infra");
+        const unnamed = yield* Effect.flip(
+          several.call("pull_request_create", { title: "Add tools", body: "Adds tools." }),
+        );
+        expect(unnamed.message).toContain("Pass repository");
+        yield* several.call("pull_request_create", {
+          title: "Add tools",
+          body: "Adds tools.",
+          repository: "acme/infra",
+        });
+        expect(opened).toEqual(["/workspace/infra"]);
+
+        const one = yield* folder("acme/infra");
+        yield* one.call("pull_request_respond", { number: 7, body: "Thanks." });
+        expect(comments).toEqual(["acme/infra#7"]);
+      }),
+  );
+
   it.effect("replies to and resolves a review thread, and refuses resolving without one", () =>
     Effect.gen(function* () {
       const calls: Array<string> = [];
       const harness = yield* makeHarness({
         thread: branchThread,
         pullRequests: {
-          replyToThread: (input) => Effect.sync(() => calls.push(`reply ${input.threadId}`)),
+          replyToThread: (input) =>
+            Effect.sync(() => calls.push(`reply ${input.threadId} ${JSON.stringify(input.body)}`)),
           setThreadResolution: (input) =>
             input.threadId === "locked-thread"
               ? Effect.fail(
@@ -1231,7 +1288,11 @@ describe("source control tools", () => {
         resolved: true,
       });
       expect(result).toMatchObject({ replied: true, resolved: true });
-      expect(calls).toEqual(["reply open-thread", "resolve open-thread true"]);
+      // T3 marks what it posts as the agent's, so a watch on the PR is not woken by it.
+      expect(calls).toEqual([
+        'reply open-thread "Fixed.\\n\\n<!-- t3code:agent -->"',
+        "resolve open-thread true",
+      ]);
       const partial = yield* harness
         .call("pull_request_respond", {
           reviewThreadId: "locked-thread",
@@ -1283,10 +1344,11 @@ describe("source control tools", () => {
         {
           number: 42,
           verdict: "request-changes",
-          body: "Two things.",
+          body: "Two things.\n\n<!-- t3code:agent -->",
           comments: [
             {
               path: "b.ts",
+              body: "Why?\n\n<!-- t3code:agent -->",
               position: { kind: "added", newLine: 10 },
               startPosition: { kind: "context", oldLine: 9, newLine: 9, side: "right" },
             },

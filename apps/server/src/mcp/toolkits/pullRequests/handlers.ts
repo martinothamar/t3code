@@ -25,7 +25,12 @@ import * as GitManager from "../../../git/GitManager.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as PullRequestWatchService from "../../../pullRequest/PullRequestWatchService.ts";
-import { resolveTarget, type ResolvedTarget } from "../../../pullRequest/pullRequestTarget.ts";
+import {
+  resolveTarget,
+  workspaceCheckout,
+  type ResolvedTarget,
+} from "../../../pullRequest/pullRequestTarget.ts";
+import { withAgentMarker } from "../../../orchestration-v2/pullRequestWatch.ts";
 import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
 import * as PullRequestService from "../../../pullRequest/PullRequestService.ts";
 import { reviewPositionInPatch } from "../../../pullRequest/pullRequestReviewPosition.ts";
@@ -472,7 +477,7 @@ const make = Effect.gen(function* () {
           path: comment.path,
           position,
           ...(start === undefined ? {} : { startPosition: start }),
-          body: comment.body,
+          body: withAgentMarker(comment.body),
         });
       }
       if (diff.nextCursor === null) break;
@@ -505,10 +510,12 @@ const make = Effect.gen(function* () {
           )
         : undefined;
     const branchPullRequest = thread.branchPullRequest ?? opened ?? null;
+    // A workspace folder holding one repository names it as a repository-rooted project does.
+    const ownRepository = project.repositoryIdentity ?? workspaceCheckout(project, undefined);
     const branchRepository =
-      project.repositoryIdentity == null
+      ownRepository == null
         ? undefined
-        : (sourceControlDefinitions.repositorySelector(project.repositoryIdentity) ?? undefined);
+        : (sourceControlDefinitions.repositorySelector(ownRepository) ?? undefined);
     const named =
       input.number !== undefined
         ? { number: input.number, repository: input.repository ?? branchRepository }
@@ -1017,9 +1024,24 @@ const make = Effect.gen(function* () {
         if (project === undefined) {
           return yield* new PullRequestProjectNotFoundError({ repository: "" });
         }
+        // A workspace folder is no repository; the branch is in one of its checkouts.
+        const checkout = workspaceCheckout(project, input.repository);
+        if (
+          thread.worktreePath == null &&
+          project.repositoryIdentity == null &&
+          (project.workspaceRepositories?.length ?? 0) > 0 &&
+          checkout === undefined
+        ) {
+          return yield* new PullRequestForgeError({
+            detail:
+              input.repository === undefined
+                ? "This thread's folder holds several repositories. Pass repository, such as owner/repo."
+                : `This thread's folder holds no checkout of ${input.repository}.`,
+          });
+        }
         const created = yield* git
           .createPullRequest({
-            cwd: thread.worktreePath ?? project.workspaceRoot,
+            cwd: thread.worktreePath ?? checkout?.rootPath ?? project.workspaceRoot,
             projectId: project.id,
             title: input.title,
             body: input.body,
@@ -1120,8 +1142,12 @@ const make = Effect.gen(function* () {
         if (input.body !== undefined) {
           yield* (
             reviewThreadId === undefined
-              ? pullRequests.comment({ ...ref, body: input.body })
-              : pullRequests.replyToThread({ ...ref, threadId: reviewThreadId, body: input.body })
+              ? pullRequests.comment({ ...ref, body: withAgentMarker(input.body) })
+              : pullRequests.replyToThread({
+                  ...ref,
+                  threadId: reviewThreadId,
+                  body: withAgentMarker(input.body),
+                })
           ).pipe(Effect.mapError(forgeFailure));
         }
         if (reviewThreadId !== undefined && input.resolved !== undefined) {
@@ -1151,7 +1177,12 @@ const make = Effect.gen(function* () {
         const { target, ref } = yield* locate(input);
         const comments = yield* reviewComments(ref, input.comments ?? []);
         yield* pullRequests
-          .submitReview({ ...ref, verdict: input.verdict, body: input.body ?? "", comments })
+          .submitReview({
+            ...ref,
+            verdict: input.verdict,
+            body: withAgentMarker(input.body ?? ""),
+            comments,
+          })
           .pipe(Effect.mapError(forgeFailure));
         return identityOf(target);
       }),

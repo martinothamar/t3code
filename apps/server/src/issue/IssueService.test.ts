@@ -9,6 +9,7 @@ import {
   SourceControlProviderKind,
   type OrchestrationProjectShell,
   type ProjectId,
+  type RepositoryIdentity,
 } from "@t3tools/contracts";
 import {
   IssueTrackerError,
@@ -157,6 +158,8 @@ function makeService(input: {
   readonly trackers: ReadonlyArray<IssueTrackerApi>;
   readonly bindings?: Record<string, IssueTrackerProjectBinding>;
   readonly readBindings?: IssueTrackerBindings.IssueTrackerBindingsRepository["Service"]["list"];
+  /** The checkouts in each workspace folder, by its root. */
+  readonly workspaces?: Record<string, ReadonlyArray<RepositoryIdentity>>;
 }) {
   return IssueService.IssueService.pipe(
     Effect.provide(
@@ -188,6 +191,7 @@ function makeService(input: {
             }),
             Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
               resolve: () => Effect.succeed(null),
+              resolveWorkspace: (cwd) => Effect.succeed(input.workspaces?.[cwd] ?? []),
             }),
           ),
         ),
@@ -217,6 +221,40 @@ describe("IssueService", () => {
         host: "dev.azure.com",
         scope: "acme/Web App",
       });
+    }),
+  );
+
+  it.effect("reads the issues of each repository in a workspace folder, from its checkout", () =>
+    Effect.gen(function* () {
+      const checkout = (repository: string, rootPath: string) => ({
+        ...project({ id: "x", repository }).repositoryIdentity!,
+        rootPath,
+      });
+      const read: string[] = [];
+      const service = yield* makeService({
+        projects: [project({ id: "folder" })],
+        workspaces: {
+          "/w/folder": [
+            checkout("acme/web", "/w/folder/web"),
+            checkout("acme/api", "/w/folder/api"),
+            // A second clone of one repository is read once.
+            checkout("acme/web", "/w/folder/web-2"),
+          ],
+        },
+        trackers: [
+          fakeTracker({
+            listIssues: (input) =>
+              Effect.sync(() => {
+                read.push(`${input.scope} in ${input.cwd}`);
+                return { items: [], nextCursor: null };
+              }),
+          }),
+        ],
+      });
+      yield* service.list({ state: "open" });
+      expect(read.sort()).toEqual(["acme/api in /w/folder/api", "acme/web in /w/folder/web"]);
+      const own = { projectId: "folder" as ProjectId, tracker: GITHUB, key: "1" };
+      expect((yield* service.detail({ ...own, scope: "acme/api" })).writable).toBe(true);
     }),
   );
 
