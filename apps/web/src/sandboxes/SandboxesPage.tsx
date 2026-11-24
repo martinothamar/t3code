@@ -299,7 +299,10 @@ function SandboxRow({
       control={
         hostOffline ? null : (
           <div className="flex shrink-0 items-center gap-1">
-            {project !== null && sandbox.phase === "ready" && connected ? (
+            {project !== null &&
+            sandbox.phase === "ready" &&
+            sandbox.action === null &&
+            connected ? (
               <Button
                 size="xs"
                 variant="outline"

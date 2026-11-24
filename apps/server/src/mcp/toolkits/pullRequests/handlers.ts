@@ -519,7 +519,10 @@ const make = Effect.gen(function* () {
         ? { number: input.number, repository: input.repository ?? branchRepository }
         : branchPullRequest === null
           ? null
-          : { number: branchPullRequest.number, repository: branchPullRequest.repository };
+          : // Its URL keeps the host, which a folder with checkouts on two hosts can't infer.
+            sourceControlDefinitions.parseChangeRequestUrl(branchPullRequest.url) !== undefined
+            ? { url: branchPullRequest.url }
+            : { number: branchPullRequest.number, repository: branchPullRequest.repository };
     if (named === null) return yield* new PullRequestBranchHasNoneError();
     const target = yield* resolveTarget(named, project);
     const ref: PullRequestRef = {

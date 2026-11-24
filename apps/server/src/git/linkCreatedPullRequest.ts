@@ -34,7 +34,10 @@ export function createdPullRequestKey(
   }
   // A workspace folder names a repository only when it holds one.
   const identities = project === undefined ? [] : projectRepositoryIdentities(project);
-  const identity = identities.length === 1 ? identities[0] : undefined;
+  const identity =
+    new Set(identities.map((candidate) => candidate.canonicalKey)).size === 1
+      ? identities[0]
+      : undefined;
   const kind = identity?.provider;
   const repository = sourceControlDefinitions.repositorySelector(identity);
   if (!identity || kind === undefined || repository === null) return null;

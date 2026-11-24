@@ -1264,7 +1264,9 @@ describe("source control tools", () => {
             },
             pullRequests: {
               comment: (input) =>
-                Effect.sync(() => void comments.push(`${input.repository}#${input.number}`)),
+                Effect.sync(
+                  () => void comments.push(`${input.host}/${input.repository}#${input.number}`),
+                ),
             },
           });
         const several = yield* folder("acme/app", "acme/infra");
@@ -1281,7 +1283,44 @@ describe("source control tools", () => {
 
         const one = yield* folder("acme/infra");
         yield* one.call("pull_request_respond", { number: 7, body: "Thanks." });
-        expect(comments).toEqual(["acme/infra#7"]);
+        expect(comments).toEqual(["github.com/acme/infra#7"]);
+
+        // The branch's PR keeps its host when the folder holds the repository on two.
+        const twoHosts = yield* makeHarness({
+          thread: {
+            ...branchThread,
+            branchPullRequest: {
+              projectId: PROJECT_ID,
+              repository: "acme/infra",
+              number: 8,
+              url: "https://gitlab.com/acme/infra/-/merge_requests/8",
+            },
+          },
+          project: {
+            ...makeProject(null),
+            workspaceRepositories: [
+              checkout("acme/infra"),
+              {
+                ...checkout("acme/infra"),
+                canonicalKey: "gitlab.com/acme/infra",
+                locator: {
+                  source: "git-remote" as const,
+                  remoteName: "origin",
+                  remoteUrl: "https://gitlab.com/acme/infra.git",
+                },
+                provider: SourceControlProviderKind.make("gitlab"),
+              },
+            ],
+          },
+          pullRequests: {
+            comment: (input) =>
+              Effect.sync(
+                () => void comments.push(`${input.host}/${input.repository}#${input.number}`),
+              ),
+          },
+        });
+        yield* twoHosts.call("pull_request_respond", { body: "Thanks." });
+        expect(comments.at(-1)).toBe("gitlab.com/acme/infra#8");
       }),
   );
 
@@ -1388,6 +1427,10 @@ describe("source control tools", () => {
         .pipe(Effect.flip);
       expect(error.message).toContain("a.ts line 40 (new side) is not in this PR's diff");
       expect(reviews).toHaveLength(1);
+
+      // An approval without a summary stays one, with no comment carrying only the marker.
+      yield* harness.call("pull_request_review", { verdict: "approve" });
+      expect(reviews[1]).toMatchObject({ verdict: "approve", body: "" });
     }),
   );
 

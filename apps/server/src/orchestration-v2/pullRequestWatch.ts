@@ -24,11 +24,14 @@ const SNIPPET_LENGTH = 200;
 const AGENT_MARKER_TEXT = "<!-- t3code:agent -->";
 const AGENT_MARKER = /(?:^|\n)[ \t]*<!--\s*t3code:agent\b[^>]*-->\s*$/u;
 
-/** What T3's own tools post for the agent, ending with the marker unless it already does. */
+/**
+ * What T3's own tools post for the agent, ending with the marker unless it already does. An
+ * empty body stays empty, since hosts post nothing for it.
+ */
 export function withAgentMarker(body: string): string {
-  if (AGENT_MARKER.test(body)) return body;
   const text = body.trimEnd();
-  return text.length === 0 ? AGENT_MARKER_TEXT : `${text}\n\n${AGENT_MARKER_TEXT}`;
+  if (text.length === 0 || AGENT_MARKER.test(body)) return body;
+  return `${text}\n\n${AGENT_MARKER_TEXT}`;
 }
 
 export type PullRequestWatchChange =

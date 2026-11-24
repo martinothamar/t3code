@@ -699,9 +699,23 @@ const make = Effect.gen(function* () {
     "IssueService.projectScope",
   )(function* (projectId) {
     const { supported } = yield* listProjects({ projectId });
-    const [own] = supported;
+    const [own, ...others] = supported;
     if (own === undefined) {
       return yield* new IssueUnavailableError({ reason: "tracker-unsupported" });
+    }
+    if (
+      own.project.repositoryIdentity == null &&
+      others.some(
+        (other) =>
+          other.tracker !== own.tracker ||
+          listCursorKey(other.host, other.scope) !== listCursorKey(own.host, own.scope),
+      )
+    ) {
+      return yield* new IssueOperationError({
+        operation: "projectScope",
+        detail:
+          "This project's folder holds the issues of several repositories. Name an issue by its URL.",
+      });
     }
     return { projectId, tracker: own.tracker, host: own.host, scope: own.scope };
   });

@@ -255,6 +255,9 @@ describe("IssueService", () => {
       expect(read.sort()).toEqual(["acme/api in /w/folder/api", "acme/web in /w/folder/web"]);
       const own = { projectId: "folder" as ProjectId, tracker: GITHUB, key: "1" };
       expect((yield* service.detail({ ...own, scope: "acme/api" })).writable).toBe(true);
+      // A bare key names no repository of the folder's several.
+      const scope = yield* Effect.flip(service.projectScope("folder" as ProjectId));
+      expect(scope.message).toContain("Name an issue by its URL");
     }),
   );
 

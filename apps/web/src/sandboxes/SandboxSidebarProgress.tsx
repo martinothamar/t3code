@@ -141,7 +141,9 @@ function SandboxProgressRows({ sandboxes }: { readonly sandboxes: ReadonlyArray<
                 </button>
               ) : null}
             </div>
-            {created.has(keyOf(sandbox)) && (ready || failed) ? (
+            {created.has(keyOf(sandbox)) &&
+            sandbox.action === null &&
+            (sandbox.phase === "ready" || failed) ? (
               <button
                 type="button"
                 aria-label={`Dismiss ${sandbox.name}`}
