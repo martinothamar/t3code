@@ -1,6 +1,7 @@
 import {
   CommandId,
   NonNegativeInt,
+  projectRepositoryIdentities,
   type PullRequestActivity,
   PullRequestListCursors,
   type PullRequestRef,
@@ -232,30 +233,27 @@ function projectForPullRequest(
   preferred: OrchestrationProjectShell | undefined,
 ): OrchestrationProjectShell | undefined {
   // Match the guide service's host-level repository key, including Azure DevOps org/project/_git/repo.
-  const matches = (project: OrchestrationProjectShell) => {
-    const own = pullRequestSyncKey(
-      { projectId: project.id, host: target.host, repository: target.repository, number: 1 },
-      project.repositoryIdentity ?? undefined,
-    );
-    const projectKey =
-      project.repositoryIdentity == null
-        ? null
-        : pullRequestSyncKey(
-            {
-              projectId: project.id,
-              repository:
-                sourceControlDefinitions.repositorySelector(project.repositoryIdentity) ?? "",
-              number: 1,
-            },
-            project.repositoryIdentity,
-          );
-    return (
-      own !== null &&
-      projectKey !== null &&
-      own.host === projectKey.host &&
-      own.repository === projectKey.repository
-    );
-  };
+  const matches = (project: OrchestrationProjectShell) =>
+    projectRepositoryIdentities(project).some((identity) => {
+      const own = pullRequestSyncKey(
+        { projectId: project.id, host: target.host, repository: target.repository, number: 1 },
+        identity,
+      );
+      const projectKey = pullRequestSyncKey(
+        {
+          projectId: project.id,
+          repository: sourceControlDefinitions.repositorySelector(identity) ?? "",
+          number: 1,
+        },
+        identity,
+      );
+      return (
+        own !== null &&
+        projectKey !== null &&
+        own.host === projectKey.host &&
+        own.repository === projectKey.repository
+      );
+    });
   if (preferred !== undefined && matches(preferred)) return preferred;
   return projects.find(matches);
 }

@@ -828,32 +828,54 @@ describe("pull request guide tools", () => {
       }),
   );
 
-  it.effect("finds an Azure DevOps checkout for a pull request named by its full path", () =>
-    Effect.gen(function* () {
-      const azure = {
-        ...makeProject({
-          canonicalKey: "dev.azure.com/org/project/_git/web",
-          locator: {
-            source: "git-remote",
-            remoteName: "origin",
-            remoteUrl: "https://dev.azure.com/org/project/_git/web",
-          },
-          provider: SourceControlProviderKind.make("azure-devops"),
-          displayName: "org/project/_git/web",
-          owner: "org",
-          name: "web",
-        }),
-        id: ProjectId.make("project-azure"),
-      };
-      const harness = yield* makeHarness({ projects: [makeProject(), azure] });
-      const result = yield* harness.call("write_pull_request_guides", {
-        pullRequests: [{ host: "dev.azure.com", repository: "org/project/_git/web", number: 9 }],
-      });
-      expect(result.guides.map((guide) => guide.outcome)).toEqual(["started"]);
-      expect((yield* Ref.get(harness.guideRequests)).map((ref) => ref.projectId)).toEqual([
-        "project-azure",
-      ]);
-    }),
+  it.effect(
+    "finds the checkout for a pull request by its full path, in a workspace folder too",
+    () =>
+      Effect.gen(function* () {
+        const azure = {
+          ...makeProject({
+            canonicalKey: "dev.azure.com/org/project/_git/web",
+            locator: {
+              source: "git-remote",
+              remoteName: "origin",
+              remoteUrl: "https://dev.azure.com/org/project/_git/web",
+            },
+            provider: SourceControlProviderKind.make("azure-devops"),
+            displayName: "org/project/_git/web",
+            owner: "org",
+            name: "web",
+          }),
+          id: ProjectId.make("project-azure"),
+        };
+        const folder = {
+          ...makeProject(null),
+          id: ProjectId.make("project-folder"),
+          workspaceRepositories: [
+            {
+              canonicalKey: "github.com/acme/infra",
+              locator: {
+                source: "git-remote" as const,
+                remoteName: "origin",
+                remoteUrl: "https://github.com/acme/infra.git",
+              },
+              provider: SourceControlProviderKind.make("github"),
+              displayName: "acme/infra",
+            },
+          ],
+        };
+        const harness = yield* makeHarness({ projects: [makeProject(), azure, folder] });
+        const result = yield* harness.call("write_pull_request_guides", {
+          pullRequests: [
+            { host: "dev.azure.com", repository: "org/project/_git/web", number: 9 },
+            { host: "github.com", repository: "acme/infra", number: 3 },
+          ],
+        });
+        expect(result.guides.map((guide) => guide.outcome)).toEqual(["started", "started"]);
+        expect((yield* Ref.get(harness.guideRequests)).map((ref) => ref.projectId)).toEqual([
+          "project-azure",
+          "project-folder",
+        ]);
+      }),
   );
 });
 

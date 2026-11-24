@@ -132,6 +132,17 @@ describe("createdPullRequestKey", () => {
         undefined,
       ),
     ).toBeNull();
+    // A workspace folder holding one repository stands for it as a repository-rooted project does.
+    expect(
+      createdPullRequestKey(
+        prResult({ status: "created", number: 3, url: "https://ghe.internal/x/3" }),
+        {
+          ...project,
+          repositoryIdentity: null,
+          workspaceRepositories: [project.repositoryIdentity!],
+        },
+      ),
+    ).toMatchObject({ host: "github.acme.test", repository: "platform/api" });
   });
 });
 

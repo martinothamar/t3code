@@ -9,9 +9,10 @@ import type {
   IssueTrackerSummary,
   SourceControlProviderKind,
 } from "@t3tools/contracts";
+import { projectRepositoryIdentities } from "@t3tools/contracts";
 
 import { mergeIssueListPage } from "./state/issues.ts";
-import { projectRepositoryIdentities, sourceControlClients } from "./sourceControlClients.ts";
+import { sourceControlClients } from "./sourceControlClients.ts";
 import type { EnvironmentProject } from "./state/shell.ts";
 
 export interface EnvironmentIssueEntry extends IssueListEntry {

@@ -942,6 +942,20 @@ describe("findProjectForRepository", () => {
         selectedEnvironmentId: "env-connecting",
       }),
     ).toBeUndefined();
+
+    // A workspace folder holds the repositories of the checkouts in it.
+    const folder = {
+      id: "p4",
+      environmentId: ENV_2,
+      repositoryIdentity: null,
+      workspaceRepositories: [project("p4", ENV_2, "acme/web").repositoryIdentity],
+    };
+    expect(
+      findProjectForRepository([...projects, folder], {
+        repository: "acme/web",
+        selectedEnvironmentId: ENV_2,
+      }),
+    ).toBe(folder);
   });
 });
 

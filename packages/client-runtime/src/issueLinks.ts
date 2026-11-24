@@ -1,5 +1,6 @@
 import {
   IssueTrackerKind,
+  projectRepositoryIdentities,
   type IssueRef,
   type IssueTrackerConnectionList,
 } from "@t3tools/contracts";
@@ -9,7 +10,7 @@ import {
   parseLinearIssueUrl,
 } from "@t3tools/issue-tracker-linear/shared/issueUrl";
 
-import { projectRepositoryIdentities, sourceControlClients } from "./sourceControlClients.ts";
+import { sourceControlClients } from "./sourceControlClients.ts";
 import type { EnvironmentProject } from "./state/shell.ts";
 
 type LinkProject = Pick<

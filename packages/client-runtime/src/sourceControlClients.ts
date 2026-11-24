@@ -5,10 +5,11 @@ import {
   type SourceControlAppSignIn,
   type SourceControlDefinition,
 } from "@t3tools/source-control-core/shared/definition";
-import type {
-  RepositoryIdentity,
-  ServerSettings,
-  SourceControlAppAccessInput,
+import {
+  projectRepositoryIdentities,
+  type RepositoryIdentity,
+  type ServerSettings,
+  type SourceControlAppAccessInput,
 } from "@t3tools/contracts";
 import { parseGitRemoteRepository } from "@t3tools/shared/git";
 
@@ -41,15 +42,6 @@ type RepositoryProject = {
   readonly repositoryIdentity?: RepositoryIdentity | null | undefined;
   readonly workspaceRepositories?: ReadonlyArray<RepositoryIdentity> | undefined;
 };
-
-/** A project's own repository, or for a folder that is no repository, the checkouts it holds. */
-export function projectRepositoryIdentities(
-  project: RepositoryProject,
-): ReadonlyArray<RepositoryIdentity> {
-  return project.repositoryIdentity != null
-    ? [project.repositoryIdentity]
-    : (project.workspaceRepositories ?? []);
-}
 
 /**
  * The repositories a project's pull requests come from, as `repositorySelector` names them. Two
