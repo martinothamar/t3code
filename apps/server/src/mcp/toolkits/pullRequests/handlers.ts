@@ -255,7 +255,11 @@ function projectForPullRequest(
       );
     });
   if (preferred !== undefined && matches(preferred)) return preferred;
-  return projects.find(matches);
+  // A project rooted in the repository comes before a folder that holds a checkout of it.
+  return (
+    projects.find((project) => project.repositoryIdentity != null && matches(project)) ??
+    projects.find(matches)
+  );
 }
 
 const make = Effect.gen(function* () {
@@ -520,7 +524,8 @@ const make = Effect.gen(function* () {
         : branchPullRequest === null
           ? null
           : // Its URL keeps the host, which a folder with checkouts on two hosts can't infer.
-            sourceControlDefinitions.parseChangeRequestUrl(branchPullRequest.url) !== undefined
+            sourceControlDefinitions.parseChangeRequestUrl(branchPullRequest.url)?.link !==
+              undefined
             ? { url: branchPullRequest.url }
             : { number: branchPullRequest.number, repository: branchPullRequest.repository };
     if (named === null) return yield* new PullRequestBranchHasNoneError();
@@ -1027,17 +1032,22 @@ const make = Effect.gen(function* () {
         }
         // A workspace folder is no repository; the branch is in one of its checkouts.
         const checkout = workspaceCheckout(project, input.repository);
+        const clones = (project.workspaceRepositories ?? []).filter(
+          (identity) => identity.canonicalKey === checkout?.canonicalKey,
+        ).length;
         if (
           thread.worktreePath == null &&
           project.repositoryIdentity == null &&
           (project.workspaceRepositories?.length ?? 0) > 0 &&
-          checkout === undefined
+          (checkout === undefined || clones > 1)
         ) {
           return yield* new PullRequestForgeError({
             detail:
-              input.repository === undefined
-                ? "This thread's folder holds several repositories. Pass repository, such as owner/repo."
-                : `This thread's folder holds no checkout of ${input.repository}.`,
+              clones > 1
+                ? "This thread's folder holds several clones of that repository, and the branch could be in any. Open the PR with the host's CLI in its clone."
+                : input.repository === undefined
+                  ? "This thread's folder holds several repositories. Pass repository, such as owner/repo."
+                  : `This thread's folder holds no checkout of ${input.repository}.`,
           });
         }
         const created = yield* git

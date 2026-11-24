@@ -956,6 +956,14 @@ describe("findProjectForRepository", () => {
         selectedEnvironmentId: ENV_2,
       }),
     ).toBe(folder);
+    // The repository's own project comes before a folder listed ahead of it.
+    const own = project("p5", ENV_2, "acme/web");
+    expect(
+      findProjectForRepository([folder, own], {
+        repository: "acme/web",
+        selectedEnvironmentId: ENV_2,
+      }),
+    ).toBe(own);
   });
 });
 

@@ -76,6 +76,8 @@ interface ProjectTrackerBinding {
   readonly scope: string;
   /** Where the tracker's tools run: the project's root, or a workspace folder's checkout. */
   readonly cwd: string;
+  /** The workspace folder's checkout it was read from, by canonical key. */
+  readonly checkout?: string;
 }
 
 /** A project the registry has a tracker for, ready to serve reads and writes. */
@@ -220,15 +222,14 @@ const make = Effect.gen(function* () {
               Effect.map((checkouts) => {
                 const seen = new Set<string>();
                 return checkouts.flatMap((checkout) =>
-                  resolveGitHostBindings(
-                    checkout,
-                    checkout.rootPath ?? project.workspaceRoot,
-                  ).filter((candidate) => {
-                    const key = `${candidate.tracker} ${listCursorKey(candidate.host, candidate.scope)}`;
-                    if (seen.has(key)) return false;
-                    seen.add(key);
-                    return true;
-                  }),
+                  resolveGitHostBindings(checkout, checkout.rootPath ?? project.workspaceRoot)
+                    .filter((candidate) => {
+                      const key = `${candidate.tracker} ${listCursorKey(candidate.host, candidate.scope)}`;
+                      if (seen.has(key)) return false;
+                      seen.add(key);
+                      return true;
+                    })
+                    .map((candidate) => ({ ...candidate, checkout: checkout.canonicalKey })),
                 );
               }),
             ),
@@ -703,18 +704,15 @@ const make = Effect.gen(function* () {
     if (own === undefined) {
       return yield* new IssueUnavailableError({ reason: "tracker-unsupported" });
     }
+    // A tracker bound in Settings leads; otherwise a folder's repositories each have their own.
     if (
-      own.project.repositoryIdentity == null &&
-      others.some(
-        (other) =>
-          other.tracker !== own.tracker ||
-          listCursorKey(other.host, other.scope) !== listCursorKey(own.host, own.scope),
-      )
+      own.checkout !== undefined &&
+      others.some((other) => other.checkout !== undefined && other.checkout !== own.checkout)
     ) {
       return yield* new IssueOperationError({
         operation: "projectScope",
         detail:
-          "This project's folder holds the issues of several repositories. Name an issue by its URL.",
+          "This project's folder holds several repositories, each with its own issues. Name an issue by its URL, or open one with its host's CLI in that repository's checkout.",
       });
     }
     return { projectId, tracker: own.tracker, host: own.host, scope: own.scope };

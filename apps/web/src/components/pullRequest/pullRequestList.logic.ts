@@ -1012,5 +1012,8 @@ export function findProjectForRepository<
   });
   // Azure repository names can collide across projects on the same host.
   const scoped = findScopedProject(candidates, input.scopedEnvironmentId, input.scopedProjectId);
-  return scoped ?? candidates[0];
+  // A project rooted in the repository comes before a folder that holds a checkout of it.
+  return (
+    scoped ?? candidates.find((project) => project.repositoryIdentity != null) ?? candidates[0]
+  );
 }

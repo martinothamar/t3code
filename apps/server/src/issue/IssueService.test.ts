@@ -258,6 +258,20 @@ describe("IssueService", () => {
       // A bare key names no repository of the folder's several.
       const scope = yield* Effect.flip(service.projectScope("folder" as ProjectId));
       expect(scope.message).toContain("Name an issue by its URL");
+
+      // A fork's upstream and origin are one checkout's, and a tracker bound in Settings leads.
+      const fork = {
+        ...checkout("acme/web", "/w/fork/web"),
+        origin: { canonicalKey: "github.com/me/web" },
+      };
+      const scoped = yield* makeService({
+        projects: [project({ id: "fork" }), project({ id: "bound" })],
+        workspaces: { "/w/fork": [fork], "/w/bound": [fork, checkout("acme/api", "/w/bound/api")] },
+        bindings: { bound: { tracker: LINEAR, scope: "ENG" } },
+        trackers: [fakeTracker(), fakeStandaloneTracker()],
+      });
+      expect(yield* scoped.projectScope("fork" as ProjectId)).toMatchObject({ scope: "acme/web" });
+      expect(yield* scoped.projectScope("bound" as ProjectId)).toMatchObject({ scope: "ENG" });
     }),
   );
 

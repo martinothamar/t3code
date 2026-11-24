@@ -875,6 +875,19 @@ describe("pull request guide tools", () => {
           "project-azure",
           "project-folder",
         ]);
+
+        // The repository's own project comes before a folder listed ahead of it.
+        const rooted = {
+          ...makeProject(folder.workspaceRepositories[0]!),
+          id: ProjectId.make("project-infra"),
+        };
+        const both = yield* makeHarness({ projects: [folder, rooted] });
+        yield* both.call("write_pull_request_guides", {
+          pullRequests: [{ host: "github.com", repository: "acme/infra", number: 3 }],
+        });
+        expect((yield* Ref.get(both.guideRequests)).map((ref) => ref.projectId)).toEqual([
+          "project-infra",
+        ]);
       }),
   );
 });
@@ -1280,6 +1293,24 @@ describe("source control tools", () => {
           repository: "acme/infra",
         });
         expect(opened).toEqual(["/workspace/infra"]);
+        // Two clones of one repository could each have the branch checked out.
+        const clones = yield* makeHarness({
+          project: {
+            ...makeProject(null),
+            workspaceRepositories: [
+              checkout("acme/infra"),
+              { ...checkout("acme/infra"), rootPath: "/workspace/infra-2" },
+            ],
+          },
+        });
+        const cloned = yield* Effect.flip(
+          clones.call("pull_request_create", {
+            title: "Add tools",
+            body: "Adds tools.",
+            repository: "acme/infra",
+          }),
+        );
+        expect(cloned.message).toContain("several clones");
 
         const one = yield* folder("acme/infra");
         yield* one.call("pull_request_respond", { number: 7, body: "Thanks." });
@@ -1321,6 +1352,23 @@ describe("source control tools", () => {
         });
         yield* twoHosts.call("pull_request_respond", { body: "Thanks." });
         expect(comments.at(-1)).toBe("gitlab.com/acme/infra#8");
+
+        // A URL no forge parses still leaves its repository and number.
+        const unreadable = yield* makeHarness({
+          thread: {
+            ...branchThread,
+            branchPullRequest: {
+              ...branchThread.branchPullRequest,
+              url: "https://code.internal/t3tools/t3code/changes/42",
+            },
+          },
+          pullRequests: {
+            comment: (input) =>
+              Effect.sync(() => void comments.push(`${input.repository}#${input.number}`)),
+          },
+        });
+        yield* unreadable.call("pull_request_respond", { body: "Thanks." });
+        expect(comments.at(-1)).toBe("t3tools/t3code#42");
       }),
   );
 
