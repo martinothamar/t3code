@@ -17,7 +17,7 @@ Threshold monitors in [`infra/relay/src/monitoring.ts`](../../infra/relay/src/mo
 
 ## Mobile crashes and errors
 
-The mobile app sends `expo-observe` telemetry to the relay (`/v1/mobile/observe`), which forwards logs, metrics, and spans to Axiom and symbolicates release Hermes JS stacks using source maps from R2 (`relay.symbolication.status` records the outcome).
+The upstream mobile app sends `expo-observe` telemetry to the relay (`/v1/mobile/observe`), which forwards logs, metrics, and spans to Axiom and symbolicates release Hermes JS stacks using source maps from R2 (`relay.symbolication.status` records the outcome). Fork mobile builds omit Expo Observe, and fork clients and servers export no relay traces.
 
 - **Counting real native crashes:** Fatal JS errors also trigger a native abort; filter out `relay.crash.js_fatal` (and Android OS `SIGKILL`s, which indicate memory pressure/swiping) when counting native crashes:
 

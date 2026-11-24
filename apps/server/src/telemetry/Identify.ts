@@ -7,8 +7,6 @@ import * as Schema from "effect/Schema";
 
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { hashTelemetryId } from "@t3tools/shared/telemetryId";
-import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import { CLOUD_LINKED_USER_ID } from "../cloud/config.ts";
 import * as ServerConfig from "../config.ts";
 
 /**
@@ -143,22 +141,3 @@ export const getTelemetryIdentity = upsertAnonymousId.pipe(
   Effect.map((installId) => ({ distinctId: installId, installId })),
   Effect.withSpan("getTelemetryIdentity"),
 );
-
-/**
- * The owner the server can read without a client: the linked T3 Connect
- * account. Clients add `connect` and `device` owners when they connect.
- */
-export const getServerOwners = Effect.gen(function* () {
-  const secrets = yield* ServerSecretStore.ServerSecretStore;
-  const connectUser = yield* secrets.get(CLOUD_LINKED_USER_ID).pipe(
-    Effect.map(Option.map((bytes) => new TextDecoder().decode(bytes))),
-    Effect.catch((cause) =>
-      Effect.logWarning("Failed to read the linked T3 Connect account for telemetry", {
-        errorTag: cause._tag,
-      }).pipe(Effect.as(Option.none<string>())),
-    ),
-  );
-  return Option.isSome(connectUser) && connectUser.value.trim() !== ""
-    ? [{ source: "connect", ownerId: hashTelemetryId(connectUser.value) } satisfies TelemetryOwner]
-    : [];
-}).pipe(Effect.withSpan("getServerOwners"));
