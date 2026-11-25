@@ -73,19 +73,22 @@ minutes and is cancelled before any step runs, and re-running it may take hours 
 the repository variable `FORK_MAC_RUNNER` to a self-hosted runner's label runs both macOS builds
 there instead; an Apple Silicon Mac builds the x64 app too. Unset it to go back to `macos-15`.
 
-The repository is public, so the runner lives in a [Tart](https://github.com/openai/tart) virtual
-machine that holds nothing else, and only Fork release, which only people with write access can
-start, names its label. On a Mac with Homebrew, signed in to `gh` as an admin of the repository:
+Each job runs in a fresh clone of a prepared [Tart](https://github.com/openai/tart) virtual machine,
+registered for that job alone and deleted afterwards, as on GitHub's runners: upstream's release
+workflow expects a clean machine, and no job leaves anything behind on this public repository's
+runner. Only Fork release, which only people with write access can start, names its label. On a Mac
+with Homebrew, signed in to `gh` as an admin of the repository:
 
 ```sh
 scripts/fork/setup-mac-runner.sh
 ```
 
-It creates the VM, registers the runner as `fork-mac` in it, starts the VM with your login, keeps the
-Mac from sleeping, requires approval for every external contributor's pull request workflows, and
-sets `FORK_MAC_RUNNER`. The runner runs in the VM's logged-in session, which the launch check needs
-to open the app, so the Mac has to stay logged in. With one runner, the two macOS builds run one
-after the other.
+It prepares the VM, adding the Developer ID intermediate certificates that Xcode would otherwise
+bring, runs the clones from a LaunchAgent that logs to
+`~/Library/Application Support/fork-mac-runner/loop.log`, keeps the Mac from sleeping, requires
+approval for every external contributor's pull request workflows, and sets `FORK_MAC_RUNNER`. The
+runner works in the VM's logged-in session, where the launch check can open the app, and the
+LaunchAgent needs this Mac's user logged in. The two macOS builds run one after the other.
 
 ## The version
 
