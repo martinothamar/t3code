@@ -73,28 +73,19 @@ minutes and is cancelled before any step runs, and re-running it may take hours 
 the repository variable `FORK_MAC_RUNNER` to a self-hosted runner's label runs both macOS builds
 there instead; an Apple Silicon Mac builds the x64 app too. Unset it to go back to `macos-15`.
 
-The repository is public, so the runner lives in a virtual machine that holds nothing else, and
-only Fork release, which only people with write access can start, names its label. On the Mac:
+The repository is public, so the runner lives in a [Tart](https://github.com/openai/tart) virtual
+machine that holds nothing else, and only Fork release, which only people with write access can
+start, names its label. On a Mac with Homebrew, signed in to `gh` as an admin of the repository:
 
-1. Install [Tart](https://github.com/openai/tart) (`brew install openai/tools/tart`), clone a
-   Cirrus Labs `macos-*-base` image no newer than the Mac's macOS, such as
-   `tart clone ghcr.io/cirruslabs/macos-tahoe-base:latest mac-runner`,
-   and give it room: `tart set mac-runner --cpu 6 --memory 12288 --disk-size 120`.
-2. `tart run mac-runner`. The VM logs in as `admin` (password `admin`); change the password. In it:
-   - `softwareupdate --install-rosetta --agree-to-license`, for the x64 build, and
-     `xcode-select --install` if `xcrun notarytool --help` fails.
-   - In the repository's Settings → Actions → Runners → New self-hosted runner, choose macOS and
-     ARM64 and run the download commands it shows, then
-     `./config.sh --url <repository URL> --token <token> --name mac-runner --labels fork-mac --unattended`
-     and `./svc.sh install && ./svc.sh start`.
-3. Keep the VM running headless, such as from a login item running
-   `tart run --no-graphics mac-runner`, and keep the Mac from sleeping.
-4. In Settings → Actions → General, require approval for fork pull request workflows from all
-   external contributors, so no pull request runs on the runner unseen.
-5. Set the repository variable `FORK_MAC_RUNNER` to `fork-mac`.
+```sh
+scripts/fork/setup-mac-runner.sh
+```
 
-`svc.sh` runs the runner in the VM's logged-in session, which the launch check needs to open
-the app. With one runner, the two macOS builds run one after the other.
+It creates the VM, registers the runner as `fork-mac` in it, starts the VM with your login, keeps the
+Mac from sleeping, requires approval for every external contributor's pull request workflows, and
+sets `FORK_MAC_RUNNER`. The runner runs in the VM's logged-in session, which the launch check needs
+to open the app, so the Mac has to stay logged in. With one runner, the two macOS builds run one
+after the other.
 
 ## The version
 
