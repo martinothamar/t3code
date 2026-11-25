@@ -66,6 +66,35 @@ A Mac with an unsigned fork build installs the first signed release with the ins
 then asks once for the keychain password, since the signed app reads the keychain item the unsigned
 one created.
 
+## A Mac as the macOS runner
+
+GitHub's hosted macOS runners have often gone unassigned since November 2026: a job waits 15
+minutes and is cancelled before any step runs, and re-running it may take hours to succeed. Setting
+the repository variable `FORK_MAC_RUNNER` to a self-hosted runner's label runs both macOS builds
+there instead; an Apple Silicon Mac builds the x64 app too. Unset it to go back to `macos-15`.
+
+The repository is public, so the runner lives in a virtual machine that holds nothing else, and
+only Fork release, which only people with write access can start, names its label. On the Mac:
+
+1. Install [Tart](https://tart.run) (`brew install cirruslabs/cli/tart`), clone Cirrus Labs' newest
+   `macos-*-base` image, such as `tart clone ghcr.io/cirruslabs/macos-tahoe-base:latest mac-runner`,
+   and give it room: `tart set mac-runner --cpu 6 --memory 12288 --disk-size 120`.
+2. `tart run mac-runner`. The VM logs in as `admin` (password `admin`); change the password. In it:
+   - `softwareupdate --install-rosetta --agree-to-license`, for the x64 build, and
+     `xcode-select --install` if `xcrun notarytool --help` fails.
+   - In the repository's Settings → Actions → Runners → New self-hosted runner, choose macOS and
+     ARM64 and run the download commands it shows, then
+     `./config.sh --url <repository URL> --token <token> --name mac-runner --labels fork-mac --unattended`
+     and `./svc.sh install && ./svc.sh start`.
+3. Keep the VM running headless, such as from a login item running
+   `tart run --no-graphics mac-runner`, and keep the Mac from sleeping.
+4. In Settings → Actions → General, require approval for fork pull request workflows from all
+   external contributors, so no pull request runs on the runner unseen.
+5. Set the repository variable `FORK_MAC_RUNNER` to `fork-mac`.
+
+`svc.sh` runs the runner in the VM's logged-in session, which the launch check needs to open
+the app. With one runner, the two macOS builds run one after the other.
+
 ## The version
 
 Releases use upstream's preview form, `<core>-preview.<YYYYMMDD>.<run>`, such as
