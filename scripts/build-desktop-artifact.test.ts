@@ -1623,7 +1623,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       browserPasskeys: false,
     });
 
-    assert.deepStrictEqual(configuration.rpDomains, [
+    assert.deepStrictEqual(configuration?.rpDomains, [
       "clerk.example.com",
       "example.clerk.accounts.dev",
     ]);
@@ -1635,6 +1635,25 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.match(entitlements, /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\/>/u);
     assert.notInclude(entitlements, "keychain-access-groups");
     assert.notInclude(entitlements, "com.apple.developer.web-browser.public-key-credential");
+
+    const developerIdOnly = resolveMacPasskeySigningConfiguration({
+      T3CODE_CLERK_PASSKEY_RP_DOMAINS: "clerk.example.com",
+    });
+    assert.isUndefined(developerIdOnly);
+    const developerIdEntitlements = renderMacPasskeyEntitlements(developerIdOnly, {
+      touchIdKeychainAccessGroup: undefined,
+      browserPasskeys: false,
+    });
+    assert.notInclude(developerIdEntitlements, "com.apple.application-identifier");
+    assert.notInclude(developerIdEntitlements, "com.apple.developer.associated-domains");
+    assert.match(
+      developerIdEntitlements,
+      /<dict>\s*<key>com\.apple\.security\.cs\.allow-jit<\/key>/u,
+    );
+    assert.match(
+      developerIdEntitlements,
+      /<key>com\.apple\.security\.device\.camera<\/key>\s*<true\/>/u,
+    );
   });
 
   it("grants in-app browser passkey entitlements only when the provisioning profile does", () => {

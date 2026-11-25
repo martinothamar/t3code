@@ -30,7 +30,8 @@ reach Sandboxes, and an app always gets the server built with it.
 ## Updates
 
 The apps update themselves from this repository's releases: each release carries electron-updater's
-manifests (`latest.yml`, `latest-linux.yml`, `latest-linux-arm64.yml`), and an installed app offers
+manifests (`latest.yml`, `latest-mac.yml`, `latest-linux.yml`, `latest-linux-arm64.yml`), and an
+installed app offers
 the latest release once it is newer, then downloads it and restarts when you choose. Reconnecting
 to an SSH host afterwards installs the matching server there. The release refuses a build older
 than the latest release, which would hold every install back.
@@ -39,8 +40,31 @@ The first release with a feed has to be installed with the install script once; 
 build has no feed to find it. A source build gets no feed either.
 
 macOS installs an update only when it is signed like the running app, so a macOS build carries a
-feed only when it is signed. Without the signing secrets, the macOS apps are unsigned and updating
-them is running the install script again. Nothing else is signed: Windows and Linux update unsigned.
+feed only when it is signed (see [Signing the macOS apps](#signing-the-macos-apps)). Without the
+signing secrets, the macOS apps are unsigned and updating them is running the install script again.
+Nothing else is signed: Windows and Linux update unsigned.
+
+## Signing the macOS apps
+
+The macOS apps and the darwin-arm64 server archive are signed with a Developer ID and notarized
+when the repository has these Actions secrets:
+
+- `CSC_LINK`: a `Developer ID Application` certificate with its private key, exported from Keychain
+  Access as a `.p12` and base64-encoded (`base64 -i cert.p12 | pbcopy`).
+- `CSC_KEY_PASSWORD`: the `.p12`'s export password.
+- `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`: an App Store Connect team API key with
+  the Developer role, for notarization: the downloaded `.p8`'s contents, its key ID and the issuer
+  ID.
+
+Leave the `APPLE_TEAM_ID` variable and `MACOS_PROVISIONING_PROFILE` secret of upstream's
+[release setup](./release.md#2-apple-signing--notarization-setup-macos) unset. Upstream's profile
+grants passkeys to its app ID, `com.t3tools.t3code`, which only upstream's team can hold, so the
+fork's apps are signed without it, and passkeys in the in-app browser stay off as in unsigned
+builds.
+
+A Mac with an unsigned fork build installs the first signed release with the install script, and
+then asks once for the keychain password, since the signed app reads the keychain item the unsigned
+one created.
 
 ## The version
 
@@ -84,7 +108,7 @@ you want only the fork's: it updates itself to upstream builds. Do not use
 `brew uninstall --zap`, which deletes `~/.t3/userdata`.
 
 Install with the script rather than from the release page: a browser marks the download, so
-Gatekeeper blocks the unsigned macOS app and SmartScreen warns about the Windows installer.
+Gatekeeper blocks an unsigned macOS app and SmartScreen warns about the Windows installer.
 
 ## Building from source
 

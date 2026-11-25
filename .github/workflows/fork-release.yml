@@ -7,7 +7,9 @@
 # version from these releases (packages/ssh/src/remoteServerOverrides.ts).
 #
 # Packaging is upstream's release-desktop.yml, called once per target as release.yml does: it
-# needs only the `js-bundle` artifact built here, and skips signing without the secrets.
+# needs only the `js-bundle` artifact built here, and skips signing without the secrets. macOS
+# builds are signed and notarized with this repository's Developer ID secrets, which
+# release-desktop.yml accepts without upstream's passkey provisioning profile, a fork edit.
 #
 # A run on `main` builds and becomes the latest release. A run on any other branch, such as a
 # `sync/<date>` branch, only builds and leaves its apps and server archives as artifacts, for
@@ -233,6 +235,12 @@ jobs:
             resource_key: win32-arm64
             cli_archive: false
     uses: ./.github/workflows/release-desktop.yml
+    secrets:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
     with:
       version: ${{ needs.preflight.outputs.version }}
       ref: ${{ github.sha }}
