@@ -2726,6 +2726,18 @@ export function resolveDesktopUpdateChannel(version: string): "latest" | "nightl
   return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
 }
 
+function isPreviewReleaseVersion(version: string): boolean {
+  return /-preview\.\d{8}\.\d+$/.test(version);
+}
+
+/**
+ * Upstream's preview releases sit beside its stable ones, where a feed would move stable installs
+ * onto them. Every release of a fork is a preview, so a fork's preview builds follow its feed.
+ */
+function isForkRepository(publishConfig: { readonly owner: string; readonly repo: string }) {
+  return `${publishConfig.owner}/${publishConfig.repo}` !== "pingdotgg/t3code";
+}
+
 export function isDesktopPreviewVersion(version: string): boolean {
   return /-pr\./.test(version) || /-preview\.\d{8}\.\d+$/.test(version);
 }
@@ -2819,7 +2831,13 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const updateChannel = resolveDesktopUpdateChannel(version);
   // Missing publish config infers a GitHub feed from tokens; staging has no repository, so manifest generation would crash.
   buildConfig.publish = null;
-  if (!isDesktopPreviewVersion(version)) {
+  if (isPreviewReleaseVersion(version)) {
+    const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
+    // macOS installs an update only when it is signed as the running app is.
+    if (publishConfig && isForkRepository(publishConfig) && (platform !== "mac" || signed)) {
+      buildConfig.publish = [publishConfig];
+    }
+  } else if (!isDesktopPreviewVersion(version)) {
     const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
     if (publishConfig) {
       buildConfig.publish = [publishConfig];

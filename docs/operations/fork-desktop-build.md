@@ -27,15 +27,28 @@ release that matches its own version, and a host's T3 server installs its own re
 agentctl Sandboxes (`packages/ssh/src/remoteServerOverrides.ts`). So the fork's server changes
 reach Sandboxes, and an app always gets the server built with it.
 
-Nothing is signed. The apps carry no update feed, so they never replace themselves; installing a
-newer release is running the install script again.
+## Updates
+
+The apps update themselves from this repository's releases: each release carries electron-updater's
+manifests (`latest.yml`, `latest-linux.yml`, `latest-linux-arm64.yml`), and an installed app offers
+the latest release once it is newer, then downloads it and restarts when you choose. Reconnecting
+to an SSH host afterwards installs the matching server there. The release refuses a build older
+than the latest release, which would hold every install back.
+
+The first release with a feed has to be installed with the install script once; an earlier fork
+build has no feed to find it. A source build gets no feed either.
+
+macOS installs an update only when it is signed like the running app, so a macOS build carries a
+feed only when it is signed. Without the signing secrets, the macOS apps are unsigned and updating
+them is running the install script again. Nothing else is signed: Windows and Linux update unsigned.
 
 ## The version
 
 Releases use upstream's preview form, `<core>-preview.<YYYYMMDD>.<run>`, such as
 `0.1.1-preview.20261017.3`, where `<core>` is the next patch after `apps/desktop/package.json`'s
-version and `<run>` the workflow's run number. The desktop build gives a preview version no update
-feed, which keeps the CI build from pointing the app at this repository's releases. Each release
+version and `<run>` the workflow's run number, so a later release always has a higher version.
+Upstream gives its preview builds no update feed, since they sit beside its stable releases; a
+build from this repository is the exception (`scripts/build-desktop-artifact.ts`). Each release
 notes the upstream stable release or nightly it is based on.
 
 The app is named T3 Code (Beta), like upstream's preview builds. Earlier fork builds were named
@@ -43,7 +56,7 @@ T3 Code (Alpha) or T3 Code (Nightly); on macOS those apps stay beside the new ap
 them, which the install script reminds you of.
 
 The client warns about a server older than itself by comparing core versions only for previews, so
-it does not notice a Sandbox on an older fork release with the same core. Reinstalling the app and
+it does not notice a Sandbox on an older fork release with the same core. Updating the app and
 reconnecting installs the matching server.
 
 ## Installing
@@ -64,7 +77,8 @@ checks the download against the release's `SHA256SUMS` and installs:
   and would replace a per-user upstream install, so the script refuses to run while one is
   installed.
 
-Running it again replaces the previous install in place. It reports an upstream install it finds,
+Running it again replaces the previous install in place, though an app with a feed updates
+itself. It reports an upstream install it finds,
 such as the AUR package or the Homebrew cask, but never removes one. Remove an upstream install if
 you want only the fork's: it updates itself to upstream builds. Do not use
 `brew uninstall --zap`, which deletes `~/.t3/userdata`.

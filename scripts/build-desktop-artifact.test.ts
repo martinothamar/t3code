@@ -554,6 +554,46 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ),
   );
 
+  it.effect("gives a fork's preview releases its own feed, except unsigned macOS builds", () =>
+    Effect.gen(function* () {
+      const publishOf = (platform: "linux" | "mac" | "win", target: string, signed: boolean) =>
+        createBuildConfig(
+          platform,
+          target,
+          "0.1.1-preview.20261125.42",
+          signed,
+          false,
+          undefined,
+          undefined,
+        ).pipe(Effect.map((config) => config.publish));
+      const forkFeed = [
+        { provider: "github", owner: "martinothamar", repo: "t3code", releaseType: "release" },
+      ];
+
+      assert.deepStrictEqual(yield* publishOf("linux", "AppImage", false), forkFeed);
+      assert.deepStrictEqual(yield* publishOf("win", "nsis", false), forkFeed);
+      assert.deepStrictEqual(yield* publishOf("mac", "dmg", true), forkFeed);
+      assert.isNull(yield* publishOf("mac", "dmg", false));
+
+      const pullRequest = yield* createBuildConfig(
+        "linux",
+        "AppImage",
+        "0.1.1-pr.55.1",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+      assert.isNull(pullRequest.publish);
+    }).pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({ env: { GITHUB_REPOSITORY: "martinothamar/t3code" } }),
+        ),
+      ),
+    ),
+  );
+
   it.effect("names the Electron window class in the Linux desktop entry", () =>
     Effect.gen(function* () {
       const linux = yield* createBuildConfig(
