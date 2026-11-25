@@ -11,6 +11,7 @@ export const DirectPushApsEnvironment = Schema.Literals(["sandbox", "production"
 export type DirectPushApsEnvironment = typeof DirectPushApsEnvironment.Type;
 
 export const DirectPushRegisterDeviceInput = Schema.Struct({
+  /** Known only to the phone, so only it can replace or remove its registration. */
   deviceId: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
   token: TrimmedNonEmptyString,
@@ -34,7 +35,6 @@ export const DirectPushCredentialsInput = Schema.Struct({
 export type DirectPushCredentialsInput = typeof DirectPushCredentialsInput.Type;
 
 export const DirectPushDevice = Schema.Struct({
-  deviceId: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
   bundleId: TrimmedNonEmptyString,
   apsEnvironment: DirectPushApsEnvironment,
@@ -55,7 +55,6 @@ export type DirectPushStatus = typeof DirectPushStatus.Type;
 export const DirectPushTestResult = Schema.Struct({
   deliveries: Schema.Array(
     Schema.Struct({
-      deviceId: TrimmedNonEmptyString,
       label: TrimmedNonEmptyString,
       ok: Schema.Boolean,
       error: Schema.NullOr(Schema.String),

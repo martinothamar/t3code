@@ -65,6 +65,10 @@ it("signs an own-team build with its team and bundle id, keeping push but not up
   });
   expect(config.ios?.appleTeamId).toBe("ABCDE12345");
   expect(config.ios?.bundleIdentifier).toBe("com.example.t3code");
+  // The team's other T3 Code builds must not share this one's stored credentials.
+  expect(config.ios?.entitlements?.["keychain-access-groups"]).toEqual([
+    "$(AppIdentifierPrefix)com.example.t3code",
+  ]);
   expect(config.updates?.enabled).toBe(false);
   const pluginNames = config.plugins?.map((plugin) => (Array.isArray(plugin) ? plugin[0] : plugin));
   expect(pluginNames).toContain("expo-widgets");

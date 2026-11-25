@@ -89,6 +89,15 @@ async function readPushToken(): Promise<string | null> {
     : null;
 }
 
+// A Release build signed by Xcode carries sandbox tokens, which only its signature shows.
+async function readApsEnvironment() {
+  const signed = await Application.getIosPushNotificationServiceEnvironmentAsync().catch(
+    () => null,
+  );
+  if (signed === null) return resolveApsEnvironment(Constants.expoConfig?.extra?.appVariant);
+  return signed === "development" ? ("sandbox" as const) : ("production" as const);
+}
+
 async function registrationPayload(pushToken: string) {
   deviceId ??= await loadOrCreateAgentAwarenessDeviceId();
   const bundleId =
@@ -99,8 +108,7 @@ async function registrationPayload(pushToken: string) {
     label: Constants.deviceName?.trim() || "iOS device",
     token: pushToken,
     bundleId,
-    // The environment retries the other APNs host when a locally signed build guesses wrong.
-    apsEnvironment: resolveApsEnvironment(Constants.expoConfig?.extra?.appVariant),
+    apsEnvironment: await readApsEnvironment(),
   };
 }
 
@@ -213,16 +221,11 @@ export async function setDirectPushEnabled(next: boolean): Promise<DirectPushTog
   storedPreference = next;
   enabled = next;
   unregisteredThisLaunch.clear();
-  if (!next) {
-    const environments = [...registered.keys()];
-    registered.clear();
-    publish();
-    await unregisterFrom([...new Set([...environments, ...connectedDirectPushEnvironments()])]);
-    return "disabled";
-  }
+  if (!next) registered.clear();
   publish();
+  // The worker runs one pass at a time, so a registration in flight cannot land after this.
   requestSync();
-  return "enabled";
+  return next ? "enabled" : "disabled";
 }
 
 /** App-lifetime worker; a no-op in builds that use T3 Connect or cannot receive pushes. */

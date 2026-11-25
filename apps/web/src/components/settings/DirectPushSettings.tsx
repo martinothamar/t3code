@@ -154,7 +154,7 @@ function DirectPushRow(props: {
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={busy || !canWrite || value.devices.length === 0}
+                  disabled={busy || !canWrite}
                   onClick={() => void test()}
                 >
                   Send test
@@ -191,7 +191,7 @@ function DirectPushRow(props: {
         {value !== null && value.devices.length > 0 ? (
           <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
             {value.devices.map((device) => (
-              <li key={device.deviceId}>
+              <li key={`${device.label}:${device.registeredAt}`}>
                 <span className="text-foreground">{device.label}</span>
                 {device.lastError ? ` · Last delivery failed: ${device.lastError}` : null}
               </li>

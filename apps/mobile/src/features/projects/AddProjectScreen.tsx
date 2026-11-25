@@ -95,7 +95,7 @@ import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { uuidv4 } from "../../lib/uuid";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { suggestAppAccessForRemote } from "./suggestAppAccess";
-import { useOffersSandboxes } from "../sandboxes/useSandboxes";
+import { useSandboxHosts } from "../sandboxes/useSandboxes";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import {
   useRemoteConnectionStatus,
@@ -620,7 +620,11 @@ export function AddProjectSourceScreen(props: { readonly environmentId?: string 
   const messages = useMessages();
   const readiness = buildAddProjectRemoteSourceReadiness(discoveryState.data, messages);
   const gt = useGT();
-  const offersSandboxes = useOffersSandboxes();
+  const offersSandboxes = useSandboxHosts().some(
+    (host) =>
+      host.hostEnvironmentId === selectedEnvironment?.environmentId &&
+      host.snapshot.status === "available",
+  );
 
   return (
     <AddProjectShell title={gt("Add project")}>
@@ -761,7 +765,13 @@ export function AddProjectSourceScreen(props: { readonly environmentId?: string 
               />
             }
             isFirst
-            onPress={() => navigation.dispatch(StackActions.push("SettingsSandboxNew"))}
+            onPress={() =>
+              navigation.dispatch(
+                StackActions.push("SettingsSandboxNew", {
+                  host: selectedEnvironment?.environmentId,
+                }),
+              )
+            }
           />
         </ListSection>
       ) : null}

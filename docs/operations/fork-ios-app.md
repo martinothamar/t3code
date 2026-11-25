@@ -14,13 +14,13 @@ Development certificate, to sign with it rather than leave the choice to Expo.
 
 1. In Xcode → Settings → Accounts, sign in with the Apple ID of your team.
 2. Connect the iPhone, trust the Mac, and turn on Settings → Privacy & Security → Developer Mode.
-3. From `apps/mobile`, with your team ID (Membership details in the developer portal) and a bundle
-   identifier you own:
+3. From `apps/mobile`, with your team ID (Membership details in the developer portal), a bundle
+   identifier you own and the device's udid from `xcrun devicectl list devices`:
 
    ```sh
    T3CODE_IOS_TEAM_ID=ABCDE12345 \
    T3CODE_IOS_BUNDLE_ID=com.example.t3code \
-   vp run ios:release
+   vp run ios:release --device <device udid>
    ```
 
    Run it again to install a newer commit. Over-the-air updates are off for these builds, since
@@ -40,7 +40,7 @@ xcrun devicectl device install app --device <device udid> \
   ~/Library/Developer/Xcode/DerivedData/T3Code-*/Build/Products/Release-iphoneos/T3Code.app
 ```
 
-`xcrun devicectl list devices` shows the udid. Signing asks for the Mac login password to use the
+Signing asks for the Mac login password to use the
 certificate's key; answer Always Allow, since a denied prompt leaves a framework unsigned and the
 phone refuses the app. If `security find-identity -v -p codesigning` lists no valid identity after
 Xcode created the certificate, the keychain lacks Apple's current intermediate: add
@@ -51,8 +51,9 @@ Management.
 ## Push notifications
 
 1. In the developer portal, under Certificates, Identifiers & Profiles → Keys, create a key with
-   Apple Push Notifications service (APNs) enabled, and download its `.p8` file. Apple lets you
-   download it only once. One key serves every app of the team, sandbox and production.
+   Apple Push Notifications service (APNs) enabled, team scoped and for Sandbox & Production, and
+   download its `.p8` file. Apple lets you download it only once. A key limited to one environment
+   reaches only the builds signed for it: sandbox from Xcode, production from TestFlight.
 2. On each T3 server the phone should hear from, open Settings → General → Notifications →
    Phone notifications, and add the team ID, the key ID and the `.p8` file.
 3. In the app, open Settings → Notifications and turn on Device Notifications. The phone registers
@@ -65,7 +66,8 @@ The server notifies when a thread needs approval or input, fails, or completes, 
 as the relay. Completions wait five seconds, so a run followed at once by its continuation does not
 notify. Subagent approval waits do not notify yet.
 
-A locally built app reports production APNs but carries a sandbox token when Xcode signs it for
-development. The server retries the other APNs host when Apple answers `BadDeviceToken`, remembers
-the one that worked, and drops a phone that Apple rejects in both, or answers `Unregistered` for.
+The app reports the APNs environment it was signed for. If Apple still answers `BadDeviceToken`, the
+server tries the other host, remembers the one that worked, and drops a phone that Apple rejects in
+both, or answers `Unregistered` for. A phone's registration ends with the session that paired it,
+so revoking its access stops its notifications.
 The key and the registered phones live in the server's secret store, never in its settings.

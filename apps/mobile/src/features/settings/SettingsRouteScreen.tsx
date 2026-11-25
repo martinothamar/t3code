@@ -34,6 +34,7 @@ import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
 import { filterSettingsSections } from "./settings-search";
 import { usePaneRole } from "../../components/ui/Pane";
 import { useGT, useMessages } from "gt-react-native";
+import { directPushAvailable } from "../agent-awareness/directPushRegistration";
 import { useOffersSandboxes } from "../sandboxes/useSandboxes";
 
 export function SettingsRouteScreen() {
@@ -136,12 +137,7 @@ function ConfiguredSettingsRouteScreen() {
         },
         environmentsRow(gt("Environments"), Object.keys(savedConnectionsById).length),
         ...sandboxes,
-        {
-          id: "SettingsNotifications",
-          icon: "bell.badge",
-          label: gt("Notifications"),
-          target: "SettingsNotifications",
-        },
+        notificationsRow(gt("Notifications")),
       ]}
     />
   );
@@ -156,6 +152,7 @@ function LocalSettingsRouteScreen() {
       connections={[
         environmentsRow(gt("Environments"), Object.keys(savedConnectionsById).length),
         ...sandboxes,
+        ...(directPushAvailable() ? [notificationsRow(gt("Notifications"))] : []),
       ]}
     />
   );
@@ -183,6 +180,15 @@ function environmentsRow(label: string, count: number): SettingsListRow {
     value: `${count}`,
     valuePosition: "trailing",
     target: "SettingsEnvironments",
+  };
+}
+
+function notificationsRow(label: string): SettingsListRow {
+  return {
+    id: "SettingsNotifications",
+    icon: "bell.badge",
+    label,
+    target: "SettingsNotifications",
   };
 }
 

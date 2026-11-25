@@ -5,7 +5,7 @@ import { seedSandboxSettings } from "@t3tools/client-runtime/sandboxes/settings-
 import { findProjectByPath } from "@t3tools/client-runtime/state/projects";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { ProjectId, type EnvironmentId } from "@t3tools/contracts";
-import { StackActions } from "@react-navigation/native";
+import { CommonActions, StackActions } from "@react-navigation/native";
 import { useEffect, useEffectEvent, useRef } from "react";
 
 import { rootNavigationRef } from "../../lib/rootNavigation";
@@ -26,15 +26,23 @@ const routeEnvironmentId = (params: object | undefined): string | undefined => {
   return typeof value === "string" ? value : value?.[0];
 };
 
-/** A deleted Sandbox takes its environment along, so a view open on one goes home. */
+/** A deleted Sandbox takes its environment along: the open view goes home, ones below it go away. */
 function leaveRemovedEnvironments(removed: ReadonlyArray<string>) {
   if (!rootNavigationRef.isReady()) return;
-  const routes = rootNavigationRef.getRootState()?.routes ?? [];
-  const open = routes.some((route) => {
+  const state = rootNavigationRef.getRootState();
+  if (state === undefined) return;
+  const isRemoved = (route: { readonly params?: object | undefined }) => {
     const environmentId = routeEnvironmentId(route.params);
     return environmentId !== undefined && removed.includes(environmentId);
-  });
-  if (open) rootNavigationRef.dispatch(StackActions.popTo("Home"));
+  };
+  const focused = state.routes[state.index];
+  if (focused !== undefined && isRemoved(focused)) {
+    rootNavigationRef.dispatch(StackActions.popTo("Home"));
+    return;
+  }
+  const routes = state.routes.filter((route) => !isRemoved(route));
+  if (routes.length === state.routes.length) return;
+  rootNavigationRef.dispatch(CommonActions.reset({ ...state, routes, index: routes.length - 1 }));
 }
 
 /**

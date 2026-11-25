@@ -3339,7 +3339,8 @@ export const layerWsRpc = (
         [WS_METHODS.agentctlPullManifestRoots]: (input) =>
           sandboxes.pullManifestRoots(input.folders),
         [WS_METHODS.subscribeAgentctlSandboxes]: (_input) => sandboxes.changes,
-        [WS_METHODS.directPushRegisterDevice]: (input) => directPush.registerDevice(input),
+        [WS_METHODS.directPushRegisterDevice]: (input) =>
+          directPush.registerDevice(input, currentSessionId),
         [WS_METHODS.directPushUnregisterDevice]: (input) => directPush.unregisterDevice(input),
         [WS_METHODS.directPushGetStatus]: (_input) => directPush.getStatus,
         [WS_METHODS.directPushSetCredentials]: (input) => directPush.setCredentials(input),

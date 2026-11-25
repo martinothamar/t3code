@@ -116,28 +116,36 @@ function readReason(body: string): string | null {
 }
 
 const make = Effect.gen(function* () {
-  const sessions = new Map<string, NodeHttp2.ClientHttp2Session>();
+  const sessions = new Map<
+    string,
+    { readonly identity: string; readonly session: NodeHttp2.ClientHttp2Session }
+  >();
   const providerTokens = new Map<string, { readonly jwt: string; readonly issuedAtMs: number }>();
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
-      for (const session of sessions.values()) session.close();
+      for (const { session } of sessions.values()) session.close();
       sessions.clear();
     }),
   );
 
-  const sessionFor = (host: string): NodeHttp2.ClientHttp2Session => {
+  const sessionFor = (host: string, credentials: ApnsCredentials): NodeHttp2.ClientHttp2Session => {
+    const identity = `${credentials.teamId}:${credentials.keyId}`;
     const existing = sessions.get(host);
-    if (existing && !existing.closed && !existing.destroyed) return existing;
+    if (existing && !existing.session.closed && !existing.session.destroyed) {
+      if (existing.identity === identity) return existing.session;
+      // APNs binds a connection to the team that first pushed on it.
+      existing.session.close();
+    }
     const session = NodeHttp2.connect(host);
     // An idle session must not keep the server process alive.
     session.unref();
     const forget = () => {
-      if (sessions.get(host) === session) sessions.delete(host);
+      if (sessions.get(host)?.session === session) sessions.delete(host);
     };
     session.on("error", forget);
     session.on("close", forget);
     session.on("goaway", forget);
-    sessions.set(host, session);
+    sessions.set(host, { identity, session });
     return session;
   };
 
@@ -184,7 +192,7 @@ const make = Effect.gen(function* () {
           );
         let request: NodeHttp2.ClientHttp2Stream;
         try {
-          request = sessionFor(APNS_HOSTS[input.environment]).request({
+          request = sessionFor(APNS_HOSTS[input.environment], input.credentials).request({
             ":method": "POST",
             ":path": `/3/device/${input.token}`,
             authorization: `bearer ${jwt}`,

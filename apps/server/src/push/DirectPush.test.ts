@@ -3,6 +3,8 @@ import * as NodeCrypto from "node:crypto";
 
 import { assert, describe, it } from "@effect/vitest";
 import {
+  type AuthClientSession,
+  AuthSessionId,
   type DirectPushApsEnvironment,
   EnvironmentId,
   type OrchestrationV2ThreadShell,
@@ -21,6 +23,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as SessionStore from "../auth/SessionStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -29,6 +32,7 @@ import * as DirectPushApns from "./DirectPushApns.ts";
 
 const THREAD_ID = ThreadId.make("push-thread");
 const PROJECT_ID = ProjectId.make("push-project");
+const PHONE_SESSION = AuthSessionId.make("phone-session");
 const NOW = "2026-11-12T12:00:00.000Z";
 
 function shell(overrides: Partial<OrchestrationV2ThreadShell> = {}): OrchestrationV2ThreadShell {
@@ -92,6 +96,19 @@ const pem = (namedCurve: string) =>
     .privateKey.export({ format: "pem", type: "pkcs8" })
     .toString();
 
+const session = (sessionId: AuthSessionId): AuthClientSession => ({
+  sessionId,
+  subject: "one-time-token",
+  scopes: [],
+  method: "dpop-access-token",
+  client: { deviceType: "mobile" },
+  issuedAt: DateTime.makeUnsafe(NOW),
+  expiresAt: DateTime.makeUnsafe(NOW),
+  lastConnectedAt: null,
+  connected: false,
+  current: false,
+});
+
 interface Delivery {
   readonly environment: DirectPushApsEnvironment;
   readonly payload: DirectPushApns.ApnsAlertPayload;
@@ -112,6 +129,7 @@ const makeHarness = Effect.fn(function* (
     getOrCreateRandom: () => Effect.die("unused"),
   });
   const currentShell = yield* Ref.make<OrchestrationV2ThreadShell>(shell());
+  const activeSessions = yield* Ref.make<ReadonlyArray<AuthSessionId>>([PHONE_SESSION]);
   const deliveries: Array<Delivery> = [];
   const apns = DirectPushApns.DirectPushApns.of({
     send: (input) =>
@@ -131,6 +149,14 @@ const makeHarness = Effect.fn(function* (
               Effect.map((thread) => ({ snapshotSequence: 1, threads: [thread] })),
             ),
           streamDomainEvents: Stream.empty,
+        }),
+        Layer.mock(SessionStore.SessionStore)({
+          cookieName: "unused",
+          legacyCookieName: undefined,
+          listActive: () =>
+            Ref.get(activeSessions).pipe(
+              Effect.map((ids) => ids.map((sessionId) => session(sessionId))),
+            ),
         }),
         Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedSome(project) }),
         Layer.mock(ServerEnvironment.ServerEnvironment)({
@@ -153,17 +179,20 @@ const makeHarness = Effect.fn(function* (
         keyId: "KEY",
         privateKey: pem("prime256v1"),
       });
-      yield* service.registerDevice({
-        deviceId: "phone",
-        label: "iPhone",
-        token: "a".repeat(64),
-        bundleId: "net.example.t3code",
-        apsEnvironment,
-      });
+      yield* service.registerDevice(
+        {
+          deviceId: "phone",
+          label: "iPhone",
+          token: "a".repeat(64),
+          bundleId: "net.example.t3code",
+          apsEnvironment,
+        },
+        PHONE_SESSION,
+      );
     });
   const observe = (thread: OrchestrationV2ThreadShell) =>
     Ref.set(currentShell, thread).pipe(Effect.andThen(service.observeThread(THREAD_ID)));
-  return { service, deliveries, configure, observe };
+  return { service, deliveries, configure, observe, activeSessions };
 });
 
 describe("directPushAlertFor", () => {
@@ -227,6 +256,47 @@ describe("DirectPush", () => {
     }),
   );
 
+  it.effect("alerts a completion that settles during its hold, not one made while snoozed", () =>
+    Effect.gen(function* () {
+      const { service, deliveries, configure, observe } = yield* makeHarness();
+      yield* configure();
+      const completed = {
+        status: "completed",
+        latestRunCompletedAt: DateTime.makeUnsafe(NOW),
+      } as const;
+      yield* observe(shell());
+      yield* observe(shell(completed));
+      yield* observe(shell({ ...completed, settledOverride: "settled" }));
+      yield* TestClock.adjust("5 seconds");
+      yield* service.drain;
+      assert.equal(deliveries.length, 1);
+
+      yield* observe(shell());
+      yield* observe(
+        shell({
+          ...completed,
+          snoozedAt: DateTime.makeUnsafe("2026-11-12T11:00:00.000Z"),
+          snoozedUntil: DateTime.makeUnsafe("2026-11-12T13:00:00.000Z"),
+        }),
+      );
+      yield* TestClock.adjust("5 seconds");
+      yield* service.drain;
+      assert.equal(deliveries.length, 1);
+    }),
+  );
+
+  it.effect("stops sending to a phone whose session ended", () =>
+    Effect.gen(function* () {
+      const { service, deliveries, configure, activeSessions } = yield* makeHarness();
+      yield* configure();
+      yield* Ref.set(activeSessions, []);
+      assert.deepEqual((yield* service.sendTest).deliveries, []);
+      assert.equal(deliveries.length, 0);
+      yield* Ref.set(activeSessions, [PHONE_SESSION]);
+      assert.deepEqual((yield* service.getStatus).devices, []);
+    }),
+  );
+
   it.effect("alerts an approval at once and stays quiet without devices", () =>
     Effect.gen(function* () {
       const { service, deliveries, configure, observe } = yield* makeHarness();
@@ -262,9 +332,7 @@ describe("DirectPush", () => {
       );
       yield* configure("production");
       const result = yield* service.sendTest;
-      assert.deepEqual(result.deliveries, [
-        { deviceId: "phone", label: "iPhone", ok: true, error: null },
-      ]);
+      assert.deepEqual(result.deliveries, [{ label: "iPhone", ok: true, error: null }]);
       assert.deepEqual(
         deliveries.map((delivery) => delivery.environment),
         ["production", "sandbox"],
@@ -288,9 +356,7 @@ describe("DirectPush", () => {
       }));
       yield* configure();
       const result = yield* service.sendTest;
-      assert.deepEqual(result.deliveries, [
-        { deviceId: "phone", label: "iPhone", ok: false, error: "Unregistered" },
-      ]);
+      assert.deepEqual(result.deliveries, [{ label: "iPhone", ok: false, error: "Unregistered" }]);
       assert.deepEqual((yield* service.getStatus).devices, []);
     }),
   );

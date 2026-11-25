@@ -1,4 +1,5 @@
 import {
+  AuthSessionId,
   DirectPushDevice,
   DirectPushError,
   isListedThreadLineage,
@@ -26,10 +27,14 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as SessionStore from "../auth/SessionStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
-import { shouldPublishAgentAwarenessEvent } from "../relay/AgentAwarenessRelay.ts";
+import {
+  shouldPublishAgentAwarenessEvent,
+  snoozedCompletion,
+} from "../relay/AgentAwarenessRelay.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as DirectPushApns from "./DirectPushApns.ts";
 
@@ -46,7 +51,13 @@ const StoredCredentials = Schema.Struct({
 });
 type StoredCredentials = typeof StoredCredentials.Type;
 
-const StoredDevice = Schema.Struct({ ...DirectPushDevice.fields, token: Schema.String });
+const StoredDevice = Schema.Struct({
+  ...DirectPushDevice.fields,
+  deviceId: Schema.String,
+  token: Schema.String,
+  /** The session that registered it; the registration ends with the session. */
+  sessionId: AuthSessionId,
+});
 type StoredDevice = typeof StoredDevice.Type;
 const StoredDevices = Schema.Array(StoredDevice);
 
@@ -117,6 +128,7 @@ export class DirectPush extends Context.Service<
   {
     readonly registerDevice: (
       input: DirectPushRegisterDeviceInput,
+      sessionId: AuthSessionId,
     ) => Effect.Effect<void, DirectPushError>;
     readonly unregisterDevice: (
       input: DirectPushUnregisterDeviceInput,
@@ -137,6 +149,7 @@ export class DirectPush extends Context.Service<
 /** @public */
 export const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
+  const sessions = yield* SessionStore.SessionStore;
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* ProjectService.ProjectService;
@@ -178,23 +191,32 @@ export const make = Effect.gen(function* () {
 
   const status = (): DirectPushStatus => ({
     credentials: credentials && { teamId: credentials.teamId, keyId: credentials.keyId },
-    devices: devices.map(({ token: _token, ...device }) => device),
+    devices: devices.map(
+      ({ token: _token, deviceId: _deviceId, sessionId: _sessionId, ...device }) => device,
+    ),
   });
 
   const enabled = () => credentials !== null && devices.length > 0;
 
   const registerDevice: DirectPush["Service"]["registerDevice"] = Effect.fn(
     "DirectPush.registerDevice",
-  )(function* (input) {
+  )(function* (input, sessionId) {
     yield* Effect.annotateCurrentSpan({ "push.aps_environment": input.apsEnvironment });
     yield* writes.withPermits(1)(
       Effect.gen(function* () {
         const existing = devices.find((device) => device.deviceId === input.deviceId);
         const sameToken = existing?.token === input.token ? existing : undefined;
-        if (sameToken?.bundleId === input.bundleId && sameToken.label === input.label) return;
+        if (
+          sameToken?.bundleId === input.bundleId &&
+          sameToken.label === input.label &&
+          sameToken.sessionId === sessionId
+        ) {
+          return;
+        }
         // Keep the environment a delivery learned: the app keeps reporting its build's guess.
         const device: StoredDevice = {
           ...input,
+          sessionId,
           apsEnvironment: sameToken?.apsEnvironment ?? input.apsEnvironment,
           registeredAt: sameToken?.registeredAt ?? DateTime.formatIso(yield* DateTime.now),
           lastError: null,
@@ -345,13 +367,39 @@ export const make = Effect.gen(function* () {
       )
       .pipe(Effect.ignore);
 
+  // Checked at each send rather than on revocation events, which do not cover expiry. A failed
+  // check sends nothing: the phone's access may have been revoked.
+  const authorizedDevices = Effect.gen(function* () {
+    const active = new Set(
+      (yield* sessions.listActive()).map((session): string => session.sessionId),
+    );
+    return yield* writes.withPermits(1)(
+      Effect.gen(function* () {
+        const kept = devices.filter((device) => active.has(device.sessionId));
+        if (kept.length < devices.length) {
+          yield* Effect.logInfo("direct push dropped devices whose session ended", {
+            devices: devices.length - kept.length,
+          });
+          yield* saveDevices(kept).pipe(Effect.ignore);
+        }
+        return kept;
+      }),
+    );
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("direct push could not check its devices' sessions", { cause }).pipe(
+        Effect.as<ReadonlyArray<StoredDevice>>([]),
+      ),
+    ),
+  );
+
   const broadcast = Effect.fn("DirectPush.broadcast")(function* (
     payload: DirectPushApns.ApnsAlertPayload,
   ) {
     const activeCredentials = credentials;
-    if (activeCredentials === null) return [];
+    if (activeCredentials === null || devices.length === 0) return [];
     return yield* Effect.forEach(
-      devices,
+      yield* authorizedDevices,
       (device) =>
         deliver(activeCredentials, device, payload).pipe(
           Effect.tap((outcome) => recordOutcome(device, outcome)),
@@ -378,7 +426,6 @@ export const make = Effect.gen(function* () {
     });
     return {
       deliveries: results.map(({ device, outcome }) => ({
-        deviceId: device.deviceId,
         label: device.label,
         ok: outcome.kind === "ok",
         error: outcome.kind === "ok" ? null : outcome.error,
@@ -403,17 +450,21 @@ export const make = Effect.gen(function* () {
     ).pipe(Effect.asVoid);
 
   // The per-event path below is untraced: it runs for every awareness-relevant domain event.
-  const readAwareness = Effect.fnUntraced(function* (threadId: ThreadId) {
+  const readAwareness = Effect.fnUntraced(function* (
+    threadId: ThreadId,
+    options?: { readonly ignoreSettled?: boolean },
+  ) {
     const thread = (yield* threads.getAgentAwarenessSnapshot(threadId)).threads[0] ?? null;
     if (thread !== null && !isListedThreadLineage(thread.lineage)) return undefined;
     if (thread === null || thread.archivedAt !== null) return null;
     const project = yield* projects.getById(thread.projectId);
     if (Option.isNone(project)) return null;
-    return projectThreadAwarenessV2({
+    const state = projectThreadAwarenessV2({
       environmentId: yield* serverEnvironment.getEnvironmentId,
       project: project.value,
-      thread,
+      thread: options?.ignoreSettled ? { ...thread, settledOverride: null } : thread,
     });
+    return snoozedCompletion(thread, state) ? null : state;
   });
 
   const lastPhase = new Map<ThreadId, AgentAwarenessPhase>();
@@ -426,7 +477,7 @@ export const make = Effect.gen(function* () {
     if (holds.get(threadId) !== holdId) return;
     holds.delete(threadId);
     if (!enabled()) return;
-    const state = yield* readAwareness(threadId);
+    const state = yield* readAwareness(threadId, { ignoreSettled: true });
     if (state?.phase === "completed") yield* alert(state);
   });
 
@@ -440,6 +491,13 @@ export const make = Effect.gen(function* () {
       const state = yield* readAwareness(threadId);
       if (state === undefined) return;
       if (state === null) {
+        // As on the relay, a completion that settles during its hold still alerts.
+        if (
+          holds.has(threadId) &&
+          (yield* readAwareness(threadId, { ignoreSettled: true }))?.phase === "completed"
+        ) {
+          return;
+        }
         lastPhase.delete(threadId);
         holds.delete(threadId);
         return;
@@ -485,7 +543,9 @@ export const make = Effect.gen(function* () {
   return DirectPush.of({
     registerDevice,
     unregisterDevice,
-    getStatus: Effect.sync(status),
+    getStatus: Effect.suspend(() => (devices.length === 0 ? Effect.void : authorizedDevices)).pipe(
+      Effect.map(status),
+    ),
     setCredentials,
     clearCredentials,
     sendTest,
