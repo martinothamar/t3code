@@ -29,36 +29,7 @@ cpus=$(( $(sysctl -n hw.ncpu) / 2 )); (( cpus >= 4 )) || cpus=4
 memory_gb=$(( $(sysctl -n hw.memsize) / 1073741824 / 2 )); (( memory_gb <= 16 )) || memory_gb=16
 tart set "$vm" --cpu "$cpus" --memory $(( memory_gb * 1024 )) --disk-size 120
 
-echo "Starting $vm to install the runner..."
-tart run --no-graphics "$vm" >/dev/null 2>&1 &
-ip="$(tart ip --wait 180 "$vm")"
-vm_ssh() {
-  sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -o LogLevel=ERROR "admin@$ip" "$@"
-}
-until vm_ssh true 2>/dev/null; do sleep 2; done
-
-token="$(gh api -X POST "repos/$repo/actions/runners/registration-token" --jq .token)"
-version="$(gh api repos/actions/runner/releases/latest --jq .tag_name)"
-vm_ssh bash -s -- "$repo" "$token" "${version#v}" "$label" <<'EOF'
-set -euo pipefail
-repo=$1 token=$2 version=$3 label=$4
-# The x64 build runs x64 Node.
-/usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null ||
-  echo admin | sudo -S -p '' softwareupdate --install-rosetta --agree-to-license
-mkdir -p ~/actions-runner && cd ~/actions-runner
-if [[ ! -f .runner ]]; then
-  curl -fsSL "https://github.com/actions/runner/releases/download/v$version/actions-runner-osx-arm64-$version.tar.gz" | tar xz
-  ./config.sh --url "https://github.com/$repo" --token "$token" --name mac-runner \
-    --labels "$label" --unattended --replace
-fi
-# A LaunchAgent, so the runner starts in the VM's logged-in session, where the launch check can
-# open the app.
-[[ -f .service ]] || ./svc.sh install
-EOF
-tart stop "$vm" >/dev/null
-wait
-
+# The VM runs headless while this user is logged in, and restarts if it stops.
 mkdir -p "$(dirname "$plist")"
 cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -73,6 +44,42 @@ cat > "$plist" <<EOF
 </dict></plist>
 EOF
 launchctl bootstrap "gui/$(id -u)" "$plist"
+
+echo "Installing the runner in $vm..."
+ip="$(tart ip --wait 180 "$vm")"
+vm_ssh() {
+  sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -o LogLevel=ERROR "admin@$ip" "$@"
+}
+until vm_ssh true 2>/dev/null; do sleep 2; done
+
+token="$(gh api -X POST "repos/$repo/actions/runners/registration-token" --jq .token)"
+version="$(gh api repos/actions/runner/releases/latest --jq .tag_name)"
+vm_ssh bash -s -- "$repo" "$token" "${version#v}" "$label" <<'EOF'
+set -euo pipefail
+repo=$1 token=$2 version=$3 label=$4
+as_root() { echo admin | sudo -S -p '' "$@"; }
+# The x64 build runs x64 Node.
+/usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null ||
+  as_root softwareupdate --install-rosetta --agree-to-license
+mkdir -p ~/actions-runner && cd ~/actions-runner
+if [[ ! -f .runner ]]; then
+  curl -fsSL "https://github.com/actions/runner/releases/download/v$version/actions-runner-osx-arm64-$version.tar.gz" | tar xz
+  ./config.sh --url "https://github.com/$repo" --token "$token" --name mac-runner \
+    --labels "$label" --unattended --replace
+fi
+# A LaunchAgent of the VM's auto-login session, where the launch check can open the app.
+agent=(~/Library/LaunchAgents/actions.runner.*.plist)
+if [[ ! -f "${agent[0]}" ]]; then
+  rm -f .service
+  ./svc.sh install
+  agent=(~/Library/LaunchAgents/actions.runner.*.plist)
+fi
+until who | grep -q "^$USER *console"; do sleep 2; done
+as_root launchctl bootout "gui/$(id -u)" "${agent[0]}" 2>/dev/null || true
+as_root launchctl bootstrap "gui/$(id -u)" "${agent[0]}"
+sync
+EOF
 
 gh api -X PUT "repos/$repo/actions/permissions/fork-pr-contributor-approval" \
   -f approval_policy=all_external_contributors >/dev/null ||
