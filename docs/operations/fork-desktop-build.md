@@ -76,8 +76,9 @@ there instead; an Apple Silicon Mac builds the x64 app too. Unset it to go back 
 The repository is public, so the runner lives in a virtual machine that holds nothing else, and
 only Fork release, which only people with write access can start, names its label. On the Mac:
 
-1. Install [Tart](https://tart.run) (`brew install cirruslabs/cli/tart`), clone Cirrus Labs' newest
-   `macos-*-base` image, such as `tart clone ghcr.io/cirruslabs/macos-tahoe-base:latest mac-runner`,
+1. Install [Tart](https://github.com/openai/tart) (`brew install openai/tools/tart`), clone a
+   Cirrus Labs `macos-*-base` image no newer than the Mac's macOS, such as
+   `tart clone ghcr.io/cirruslabs/macos-tahoe-base:latest mac-runner`,
    and give it room: `tart set mac-runner --cpu 6 --memory 12288 --disk-size 120`.
 2. `tart run mac-runner`. The VM logs in as `admin` (password `admin`); change the password. In it:
    - `softwareupdate --install-rosetta --agree-to-license`, for the x64 build, and
