@@ -96,12 +96,13 @@ while true; do
           -o LogLevel=ERROR -o ServerAliveInterval=30 "admin@$ip" "$@"
       }
       for _ in $(seq 90); do vm_ssh true 2>/dev/null && break; sleep 2; done
-      jit="$(gh api -X POST "repos/$repo/actions/runners/generate-jitconfig" -f name="$vm" \
-        -F runner_group_id=1 -f "labels[]=$label" --jq .encoded_jit_config)" &&
-        # The logged-in session, where the launch check can open the app.
-        vm_ssh "until who | grep -q '^admin *console'; do sleep 2; done
-          echo admin | sudo -S -p '' launchctl asuser \$(id -u admin) sudo -u admin \
-            /Users/admin/actions-runner/run.sh --jitconfig '$jit'" ||
+      # The runner works in the logged-in session, where the launch check can open the app.
+      vm_ssh "for _ in \$(seq 150); do who | grep -q '^admin *console' && exit 0; sleep 2; done
+        exit 1" &&
+        jit="$(gh api -X POST "repos/$repo/actions/runners/generate-jitconfig" -f name="$vm" \
+          -F runner_group_id=1 -f "labels[]=$label" --jq .encoded_jit_config)" &&
+        vm_ssh "echo admin | sudo -S -p '' launchctl asuser \$(id -u admin) sudo -u admin \
+          /Users/admin/actions-runner/run.sh --jitconfig '$jit'" ||
         sleep 30
     fi
     tart stop "$vm" >/dev/null 2>&1
@@ -127,17 +128,16 @@ cat > "$agent" <<EOF
   <key>StandardErrorPath</key><string>$support/loop.log</string>
 </dict></plist>
 EOF
-launchctl bootstrap "gui/$(id -u)" "$agent"
-
+# A pull request's workflow could name the runner's label, so none may run without approval.
 gh api -X PUT "repos/$repo/actions/permissions/fork-pr-contributor-approval" \
-  -f approval_policy=all_external_contributors >/dev/null ||
-  echo "Set Settings → Actions → General → fork pull request approval to all external contributors." >&2
-gh variable set FORK_MAC_RUNNER --repo "$repo" --body "$label"
+  -f approval_policy=all_external_contributors >/dev/null
+launchctl bootstrap "gui/$(id -u)" "$agent"
 
 echo "Waiting for the first runner to come online..."
 for _ in $(seq 60); do
   if [[ -n "$(gh api "repos/$repo/actions/runners" \
     --jq '.runners[] | select(.name | startswith("mac-runner-")) | select(.status == "online") | .name')" ]]; then
+    gh variable set FORK_MAC_RUNNER --repo "$repo" --body "$label"
     echo "The runner is online. Fork release now builds the macOS apps on this Mac."
     echo "Its log: $support/loop.log"
     exit 0

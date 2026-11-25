@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import {
   buildEnvironment,
   cacheDirectory,
+  followsAnotherFeed,
   localBuildVersion,
   parseArguments,
   parseChecksums,
@@ -15,6 +16,19 @@ import {
   renderLauncher,
   replace,
 } from "./install-desktop.ts";
+
+describe("followsAnotherFeed", () => {
+  it("tells this repository's installs from upstream's and other forks'", () => {
+    const feed = (owner: string, repo = "t3code") =>
+      `owner: ${owner}\nrepo: ${repo}\nprovider: github\nupdaterCacheDirName: t3code-updater\n`;
+    expect(followsAnotherFeed(feed("martinothamar"))).toBe(false);
+    expect(followsAnotherFeed(feed("pingdotgg"))).toBe(true);
+    expect(followsAnotherFeed(feed("someone"))).toBe(true);
+    expect(followsAnotherFeed(feed("martinothamar", "t3code-other"))).toBe(true);
+    // Earlier fork builds carry no feed.
+    expect(followsAnotherFeed("")).toBe(false);
+  });
+});
 
 describe("releaseAssetNames", () => {
   it("names each platform's build the way electron-builder writes it", () => {

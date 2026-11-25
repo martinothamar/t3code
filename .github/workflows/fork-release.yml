@@ -237,12 +237,13 @@ jobs:
             resource_key: win32-arm64
             cli_archive: false
     uses: ./.github/workflows/release-desktop.yml
+    # Only the macOS builds sign.
     secrets:
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      CSC_LINK: ${{ matrix.platform == 'mac' && secrets.CSC_LINK || '' }}
+      CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.CSC_KEY_PASSWORD || '' }}
+      APPLE_API_KEY: ${{ matrix.platform == 'mac' && secrets.APPLE_API_KEY || '' }}
+      APPLE_API_KEY_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+      APPLE_API_ISSUER: ${{ matrix.platform == 'mac' && secrets.APPLE_API_ISSUER || '' }}
     with:
       version: ${{ needs.preflight.outputs.version }}
       ref: ${{ github.sha }}
@@ -353,7 +354,9 @@ jobs:
           set -euo pipefail
           # The apps update to the latest release only when it is newer, so publishing an older
           # build as latest would hold every install back until the next release.
-          latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || true)"
+          if ! latest="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>latest-error.txt)"; then
+            grep -q "release not found" latest-error.txt || { cat latest-error.txt >&2; exit 1; }
+          fi
           latest="${latest#v}"
           if [[ -n "$latest" && "$(printf '%s\n%s\n' "$latest" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ]]; then
             echo "The latest release, $latest, is newer than $VERSION; build and test main again." >&2

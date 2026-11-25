@@ -185,6 +185,14 @@ function readIfExists(file: string): string {
   return NodeFS.existsSync(file) ? NodeFS.readFileSync(file, "utf8") : "";
 }
 
+/** An app's `app-update.yml` naming another repository updates it away from this one's builds. */
+export function followsAnotherFeed(appUpdateYml: string): boolean {
+  if (!appUpdateYml) return false;
+  const field = (name: string) =>
+    new RegExp(`^${name}: *['"]?([^'"\\s]+)`, "m").exec(appUpdateYml)?.[1];
+  return `${field("owner")}/${field("repo")}` !== RELEASE_REPOSITORY;
+}
+
 function succeeds(command: string, args: ReadonlyArray<string>): string | undefined {
   const result = NodeChildProcess.spawnSync(command, args, { encoding: "utf8" });
   return result.status === 0 ? result.stdout : undefined;
@@ -501,12 +509,11 @@ function findUpstreamInstalls(): Array<UpstreamInstall> {
     const installedCasks = new Set(succeeds("brew", ["list", "--cask", "-1"])?.split("\n"));
     const casks = Object.keys(UPSTREAM_CASKS).filter((cask) => installedCasks.has(cask));
     const caskApps = new Set(casks.map((cask) => UPSTREAM_CASKS[cask]));
-    // Upstream builds follow upstream's update feed; a signed fork build follows the fork's.
     const apps = NodeFS.readdirSync("/Applications").filter(
       (app) =>
         app.startsWith("T3 Code") &&
         !caskApps.has(app) &&
-        /^owner: pingdotgg$/m.test(
+        followsAnotherFeed(
           readIfExists(NodePath.join("/Applications", app, "Contents/Resources/app-update.yml")),
         ),
     );
@@ -543,7 +550,7 @@ function findUpstreamInstalls(): Array<UpstreamInstall> {
         "resources",
         "app-update.yml",
       );
-      if (!NodeFS.existsSync(updateFeed)) return [];
+      if (!followsAnotherFeed(readIfExists(updateFeed))) return [];
       // The per-user installer only uninstalls a per-user install with its app ID.
       const perUser = PSPath?.includes("HKEY_CURRENT_USER") ?? false;
       return [

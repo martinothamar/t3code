@@ -30,7 +30,8 @@ reach Sandboxes, and an app always gets the server built with it.
 ## Updates
 
 The apps update themselves from this repository's releases: each release carries electron-updater's
-manifests (`latest.yml`, `latest-mac.yml`, `latest-linux.yml`, `latest-linux-arm64.yml`), and an
+manifests (`latest.yml`, `latest-linux.yml`, `latest-linux-arm64.yml`, and `latest-mac.yml` when the
+macOS apps are signed), and an
 installed app offers
 the latest release once it is newer, then downloads it and restarts when you choose. Reconnecting
 to an SSH host afterwards installs the matching server there. The release refuses a build older
