@@ -73,8 +73,9 @@ rm -rf ~/actions-runner
 mkdir -p ~/actions-runner && cd ~/actions-runner
 curl -fsSL "https://github.com/actions/runner/releases/download/v$version/actions-runner-osx-arm64-$version.tar.gz" | tar xz
 sync
-as_root shutdown -h now
 EOF
+# Shutting down drops the connection, so ssh fails here.
+vm_ssh "echo admin | sudo -S -p '' shutdown -h now" || true
 wait "$pid" || true
 
 mkdir -p "$support"
