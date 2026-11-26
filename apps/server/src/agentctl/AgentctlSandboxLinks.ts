@@ -59,7 +59,10 @@ const make = Effect.gen(function* () {
         const renewAt = DateTime.subtractDuration(existing.value.expiresAt, RENEW_BEFORE);
         if (DateTime.isGreaterThan(renewAt, yield* DateTime.now)) {
           if (!existing.value.urls.includes(new URL(httpBaseUrl).origin)) {
-            yield* links.relocate(environmentId, [httpBaseUrl], { ownForward: true });
+            yield* links.relocate(environmentId, [httpBaseUrl], {
+              ownForward: true,
+              linkedAt: existing.value.linkedAt,
+            });
           }
           return;
         }
@@ -75,7 +78,11 @@ const make = Effect.gen(function* () {
           expectedEnvironmentId: environmentId,
           expectedLabel: name,
         },
-        { ownForward: true },
+        // Only the link this checked: one the user made meanwhile is theirs.
+        {
+          ownForward: true,
+          replacing: Option.isSome(existing) ? existing.value.linkedAt : null,
+        },
       );
       yield* sandboxes.recordSandboxLink(name, {
         environmentId,
@@ -103,7 +110,7 @@ const make = Effect.gen(function* () {
         if (current.get(name) === record.environmentId) continue;
         const existing = yield* links.get(record.environmentId);
         if (Option.isSome(existing) && isOwn(record, existing.value)) {
-          yield* links.unlink(record.environmentId);
+          yield* links.unlink(record.environmentId, { linkedAt: existing.value.linkedAt });
         }
         yield* sandboxes.recordSandboxLink(name, null);
       }

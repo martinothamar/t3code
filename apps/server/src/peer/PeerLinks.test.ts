@@ -638,6 +638,41 @@ it.effect("moves a link to the peer's new address, keeping its token, and only t
       yield* a.links.relocate(box.environmentId, [b.url]).pipe(Effect.flip);
       expect(Option.getOrThrow(yield* a.links.get(box.environmentId)).urls).toEqual(after.urls);
       expect(yield* a.links.relocate(laptop.environmentId, [b.url])).toBe(false);
+
+      // Linking in the background replaces only the link it checked, so one made meanwhile stays.
+      yield* Ref.set(b.descriptor, box);
+      const current = Option.getOrThrow(yield* a.links.get(box.environmentId));
+      const again = yield* b.auth.issuePairingCredential();
+      const refused = yield* a.links
+        .link(
+          {
+            url: b.url,
+            pairingCode: again.credential,
+            access: "auto",
+            expectedEnvironmentId: box.environmentId,
+          },
+          { replacing: null },
+        )
+        .pipe(Effect.flip);
+      expect(refused.message).toContain("linked again meanwhile");
+      expect(Option.getOrThrow(yield* a.links.get(box.environmentId)).linkedAt).toEqual(
+        current.linkedAt,
+      );
+
+      // A caller that checked an earlier link changes nothing, as after the peer was re-paired.
+      const earlier = { linkedAt: DateTime.subtractDuration(before.linkedAt, Duration.seconds(1)) };
+      expect(
+        yield* a.links.relocate(box.environmentId, [forward], { ownForward: true, ...earlier }),
+      ).toBe(false);
+      expect(Option.getOrThrow(yield* a.links.get(box.environmentId)).urls).toEqual(after.urls);
+      expect(yield* a.links.unlink(box.environmentId, earlier)).toEqual({
+        removed: false,
+        endedThere: false,
+      });
+      expect(Option.isSome(yield* a.links.get(box.environmentId))).toBe(true);
+      expect(
+        (yield* a.links.unlink(box.environmentId, { linkedAt: before.linkedAt })).removed,
+      ).toBe(true);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
