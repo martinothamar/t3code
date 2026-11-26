@@ -163,9 +163,22 @@ function makeService(input: {
   readonly readBindings?: ReturnType<
     IssueTrackerBindings.IssueTrackerBindingsRepository["Service"]["list"]
   >;
-  /** The checkouts in each workspace folder, by its root. */
+  /** The repositories each workspace folder tracks, by its root. */
   readonly workspaces?: Record<string, ReadonlyArray<RepositoryIdentity>>;
 }) {
+  const checkouts = Object.values(input.workspaces ?? {}).flat();
+  const projects = input.projects.map((each) => {
+    const tracked = input.workspaces?.[each.workspaceRoot];
+    return tracked === undefined
+      ? each
+      : {
+          ...each,
+          trackedFolders: tracked.map((checkout) => ({
+            path: checkout.rootPath!,
+            name: checkout.rootPath!.split("/").at(-1)!,
+          })),
+        };
+  });
   return IssueService.IssueService.pipe(
     Effect.provide(
       IssueService.layer.pipe(
@@ -188,15 +201,13 @@ function makeService(input: {
               IssueTrackerRegistry.fromTrackers(input.trackers),
             ),
             Layer.mock(ProjectService.ProjectService)({
-              listShells: () => Effect.succeed(input.projects),
+              listShells: () => Effect.succeed(projects),
               getShell: (projectId) =>
-                Effect.succeed(
-                  Option.fromNullishOr(input.projects.find((p) => p.id === projectId)),
-                ),
+                Effect.succeed(Option.fromNullishOr(projects.find((p) => p.id === projectId))),
             }),
             Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
-              resolve: () => Effect.succeed(null),
-              resolveWorkspace: (cwd) => Effect.succeed(input.workspaces?.[cwd] ?? []),
+              resolve: (cwd) =>
+                Effect.succeed(checkouts.find((checkout) => checkout.rootPath === cwd) ?? null),
             }),
           ),
         ),

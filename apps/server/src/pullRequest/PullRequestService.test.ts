@@ -19,7 +19,7 @@ import type {
   PullRequestReviewerCapabilities,
 } from "@t3tools/contracts";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts/settings";
-import type { ServerSettings } from "@t3tools/contracts";
+import type { RepositoryIdentity, ServerSettings } from "@t3tools/contracts";
 import * as ServerSettingsService from "../serverSettings.ts";
 import { PullRequestOperationError } from "@t3tools/contracts";
 
@@ -327,8 +327,24 @@ function makeService(input: {
   readonly resolveHandle?: SourceControlProviderRegistry.SourceControlProviderRegistry["Service"]["resolveHandle"];
   readonly resolveRepositoryIdentity?: RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]["resolve"];
   readonly onProjectRead?: () => void;
-  readonly resolveWorkspaceRepositories?: RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]["resolveWorkspace"];
+  /** The repositories a folder project tracks, by its root. */
+  readonly workspaceRepositories?: (workspaceRoot: string) => ReadonlyArray<RepositoryIdentity>;
 }) {
+  const projects = input.projects.map((each) => {
+    const tracked = input.workspaceRepositories?.(each.workspaceRoot) ?? [];
+    return tracked.length === 0
+      ? each
+      : {
+          ...each,
+          trackedFolders: tracked.map((checkout) => ({
+            path: checkout.rootPath!,
+            name: checkout.rootPath!.split("/").at(-1)!,
+          })),
+        };
+  });
+  const checkouts = projects.flatMap(
+    (each) => input.workspaceRepositories?.(each.workspaceRoot) ?? [],
+  );
   // Build in the test scope; per-call Effect.provide would close the marks database on service acquisition.
   return Effect.flatMap(
     Layer.build(
@@ -353,19 +369,22 @@ function makeService(input: {
           listShells: (options) =>
             Effect.sync(() => {
               input.onProjectRead?.();
-              return input.projects.filter(
+              return projects.filter(
                 (project) => options?.projectIds?.includes(project.id) ?? true,
               );
             }),
           getShell: (projectId) =>
             Effect.sync(() => {
               input.onProjectRead?.();
-              return Option.fromNullishOr(input.projects.find((p) => p.id === projectId));
+              return Option.fromNullishOr(projects.find((p) => p.id === projectId));
             }),
         }),
         Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
-          resolve: input.resolveRepositoryIdentity ?? (() => Effect.succeed(null)),
-          resolveWorkspace: input.resolveWorkspaceRepositories ?? (() => Effect.succeed([])),
+          resolve: (cwd, options) => {
+            const checkout = checkouts.find((each) => each.rootPath === cwd);
+            if (checkout !== undefined) return Effect.succeed(checkout);
+            return input.resolveRepositoryIdentity?.(cwd, options) ?? Effect.succeed(null);
+          },
         }),
         SourceControlRateLimit.layer,
         PullRequestFilesViewed.layer.pipe(Layer.provide(SqlitePersistence.layerMemory)),
@@ -389,15 +408,13 @@ it.effect("serves a workspace folder's repositories from their own checkouts", (
     );
     const service = yield* makeService({
       projects: [project({ id: "sandbox", title: "sandbox", workspaceRoot: "/workspace" })],
-      resolveWorkspaceRepositories: (cwd) =>
-        Effect.succeed(
-          cwd === "/workspace"
-            ? repositories.map((identity) => ({
-                ...identity,
-                rootPath: `/workspace/${identity.displayName!.split("/")[1]}`,
-              }))
-            : [],
-        ),
+      workspaceRepositories: (cwd) =>
+        cwd === "/workspace"
+          ? repositories.map((identity) => ({
+              ...identity,
+              rootPath: `/workspace/${identity.displayName!.split("/")[1]}`,
+            }))
+          : [],
       providers: [
         fakePullRequestProvider(SourceControlProviderKind.make("github"), {
           listChangeRequests: ({ cwd, repository }) =>
@@ -504,13 +521,11 @@ it.effect("leaves out the repositories another connection lists", () =>
     );
     const service = yield* makeService({
       projects: [project({ id: "sandbox", title: "sandbox", workspaceRoot: "/workspace" })],
-      resolveWorkspaceRepositories: () =>
-        Effect.succeed(
-          repositories.map((identity) => ({
-            ...identity,
-            rootPath: `/workspace/${identity.displayName!.split("/")[1]}`,
-          })),
-        ),
+      workspaceRepositories: () =>
+        repositories.map((identity) => ({
+          ...identity,
+          rootPath: `/workspace/${identity.displayName!.split("/")[1]}`,
+        })),
       providers: [
         fakePullRequestProvider(SourceControlProviderKind.make("github"), {
           listChangeRequests: ({ repository }) =>
@@ -548,13 +563,11 @@ it.effect("searches filter options only in the repositories its listing reads", 
     );
     const service = yield* makeService({
       projects: [project({ id: "sandbox", title: "sandbox", workspaceRoot: "/workspace" })],
-      resolveWorkspaceRepositories: () =>
-        Effect.succeed(
-          repositories.map((identity) => ({
-            ...identity,
-            rootPath: `/workspace/${identity.displayName!.split("/")[1]}`,
-          })),
-        ),
+      workspaceRepositories: () =>
+        repositories.map((identity) => ({
+          ...identity,
+          rootPath: `/workspace/${identity.displayName!.split("/")[1]}`,
+        })),
       providers: [
         fakePullRequestProvider(SourceControlProviderKind.make("github"), {
           listRepositoryLabels: ({ repository }) =>
@@ -587,12 +600,8 @@ it.effect(
       });
       const service = yield* makeService({
         projects: [project({ id: "sandbox", title: "sandbox", workspaceRoot: "/workspace" }), app],
-        resolveWorkspaceRepositories: (cwd) =>
-          Effect.succeed(
-            cwd === "/workspace"
-              ? [{ ...app.repositoryIdentity!, rootPath: "/workspace/app" }]
-              : [],
-          ),
+        workspaceRepositories: (cwd) =>
+          cwd === "/workspace" ? [{ ...app.repositoryIdentity!, rootPath: "/workspace/app" }] : [],
         providers: [
           fakePullRequestProvider(SourceControlProviderKind.make("github"), {
             listChangeRequests: () =>

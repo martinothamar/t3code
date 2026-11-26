@@ -52,6 +52,7 @@ import { parseUrl } from "@t3tools/shared/url";
 import * as IssueTrackerBindings from "../persistence/IssueTrackerBindings.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import { folderRepositories } from "../project/folderRepositories.ts";
 import { sourceControlDefinitions } from "../sourceControl/sourceControlDefinitions.ts";
 import * as IssueTrackerRegistry from "./IssueTrackerRegistry.ts";
 
@@ -214,6 +215,15 @@ const make = Effect.gen(function* () {
   const registry = yield* IssueTrackerRegistry.IssueTrackerRegistry;
   const projects = yield* ProjectService.ProjectService;
   const repositoryIdentities = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+  const readFolderRepositories = (
+    project: Pick<OrchestrationProjectShell, "workspaceRoot" | "trackedFolders">,
+  ) =>
+    folderRepositories(project).pipe(
+      Effect.provideService(
+        RepositoryIdentityResolver.RepositoryIdentityResolver,
+        repositoryIdentities,
+      ),
+    );
   const bindings = yield* IssueTrackerBindings.IssueTrackerBindingsRepository;
 
   const resolveStandaloneBindings = (
@@ -250,7 +260,7 @@ const make = Effect.gen(function* () {
         repositoryIdentity !== null
           ? Effect.succeed(resolveGitHostBindings(repositoryIdentity, project.workspaceRoot))
           : // A folder that is no repository reads the trackers of the checkouts in it.
-            repositoryIdentities.resolveWorkspace(project.workspaceRoot).pipe(
+            readFolderRepositories(project).pipe(
               Effect.map((checkouts) => {
                 const seen = new Set<string>();
                 return checkouts.flatMap((checkout) =>

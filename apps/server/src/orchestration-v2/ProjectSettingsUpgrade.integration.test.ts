@@ -114,7 +114,6 @@ const seedV1Database = Effect.gen(function* () {
 
 const unusedEnrichment = {
   repositoryIdentity: null,
-  workspaceRepositories: [],
   faviconPath: null,
   repositoryIdentityResolved: false,
 };

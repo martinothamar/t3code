@@ -44,6 +44,7 @@ import { deletedProjectOverridePatch } from "../provider/ProjectSettingsOverride
 import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
+import { enrichProjectShell } from "./folderRepositories.ts";
 import { makeIsWorktreeContainer } from "./worktreeContainer.ts";
 import { isWithinRoot } from "../workspace/KnownWorkspaces.ts";
 import {
@@ -835,9 +836,10 @@ export const make = Effect.gen(function* () {
   );
 
   const enrichShell = (shell: OrchestrationProjectShell) =>
-    projectEnrichment
-      .getAvailable(shell.workspaceRoot)
-      .pipe(Effect.map((enrichment) => ProjectEnrichmentService.withEnrichment(shell, enrichment)));
+    enrichProjectShell(shell).pipe(
+      Effect.map(({ project }) => project),
+      Effect.provideService(ProjectEnrichmentService.ProjectEnrichmentService, projectEnrichment),
+    );
 
   const getShell: ProjectService["Service"]["getShell"] = Effect.fn("ProjectService.getShell")(
     function* (projectId) {
