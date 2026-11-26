@@ -48,6 +48,10 @@ const DROPPED_REQUEST_HEADERS = new Set([
   "x-forwarded-proto",
 ]);
 
+// The policy the Sandbox's own server gives agent HTML: scripts run, but in an opaque origin.
+const RELAYED_CONTENT_SECURITY_POLICY =
+  "sandbox allow-scripts allow-forms allow-popups allow-downloads";
+
 // The client decodes a compressed body, so its length no longer holds.
 const DROPPED_RESPONSE_HEADERS = new Set([
   "content-encoding",
@@ -56,6 +60,8 @@ const DROPPED_RESPONSE_HEADERS = new Set([
   "connection",
   "keep-alive",
   "set-cookie",
+  // It clears the browser's data for the origin that serves it, which is this server's.
+  "clear-site-data",
 ]);
 
 /** The Sandbox and the path on its server, or null for a path outside any Sandbox. */
@@ -143,6 +149,16 @@ const relayHttp = Effect.fn("AgentctlSandboxRelay.relayHttp")(function* (
   }
   // Streamed responses, such as an event stream, must not wait in this server's compression.
   headers["cache-control"] = `${headers["cache-control"] ?? "no-store"}, no-transform`;
+  // The Sandbox is less trusted than this server, so nothing it serves runs as this origin. Agent
+  // HTML keeps its scripts in an opaque origin, as on its own server, and its own policy stays.
+  headers["x-content-type-options"] = "nosniff";
+  if (headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/pdf") {
+    const own = headers["content-security-policy"];
+    headers["content-security-policy"] =
+      own === undefined
+        ? RELAYED_CONTENT_SECURITY_POLICY
+        : `${own}, ${RELAYED_CONTENT_SECURITY_POLICY}`;
+  }
   return HttpServerResponse.stream(response.stream, {
     status: response.status,
     headers,
