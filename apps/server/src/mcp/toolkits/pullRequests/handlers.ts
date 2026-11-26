@@ -9,6 +9,7 @@ import {
   type PullRequestCheck,
   type PullRequestReviewThread,
   type OrchestrationProjectShell,
+  type RepositoryIdentity,
   type PullRequestState,
   type PullRequestWatchUntil,
   type OrchestrationV2ThreadShell,
@@ -24,6 +25,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as GitManager from "../../../git/GitManager.ts";
+import * as TaskFolderStore from "../../../workspace/TaskFolderStore.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as PullRequestWatchService from "../../../pullRequest/PullRequestWatchService.ts";
@@ -31,6 +33,8 @@ import {
   resolveTarget,
   workspaceCheckout,
   checkoutInWorktree,
+  hostsHolding,
+  PullRequestHostAmbiguousError,
   type ResolvedTarget,
 } from "../../../pullRequest/pullRequestTarget.ts";
 import { withAgentMarker } from "../../../orchestration-v2/pullRequestWatch.ts";
@@ -280,6 +284,24 @@ const make = Effect.gen(function* () {
   const watches = yield* PullRequestWatchService.PullRequestWatchService;
   const pullRequests = yield* PullRequestService.PullRequestService;
   const git = yield* GitManager.GitManager;
+  // Absent where no task folders are kept, such as the CLI.
+  const taskFolderStore = yield* Effect.serviceOption(TaskFolderStore.TaskFolderStore);
+  const worktreeOfCheckout = Effect.fnUntraced(function* (
+    worktreePath: string,
+    checkout: RepositoryIdentity,
+    project: OrchestrationProjectShell,
+  ) {
+    if (Option.isSome(taskFolderStore)) {
+      const taskFolder = yield* taskFolderStore.value
+        .findContaining(worktreePath)
+        .pipe(Effect.orElseSucceed(() => null));
+      const repository = taskFolder?.repositories.find(
+        (candidate) => candidate.repositoryPath === checkout.rootPath,
+      );
+      if (repository !== undefined) return repository.worktreePath;
+    }
+    return checkoutInWorktree(project, checkout, worktreePath);
+  });
 
   const projects = yield* ProjectService.ProjectService;
   const random = yield* SecureRandom.SecureRandom;
@@ -1076,6 +1098,10 @@ const make = Effect.gen(function* () {
           return yield* new PullRequestProjectNotFoundError({ repository: "" });
         }
         // A workspace folder is no repository; the branch is in one of its checkouts.
+        const hosts = input.repository === undefined ? [] : hostsHolding(project, input.repository);
+        if (input.repository !== undefined && hosts.length > 1) {
+          return yield* new PullRequestHostAmbiguousError({ repository: input.repository, hosts });
+        }
         const checkout = workspaceCheckout(project, input.repository);
         const clones = (project.workspaceRepositories ?? []).filter(
           (identity) => identity.canonicalKey === checkout?.canonicalKey,
@@ -1094,15 +1120,24 @@ const make = Effect.gen(function* () {
                   : `This thread's folder holds no checkout of ${input.repository}.`,
           });
         }
+        // A worktree thread works in its task folder's worktree of the checkout, wherever the
+        // checkout is, including a folder added from outside the project.
+        const worktree =
+          checkout === undefined || thread.worktreePath == null
+            ? undefined
+            : yield* worktreeOfCheckout(thread.worktreePath, checkout, project);
+        if (checkout !== undefined && thread.worktreePath != null && worktree === undefined) {
+          return yield* new PullRequestForgeError({
+            detail: `This thread's worktree holds no checkout of ${checkout.displayName ?? input.repository}. Open the PR with the host's CLI where its branch is.`,
+          });
+        }
         const created = yield* git
           .createPullRequest({
             cwd:
-              checkout === undefined
+              worktree ??
+              (checkout === undefined
                 ? (thread.worktreePath ?? project.workspaceRoot)
-                : thread.worktreePath == null
-                  ? (checkout.rootPath ?? project.workspaceRoot)
-                  : (checkoutInWorktree(project, checkout, thread.worktreePath) ??
-                    thread.worktreePath),
+                : (checkout.rootPath ?? project.workspaceRoot)),
             projectId: project.id,
             title: input.title,
             body: input.body,

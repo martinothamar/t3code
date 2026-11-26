@@ -89,9 +89,16 @@ const make = Effect.gen(function* () {
   const keyFor = Effect.fn("PullRequestReviewGuideService.keyFor")(function* (
     input: PullRequestRef,
   ) {
-    const project = Option.getOrUndefined(
+    const shell = Option.getOrUndefined(
       yield* projects.getShell(input.projectId).pipe(Effect.orElseSucceed(() => Option.none())),
     );
+    // A shell carries only the folder checkouts already resolved; the PR service resolves them all.
+    const project =
+      shell?.repositoryIdentity == null && shell !== undefined
+        ? ((yield* pullRequests
+            .addressedProject(input.projectId)
+            .pipe(Effect.orElseSucceed(() => undefined))) ?? shell)
+        : shell;
     // A workspace folder writes the guide from its checkout of the pull request's repository.
     const checkout =
       project?.repositoryIdentity == null && project !== undefined

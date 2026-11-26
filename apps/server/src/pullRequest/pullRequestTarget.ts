@@ -68,7 +68,7 @@ export class PullRequestHostAmbiguousError extends Schema.TaggedError<PullReques
   { repository: Schema.String, hosts: Schema.Array(Schema.String) },
 ) {
   override get message(): string {
-    return `This project's folder holds ${this.repository} on ${this.hosts.join(" and ")}. Name the pull request by its URL, or use that host's CLI in its checkout.`;
+    return `This project's folder holds ${this.repository} on ${this.hosts.join(" and ")}. Name the pull request by its URL where the tool takes one, or use that host's CLI in its checkout.`;
   }
 }
 
@@ -116,6 +116,21 @@ function namesRepository(identity: RepositoryIdentity, repository: string): bool
     // The path below the host, which is how Azure names a repository in full.
     identity.canonicalKey.split("/").slice(1).join("/"),
   ].some((name) => name?.toLowerCase() === wanted);
+}
+
+/** The hosts a workspace folder holds `repository` on; none for a project rooted in one. */
+export function hostsHolding(
+  project: OrchestrationProjectShell | undefined,
+  repository: string,
+): ReadonlyArray<string> {
+  if (project?.repositoryIdentity != null) return [];
+  return [
+    ...new Set(
+      (project?.workspaceRepositories ?? [])
+        .filter((identity) => namesRepository(identity, repository))
+        .flatMap((identity) => projectHostAndProvider(identity).host ?? []),
+    ),
+  ];
 }
 
 /**
@@ -184,17 +199,9 @@ export const resolveTarget = Effect.fn("PullRequestsToolkit.resolveTarget")(func
   }
   // A repository a folder holds on two hosts names neither; acting on the first could close the
   // wrong pull request.
-  if (input.host === undefined && project?.repositoryIdentity == null) {
-    const hosts = [
-      ...new Set(
-        (project?.workspaceRepositories ?? [])
-          .filter((identity) => namesRepository(identity, input.repository!))
-          .flatMap((identity) => projectHostAndProvider(identity).host ?? []),
-      ),
-    ];
-    if (hosts.length > 1) {
-      return yield* new PullRequestHostAmbiguousError({ repository: input.repository, hosts });
-    }
+  const hosts = input.host === undefined ? hostsHolding(project, input.repository) : [];
+  if (hosts.length > 1) {
+    return yield* new PullRequestHostAmbiguousError({ repository: input.repository, hosts });
   }
   const identity = projectRepositoryFor(project, input.repository, input.host?.toLowerCase());
   // Azure DevOps tools name the project's repository by its bare name, which no URL can be built

@@ -192,6 +192,20 @@ const makeLayer = (input: {
         activity: () => Effect.succeed(activity),
         invalidate: () => Effect.void,
         stack: () => Effect.succeed(stack(input)),
+        // Resolves a folder's checkouts, which a shell read may not have yet.
+        addressedProject: () =>
+          Effect.succeed({
+            id: projectId,
+            workspaceRoot: input.root,
+            repositoryIdentity: null,
+            workspaceRepositories: [
+              {
+                ...(input.identity ?? ACME_APP),
+                locator: input.locator ?? { ...ACME_APP.locator, remoteUrl: input.remote },
+                rootPath: input.workspace,
+              },
+            ],
+          }),
       } as unknown as PullRequestService.PullRequestService["Service"]),
     ),
     Layer.provide(
@@ -206,8 +220,8 @@ const makeLayer = (input: {
               ? {
                   id: projectId,
                   workspaceRoot: input.root,
+                  // Read before the folder's checkouts resolved.
                   repositoryIdentity: null,
-                  workspaceRepositories: [{ ...identity, rootPath: input.workspace }],
                 }
               : { id: projectId, workspaceRoot: input.workspace, repositoryIdentity: identity },
           );

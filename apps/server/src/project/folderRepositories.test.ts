@@ -8,7 +8,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { enrichProjectShell, folderRepositories, projectCoversPath } from "./folderRepositories.ts";
+import { enrichProjectShell, enrichmentRefresh, folderRepositories } from "./folderRepositories.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
 import * as RepositoryIdentityResolver from "./RepositoryIdentityResolver.ts";
 
@@ -33,6 +33,8 @@ const folder = {
     { path: "/workspace/app", name: "app", discovered: true },
     { path: "/home/user/lib", name: "lib" },
     { path: "/workspace/notes", name: "notes", discovered: true },
+    // A plain folder inside another repository, which Git resolves to that repository.
+    { path: "/other/repo/docs", name: "docs" },
   ],
 } as unknown as OrchestrationProjectShell;
 
@@ -40,6 +42,7 @@ const identities: Record<string, RepositoryIdentity> = {
   "/workspace/app": identity("acme/app"),
   "/home/user/lib": identity("acme/lib", "/home/user/lib"),
   "/repo": identity("acme/repo", "/repo"),
+  "/other/repo/docs": identity("acme/other", "/other/repo"),
 };
 
 describe("folder repositories", () => {
@@ -76,9 +79,20 @@ describe("folder repositories", () => {
       expect(rooted.project.repositoryIdentity).toEqual(identity("acme/repo", "/repo"));
       expect(rooted.project).not.toHaveProperty("workspaceRepositories");
 
-      expect(projectCoversPath(folder, "/home/user/lib")).toBe(true);
-      expect(projectCoversPath(folder, "/workspace")).toBe(true);
-      expect(projectCoversPath(folder, "/elsewhere")).toBe(false);
+      // A folder known to hold none says so, so a client drops the last one untracked.
+      const emptied = yield* enrichProjectShell({ ...folder, trackedFolders: [] });
+      expect(emptied.project.workspaceRepositories).toEqual([]);
+
+      // A tracked folder resolving refreshes the folder project that tracks it, as resolved.
+      const other = {
+        ...folder,
+        id: ProjectId.make("other"),
+        workspaceRoot: "/other",
+        trackedFolders: [],
+      };
+      const refresh = yield* enrichmentRefresh([folder, other], ["/home/user/lib"]);
+      expect(refresh.projects.map((project) => project.id)).toEqual([folder.id]);
+      expect(refresh.resolvedRoots).toEqual(["/workspace"]);
     }).pipe(
       Effect.provide(
         Layer.mock(ProjectEnrichmentService.ProjectEnrichmentService)({

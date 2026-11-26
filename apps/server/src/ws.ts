@@ -240,7 +240,7 @@ import { refreshPushedPullRequests } from "./git/refreshPushedPullRequests.ts";
 import { linkCreatedPullRequest } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
-import { enrichProjectShell, projectCoversPath } from "./project/folderRepositories.ts";
+import { enrichProjectShell, enrichmentRefresh } from "./project/folderRepositories.ts";
 import * as ProjectService from "./project/ProjectService.ts";
 import { threadWorkspaceRoot } from "./project/threadWorkspaceRoot.ts";
 import * as ManagedProjectFolders from "./project/ManagedProjectFolders.ts";
@@ -1312,25 +1312,21 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       Stream.groupedWithin(64, Duration.millis(25)),
       Stream.mapEffect((changes) =>
         Effect.gen(function* () {
-          const changedPaths = Array.from(changes, (change) => change.workspaceRoot);
           const snapshotSequence = yield* applicationEvents.latestApplicationSequence;
           // A tracked folder's identity changes the shell of the folder project that tracks it.
-          const changedProjects = yield* Effect.forEach(
-            (yield* projects.listShells()).filter((project) =>
-              changedPaths.some((path) => projectCoversPath(project, path)),
-            ),
-            (project) => enrichProjectShell(project).pipe(Effect.map(({ project }) => project)),
-            { concurrency: 16 },
+          const refreshed = yield* enrichmentRefresh(
+            yield* projects.listShells(),
+            Array.from(changes, (change) => change.workspaceRoot),
           );
           return shellStreamItemFromEnrichmentRefresh({
             snapshot: {
               schemaVersion: ORCHESTRATION_V2_PROJECTION_SCHEMA_VERSION,
               snapshotSequence,
-              projects: changedProjects,
+              projects: refreshed.projects,
               threads: [],
               archivedThreads: [],
             } as OrchestrationV2ShellSnapshot,
-            changes: Array.from(changes),
+            changes: refreshed.resolvedRoots.map((workspaceRoot) => ({ workspaceRoot })),
           });
         }),
       ),
