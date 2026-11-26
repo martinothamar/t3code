@@ -189,7 +189,6 @@ const layerEnrichment = Layer.unwrap(
       getAvailable: () =>
         Effect.succeed({
           repositoryIdentity: FLEET_PROJECT_IDENTITY,
-          workspaceRepositories: [],
           faviconPath: null,
           repositoryIdentityResolved: true,
         }),

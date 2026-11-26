@@ -84,6 +84,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import { folderRepositories } from "../project/folderRepositories.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import type { SourceControlProviderContext } from "@t3tools/source-control-core/server/SourceControlProvider";
 import * as SourceControlRateLimit from "@t3tools/source-control-core/server/SourceControlRateLimit";
@@ -792,6 +793,15 @@ export const make = Effect.gen(function* () {
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const projects = yield* ProjectService.ProjectService;
   const repositoryIdentities = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+  const readFolderRepositories = (
+    project: Pick<OrchestrationProjectShell, "workspaceRoot" | "trackedFolders">,
+  ) =>
+    folderRepositories(project).pipe(
+      Effect.provideService(
+        RepositoryIdentityResolver.RepositoryIdentityResolver,
+        repositoryIdentities,
+      ),
+    );
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   const rateLimits = yield* SourceControlRateLimit.SourceControlRateLimit;
   const filesViewedStore = yield* PullRequestFilesViewed.PullRequestFilesViewedRepository;
@@ -936,7 +946,7 @@ export const make = Effect.gen(function* () {
     const repositoryIdentity = yield* repositoryIdentities.resolve(project.workspaceRoot);
     if (repositoryIdentity !== null)
       return [{ rank: 0, project: { ...project, repositoryIdentity } }];
-    const identities = yield* repositoryIdentities.resolveWorkspace(project.workspaceRoot);
+    const identities = yield* readFolderRepositories(project);
     return identities.flatMap((identity) =>
       identity.rootPath === undefined
         ? []

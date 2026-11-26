@@ -13,8 +13,8 @@ export const OrchestrationProjectShell = Schema.Struct({
   hasCustomTitle: Schema.optional(Schema.Boolean),
   workspaceRoot: TrimmedNonEmptyString,
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
-  // For a folder that is no repository itself, the repositories checked out in its immediate
-  // subfolders, so links to their pull requests resolve to it. Absent when there are none.
+  // For a folder that is no repository itself, the identities of the repositories it tracks
+  // (`trackedFolders`), so links to their pull requests resolve to it. Absent when there are none.
   workspaceRepositories: Schema.optional(Schema.Array(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),

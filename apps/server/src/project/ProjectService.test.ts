@@ -56,7 +56,6 @@ const layerWorkspacePaths = Layer.succeed(WorkspacePaths.WorkspacePaths, {
 
 const layerMetadata = Layer.merge(
   Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-    resolveWorkspace: () => Effect.succeed([]),
     resolve: (workspaceRoot) =>
       Effect.succeed({
         canonicalKey: `github.com/t3tools/${workspaceRoot.split("/").at(-1)}`,
@@ -141,7 +140,6 @@ it.effect("resolves only the requested active project page in creation order", (
               rootPath: workspaceRoot,
             }),
           ),
-        resolveWorkspace: () => Effect.succeed([]),
       }),
       Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
         invalidate: () => Effect.void,
@@ -868,7 +866,6 @@ it.effect("keeps project snapshots available when optional metadata enrichment f
   Effect.gen(function* () {
     const layerFailingMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolveWorkspace: () => Effect.succeed([]),
         resolve: () => Effect.succeed(null),
       }),
       Layer.succeed(ProjectFaviconResolver.ProjectFaviconResolver, {
@@ -909,7 +906,6 @@ it.effect("invalidates workspace-derived metadata when a project moves", () =>
     const metadataVersion = yield* Ref.make(1);
     const layerVersionedMetadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolveWorkspace: () => Effect.succeed([]),
         resolve: (workspaceRoot) =>
           Ref.get(metadataVersion).pipe(
             Effect.map((version) => ({
@@ -983,7 +979,6 @@ it.effect("resolves a restored icon immediately after reselecting its saved path
     const iconPath = `${cwd}/icon.svg`;
     const metadata = Layer.merge(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolveWorkspace: () => Effect.succeed([]),
         resolve: () => Effect.succeed(null),
       }),
       ProjectFaviconResolver.layer.pipe(
@@ -1178,6 +1173,65 @@ it.effect("keeps a folder added while a scan of the project folder waited to com
     assert.deepEqual(Option.getOrThrow(yield* service.getById(projectId)).trackedFolders, [
       { path: path.join(root, "api"), name: "api", discovered: true },
       added,
+    ]);
+  }).pipe(Effect.provide(layerProjectServiceDependencies)),
+);
+
+it.effect("brings a folder project's repositories in step when only its shell is read", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fileSystem.realPath(
+      yield* fileSystem.makeTempDirectoryScoped({ prefix: "project-shell-sync-" }),
+    );
+    const eventSink = yield* EventSink.EventSinkV2;
+    const synced = yield* Queue.unbounded<void>();
+    const service = yield* ProjectService.make.pipe(
+      Effect.provideService(
+        EventSink.EventSinkV2,
+        EventSink.EventSinkV2.of({
+          ...eventSink,
+          commitProjectCommand: (input) =>
+            input.commandId.startsWith("project-folders:")
+              ? eventSink
+                  .commitProjectCommand(input)
+                  .pipe(Effect.ensuring(Queue.offer(synced, undefined)))
+              : eventSink.commitProjectCommand(input),
+        }),
+      ),
+      // The project folder is no repository, as a Sandbox's working directory.
+      Effect.provideService(
+        ProjectEnrichmentService.ProjectEnrichmentService,
+        ProjectEnrichmentService.ProjectEnrichmentService.of({
+          ...(yield* ProjectEnrichmentService.ProjectEnrichmentService),
+          getAvailable: () =>
+            Effect.succeed({
+              repositoryIdentity: null,
+              faviconPath: null,
+              repositoryIdentityResolved: true,
+            }),
+        }),
+      ),
+    );
+    const projectId = ProjectId.make("project:shell-sync");
+    // Made by a service that is gone, so no sync of its own is left to find the clone below.
+    yield* Effect.scoped(
+      Effect.flatMap(ProjectService.make, (creator) =>
+        creator.create({
+          commandId: CommandId.make("command:shell-sync:create"),
+          projectId,
+          title: "Shell sync",
+          workspaceRoot: root,
+        }),
+      ),
+    );
+    // Cloned later; pull requests and issues read shells, never snapshots.
+    yield* fileSystem.makeDirectory(`${root}/api/.git`, { recursive: true });
+    yield* TestClock.adjust("31 seconds");
+    yield* service.getShell(projectId);
+    yield* Queue.take(synced);
+    assert.deepEqual(Option.getOrThrow(yield* service.getShell(projectId)).trackedFolders, [
+      { path: path.join(root, "api"), name: "api", discovered: true },
     ]);
   }).pipe(Effect.provide(layerProjectServiceDependencies)),
 );

@@ -16,6 +16,7 @@ import {
   type PullRequestReviewGuideResult,
   type ThreadPullRequestLink,
   SourceControlProviderKind,
+  type TaskFolder,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -28,6 +29,7 @@ import * as Stream from "effect/Stream";
 import type { Tool } from "effect/ai";
 
 import * as GitManager from "../../../git/GitManager.ts";
+import * as TaskFolderStore from "../../../workspace/TaskFolderStore.ts";
 import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import {
   type PullRequestTestThread,
@@ -155,6 +157,8 @@ interface HarnessOptions {
   >;
   readonly pullRequests?: Partial<PullRequestService.PullRequestService["Service"]>;
   readonly git?: Partial<GitManager.GitManager["Service"]>;
+  /** The task folder a worktree thread works in, with each repository's worktree. */
+  readonly taskFolder?: TaskFolder;
 }
 
 const NO_GUIDE: PullRequestReviewGuideResult = { guide: null, run: null, currentHeadSha: "head-1" };
@@ -214,6 +218,11 @@ const makeHarness = Effect.fn("makePullRequestsToolkitHarness")(function* (
     Layer.mock(GitManager.GitManager)(options.git ?? {}),
     Layer.succeed(SecureRandom.SecureRandom, testCrypto),
     McpToolAccessTestkit.liveThreadsLayer,
+    options.taskFolder === undefined
+      ? Layer.empty
+      : Layer.mock(TaskFolderStore.TaskFolderStore)({
+          findContaining: () => Effect.succeed(options.taskFolder ?? null),
+        }),
   );
   const toolkit = yield* PullRequestsToolkit.pipe(
     Effect.provide(
@@ -1448,6 +1457,38 @@ describe("source control tools", () => {
           repository: "acme/infra",
         });
         expect(opened).toEqual(["/workspace/infra", "/tasks/t1/project/infra"]);
+        // A folder added from outside the project has its worktree where the task folder says.
+        const outside = yield* makeHarness({
+          thread: { ...makeThread([]), worktreePath: "/tasks/t2/project" },
+          project: {
+            ...makeProject(null),
+            workspaceRepositories: [{ ...checkout("acme/lib"), rootPath: "/home/user/lib" }],
+          },
+          taskFolder: {
+            repositories: [
+              {
+                name: "lib",
+                repositoryPath: "/home/user/lib",
+                worktreePath: "/tasks/t2/lib",
+              },
+            ],
+          } as unknown as TaskFolder,
+          git: {
+            createPullRequest: (input) =>
+              Effect.sync(() => opened.push(input.cwd)).pipe(
+                Effect.as({
+                  status: "created" as const,
+                  url: "https://github.com/acme/lib/pull/3",
+                  number: 3,
+                  baseBranch: "main",
+                  headBranch: "tools",
+                  title: input.title,
+                }),
+              ),
+          },
+        });
+        yield* outside.call("pull_request_create", { title: "Add tools", body: "Adds tools." });
+        expect(opened.at(-1)).toBe("/tasks/t2/lib");
         // Two clones of one repository could each have the branch checked out.
         const clones = yield* makeHarness({
           project: {
@@ -1506,6 +1547,25 @@ describe("source control tools", () => {
           },
         });
         yield* twoHosts.call("pull_request_respond", { body: "Thanks." });
+        expect(comments.at(-1)).toBe("gitlab.com/acme/infra#8");
+        // A pull request named by number alone could be on either host, so none is guessed.
+        const either = yield* Effect.flip(
+          twoHosts.call("pull_request_respond", {
+            repository: "acme/infra",
+            number: 9,
+            body: "Thanks.",
+          }),
+        );
+        expect(either.message).toContain("acme/infra on github.com and gitlab.com");
+        // Nor is a pull request opened from whichever checkout comes first.
+        const created = yield* Effect.flip(
+          twoHosts.call("pull_request_create", {
+            title: "Add tools",
+            body: "Adds tools.",
+            repository: "acme/infra",
+          }),
+        );
+        expect(created.message).toContain("acme/infra on github.com and gitlab.com");
         expect(comments.at(-1)).toBe("gitlab.com/acme/infra#8");
 
         // A URL no forge parses still leaves its repository and number.

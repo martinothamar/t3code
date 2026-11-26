@@ -259,11 +259,10 @@ without a connection, including after restarting the app. Saved content refreshe
 environment reconnects; submitting changes requires a connection.
 
 A project folder that is not a Git repository itself lists the pull requests and issues of the
-repositories inside it, found as for [projects with several repositories](./multi-repo-projects.md#which-repositories-a-project-covers),
-`ignoreRepositories` included. Folders added from outside the project are not listed. Threads in it
-show the status of the pull requests linked to them, and open links to those repositories' pull
-requests beside the thread. A new checkout shows up within two minutes. A guide for one of their
-pull requests is written from its checkout.
+[repositories it covers](./multi-repo-projects.md#which-repositories-a-project-covers), including
+folders added to it. Threads in it show the status of the pull requests linked to them, and open
+links to those repositories' pull requests beside the thread. A new checkout shows up within a
+minute. A guide for one of their pull requests is written from its checkout.
 
 When several connected environments hold the same repository, such as Sandboxes that each
 clone it, Pull requests lists it from one of them, and a pull request's actions let you pick
