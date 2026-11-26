@@ -1507,6 +1507,16 @@ describe("source control tools", () => {
         });
         yield* twoHosts.call("pull_request_respond", { body: "Thanks." });
         expect(comments.at(-1)).toBe("gitlab.com/acme/infra#8");
+        // A pull request named by number alone could be on either host, so none is guessed.
+        const either = yield* Effect.flip(
+          twoHosts.call("pull_request_respond", {
+            repository: "acme/infra",
+            number: 9,
+            body: "Thanks.",
+          }),
+        );
+        expect(either.message).toContain("acme/infra on github.com and gitlab.com");
+        expect(comments.at(-1)).toBe("gitlab.com/acme/infra#8");
 
         // A URL no forge parses still leaves its repository and number.
         const unreadable = yield* makeHarness({

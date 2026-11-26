@@ -63,12 +63,22 @@ export class PullRequestRepositoryInvalidError extends Schema.TaggedError<PullRe
   }
 }
 
+export class PullRequestHostAmbiguousError extends Schema.TaggedError<PullRequestHostAmbiguousError>()(
+  "PullRequestHostAmbiguousError",
+  { repository: Schema.String, hosts: Schema.Array(Schema.String) },
+) {
+  override get message(): string {
+    return `This project's folder holds ${this.repository} on ${this.hosts.join(" and ")}. Name the pull request by its URL, or use that host's CLI in its checkout.`;
+  }
+}
+
 export type PullRequestTargetError =
   | PullRequestUrlInvalidError
   | PullRequestTargetIncompleteError
   | PullRequestHostRequiredError
   | PullRequestUrlUnavailableError
-  | PullRequestRepositoryInvalidError;
+  | PullRequestRepositoryInvalidError
+  | PullRequestHostAmbiguousError;
 
 export interface ResolvedTarget {
   readonly host: string;
@@ -171,6 +181,20 @@ export const resolveTarget = Effect.fn("PullRequestsToolkit.resolveTarget")(func
   }
   if (input.repository === undefined || input.number === undefined) {
     return yield* new PullRequestTargetIncompleteError({});
+  }
+  // A repository a folder holds on two hosts names neither; acting on the first could close the
+  // wrong pull request.
+  if (input.host === undefined && project?.repositoryIdentity == null) {
+    const hosts = [
+      ...new Set(
+        (project?.workspaceRepositories ?? [])
+          .filter((identity) => namesRepository(identity, input.repository!))
+          .flatMap((identity) => projectHostAndProvider(identity).host ?? []),
+      ),
+    ];
+    if (hosts.length > 1) {
+      return yield* new PullRequestHostAmbiguousError({ repository: input.repository, hosts });
+    }
   }
   const identity = projectRepositoryFor(project, input.repository, input.host?.toLowerCase());
   // Azure DevOps tools name the project's repository by its bare name, which no URL can be built
