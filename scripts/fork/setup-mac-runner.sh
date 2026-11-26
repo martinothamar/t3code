@@ -83,6 +83,9 @@ done
 rm -rf ~/actions-runner
 mkdir -p ~/actions-runner && cd ~/actions-runner
 curl -fsSL "https://github.com/actions/runner/releases/download/v$version/actions-runner-osx-arm64-$version.tar.gz" | tar xz
+# sudo starts the runner with the system PATH; jobs need the image's tools, such as Homebrew and
+# rbenv's CocoaPods, which its login shell adds.
+echo "PATH=$(bash -lc 'echo $PATH')" > .env
 sync
 EOF
 # Shutting down drops the connection, so ssh fails here.
