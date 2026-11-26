@@ -382,3 +382,103 @@ jobs:
             --title "T3 Code fork $VERSION" \
             --notes-file notes.md \
             --latest
+
+  # Each published release also goes to TestFlight, built from the same commit and numbered by the
+  # release's run. It runs on the self-hosted Mac, whose VM has Xcode, and is skipped until the
+  # repository has the iOS variables and signing secrets (docs/operations/fork-ios-app.md).
+  testflight:
+    name: TestFlight
+    needs: [preflight, release]
+    if: ${{ !cancelled() && needs.release.result == 'success' && vars.FORK_MAC_RUNNER != '' && vars.IOS_BUNDLE_ID != '' }}
+    runs-on: ${{ vars.FORK_MAC_RUNNER }}
+    timeout-minutes: 90
+    env:
+      APP_VARIANT: production
+      EXPO_NO_GIT_STATUS: "1"
+      LANG: en_US.UTF-8
+      NODE_OPTIONS: --max-old-space-size=8192
+      T3CODE_IOS_TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+      T3CODE_IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/mobile... --filter=@t3tools/scripts...
+
+      - name: Install CocoaPods
+        run: command -v pod >/dev/null || brew install cocoapods
+
+      # A keychain of its own, so codesign never waits on a password prompt.
+      - name: Install the distribution certificate
+        env:
+          CERTIFICATE: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/ios-signing.keychain-db"
+          password="$(uuidgen)"
+          (umask 077 && printf '%s' "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/distribution.p12")
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/distribution.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm "$RUNNER_TEMP/distribution.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain" | grep -q "Apple Distribution" ||
+            { echo "The certificate is not an Apple Distribution identity." >&2; exit 1; }
+
+      - name: Generate the iOS project
+        working-directory: apps/mobile
+        run: vp exec expo prebuild --clean --platform ios
+
+      - name: Sign for TestFlight
+        env:
+          PROFILES: ${{ secrets.IOS_PROVISIONING_PROFILES }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/profiles"
+          printf '%s' "$PROFILES" | base64 --decode | tar -xz -C "$RUNNER_TEMP/profiles"
+          # The version ends in the release's run number, which only grows.
+          node scripts/fork/ios-testflight-signing.ts --project apps/mobile/ios \
+            --profiles "$RUNNER_TEMP/profiles" --build-number "${VERSION##*.}" \
+            --export-options "$RUNNER_TEMP/ExportOptions.plist"
+
+      - name: Archive
+        working-directory: apps/mobile
+        run: |
+          xcodebuild archive -workspace ios/T3Code.xcworkspace -scheme T3Code -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/T3Code.xcarchive" \
+            COMPILER_INDEX_STORE_ENABLE=NO
+
+      # A Developer-role App Store Connect key may upload builds; signing was manual, so it needs
+      # no more than that.
+      - name: Upload to TestFlight
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY_ID.p8"
+          (umask 077 && printf '%s' "$APPLE_API_KEY" > "$key")
+          plutil -insert destination -string upload "$RUNNER_TEMP/ExportOptions.plist"
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/T3Code.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -authenticationKeyPath "$key" -authenticationKeyID "$APPLE_API_KEY_ID" \
+            -authenticationKeyIssuerID "$APPLE_API_ISSUER"
+          rm "$key"
+
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/ios-signing.keychain-db" 2>/dev/null || true

@@ -84,8 +84,8 @@ with Homebrew, signed in to `gh` as an admin of the repository:
 scripts/fork/setup-mac-runner.sh
 ```
 
-It prepares the VM, adding the Developer ID intermediate certificates that Xcode would otherwise
-bring, runs the clones from a LaunchAgent that logs to
+It prepares the VM from Cirrus Labs' Xcode image, which the TestFlight build needs, adding the
+Developer ID intermediate certificates, and runs the clones from a LaunchAgent that logs to
 `~/Library/Application Support/fork-mac-runner/loop.log`, keeps the Mac from sleeping, requires
 approval for every external contributor's pull request workflows, and sets `FORK_MAC_RUNNER`. The
 runner works in the VM's logged-in session, where the launch check can open the app, and the

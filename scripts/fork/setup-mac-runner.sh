@@ -10,7 +10,8 @@ set -euo pipefail
 
 repo="${1:-martinothamar/t3code}"
 base=mac-runner
-image=ghcr.io/cirruslabs/macos-tahoe-base:latest
+# Xcode for the TestFlight build; the desktop builds need only its certificates.
+image=ghcr.io/cirruslabs/macos-tahoe-xcode:27.2
 label=fork-mac
 support="$HOME/Library/Application Support/fork-mac-runner"
 agent="$HOME/Library/LaunchAgents/local.fork-mac-runner.plist"
@@ -37,10 +38,19 @@ done
 gh api "repos/$repo/actions/runners" --jq '.runners[] | select(.name | startswith("mac-runner")) | .id' |
   while read -r id; do gh api -X DELETE "repos/$repo/actions/runners/$id"; done
 
+mkdir -p "$support"
+# A base VM from another image is replaced, so a new image takes effect on the next run.
+if tart get "$base" >/dev/null 2>&1 && [[ "$(cat "$support/image" 2>/dev/null)" != "$image" ]]; then
+  tart delete "$base"
+fi
 tart get "$base" >/dev/null 2>&1 || tart clone "$image" "$base"
+echo "$image" > "$support/image"
 cpus=$(( $(sysctl -n hw.ncpu) / 2 )); (( cpus >= 4 )) || cpus=4
 memory_gb=$(( $(sysctl -n hw.memsize) / 1073741824 / 2 )); (( memory_gb <= 16 )) || memory_gb=16
-tart set "$base" --cpu "$cpus" --memory $(( memory_gb * 1024 )) --disk-size 120
+# The Xcode image's disk is 140 GB; a build needs room beyond it. Tart only grows disks.
+disk="$(tart get "$base" --format json | sed -nE 's/.*"Disk" *: *([0-9]+).*/\1/p')"
+(( ${disk:-0} >= 160 )) || disk=160
+tart set "$base" --cpu "$cpus" --memory $(( memory_gb * 1024 )) --disk-size "$disk"
 
 echo "Preparing $base..."
 tart run --no-graphics "$base" >/dev/null 2>&1 &
@@ -58,8 +68,9 @@ version=$1
 as_root() { echo admin | sudo -S -p '' "$@"; }
 /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null ||
   as_root softwareupdate --install-rosetta --agree-to-license
-# Xcode brings Apple's intermediate certificates; without them a Developer ID identity is invalid.
-for ca in DeveloperIDG2CA DeveloperIDCA; do
+# Without Apple's intermediate certificates a signing identity is invalid, and Xcode does not
+# always bring the one for Apple Distribution.
+for ca in DeveloperIDG2CA DeveloperIDCA AppleWWDRCAG3; do
   curl -fsSL -o "/tmp/$ca.cer" "https://www.apple.com/certificateauthority/$ca.cer"
   as_root security add-certificates -k /Library/Keychains/System.keychain "/tmp/$ca.cer" 2>/dev/null || true
 done

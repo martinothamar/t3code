@@ -46,3 +46,34 @@ Xcode created the certificate, the keychain lacks Apple's current intermediate: 
 [AppleWWDRCAG3.cer](https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer) to the login
 keychain. On the phone, trust the developer once under Settings → General → VPN & Device
 Management.
+
+## TestFlight
+
+Fork release uploads each published release's app to TestFlight, numbered by the release's run, so
+a phone in the internal testing group installs it without a cable. A TestFlight build expires after
+90 days. The job runs on the self-hosted Mac (`scripts/fork/setup-mac-runner.sh`, whose VM has
+Xcode) and signs manually: Xcode's own signing in CI would need an App Store Connect key allowed to
+manage certificates. It is skipped until the repository has the following, set up once:
+
+1. In App Store Connect, the app record for your bundle identifier, and an internal testing group
+   with automatic distribution that you are in.
+2. An Apple Distribution certificate: Xcode → Settings → Accounts → your team → Manage Certificates
+   → + → Apple Distribution. Export it from Keychain Access (My Certificates) as a `.p12` with a
+   password.
+3. In the developer portal, under Profiles, an App Store Connect profile with that certificate for
+   each of the app's identifiers: the bundle identifier and its `.widgets` and `.sharing`
+   extensions. Download the three.
+4. The repository's variables and secrets, from the folder holding the files:
+
+   ```sh
+   gh variable set IOS_TEAM_ID --body ABCDE12345
+   gh variable set IOS_BUNDLE_ID --body com.example.t3code
+   base64 -i distribution.p12 | gh secret set IOS_DISTRIBUTION_CERTIFICATE
+   gh secret set IOS_DISTRIBUTION_CERTIFICATE_PASSWORD
+   tar -cz *.mobileprovision | base64 | gh secret set IOS_PROVISIONING_PROFILES
+   ```
+
+   The upload uses the App Store Connect key the macOS builds notarize with (`APPLE_API_KEY`,
+   `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`); its Developer role may upload builds.
+
+The certificate and profiles last a year. Renew them the same way and replace the secrets.
