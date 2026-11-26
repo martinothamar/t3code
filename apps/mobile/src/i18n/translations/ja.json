@@ -3337,6 +3337,7 @@
   "c0e935e82c6c7ff0": "{tab} を上へ移動",
   "5f562a95198fb06f": "{tab} を下へ移動",
   "c72fe899b28f3f2f": "タブをリセット",
+  "987d2f0e75e37fc7": "Notifications require {product} in this app build.",
   "fe82d02a0fb8f2f9": "通知を有効にするには新しいアプリのビルドをインストールしてください",
   "cf77d0d6fcfd8871": "通知を利用できません",
   "a54ab9f2dca595ac": "通知の権限をリクエストできませんでした。",

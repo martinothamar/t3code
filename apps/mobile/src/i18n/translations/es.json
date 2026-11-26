@@ -3340,6 +3340,7 @@
   "c0e935e82c6c7ff0": "Subir {tab}",
   "5f562a95198fb06f": "Bajar {tab}",
   "c72fe899b28f3f2f": "Restablecer pestañas",
+  "987d2f0e75e37fc7": "Notifications require {product} in this app build.",
   "fe82d02a0fb8f2f9": "Instala una compilación más reciente de la app para activar las notificaciones",
   "cf77d0d6fcfd8871": "Notificaciones no disponibles",
   "a54ab9f2dca595ac": "No se pudo solicitar el permiso de notificaciones.",

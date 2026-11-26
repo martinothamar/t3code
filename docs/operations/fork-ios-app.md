@@ -1,15 +1,14 @@
-# The fork's iOS app and its push notifications
+# The fork's iOS app
 
 The fork builds its own iOS app, signed with your own Apple team, so the phone gets the fork's
-features. The fork's builds have T3 Connect turned off, so notifications cannot come through
-upstream's relay. Instead each T3 server sends them to Apple itself, with your own APNs key.
+features. The fork's builds have T3 Connect turned off, so the phone gets no push notifications.
 
 ## Building and installing
 
 You need a paid Apple Developer Program membership: push, App Groups and the widget and share
 extensions cannot be signed by a Personal Team, and Personal Team builds expire after seven days.
 A free account still works with `T3CODE_IOS_PERSONAL_TEAM=1` (see `apps/mobile/README.md`), without
-notifications; add `T3CODE_IOS_TEAM_ID` with the Personal Team's ID, the `OU` of its Apple
+the extensions; add `T3CODE_IOS_TEAM_ID` with the Personal Team's ID, the `OU` of its Apple
 Development certificate, to sign with it rather than leave the choice to Expo.
 
 1. In Xcode → Settings → Accounts, sign in with the Apple ID of your team.
@@ -47,27 +46,3 @@ Xcode created the certificate, the keychain lacks Apple's current intermediate: 
 [AppleWWDRCAG3.cer](https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer) to the login
 keychain. On the phone, trust the developer once under Settings → General → VPN & Device
 Management.
-
-## Push notifications
-
-1. In the developer portal, under Certificates, Identifiers & Profiles → Keys, create a key with
-   Apple Push Notifications service (APNs) enabled, team scoped and for Sandbox & Production, and
-   download its `.p8` file. Apple lets you download it only once. A key limited to one environment
-   reaches only the builds signed for it: sandbox from Xcode, production from TestFlight.
-2. On each T3 server the phone should hear from, open Settings → General → Notifications →
-   Phone notifications, and add the team ID, the key ID and the `.p8` file.
-3. In the app, open Settings → Notifications and turn on Device Notifications. The phone registers
-   with every connected server that sends notifications itself, and again after a reconnect or a
-   token change.
-4. Send test, on the server's Phone notifications row, notifies every registered phone and shows
-   APNs' answer for any that failed.
-
-The server notifies when a thread needs approval or input, fails, or completes, using the same rules
-as the relay. Completions wait five seconds, so a run followed at once by its continuation does not
-notify. Subagent approval waits do not notify yet.
-
-The app reports the APNs environment it was signed for. If Apple still answers `BadDeviceToken`, the
-server tries the other host, remembers the one that worked, and drops a phone that Apple rejects in
-both, or answers `Unregistered` for. A phone's registration ends with the session that paired it,
-so revoking its access stops its notifications.
-The key and the registered phones live in the server's secret store, never in its settings.

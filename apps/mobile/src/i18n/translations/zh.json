@@ -3342,6 +3342,7 @@
   "c0e935e82c6c7ff0": "上移 {tab}",
   "5f562a95198fb06f": "下移 {tab}",
   "c72fe899b28f3f2f": "重置标签",
+  "987d2f0e75e37fc7": "Notifications require {product} in this app build.",
   "fe82d02a0fb8f2f9": "安装更新版本的应用以启用通知",
   "cf77d0d6fcfd8871": "通知不可用",
   "a54ab9f2dca595ac": "无法请求通知权限。",
