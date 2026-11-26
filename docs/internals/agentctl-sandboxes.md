@@ -25,6 +25,10 @@ headers. Each client pairs with each Sandbox once: it asks the host for a one-ti
 Sandbox's server through the relay. A client gets no access to a Sandbox it could not get by
 asking the host. The host holds no client session of its own, only the link below.
 
+The trust runs one way: the host's origin is the client's, and a Sandbox is less trusted. So the
+relay gives every response but a PDF the sandbox policy the Sandbox's own server gives agent HTML,
+which keeps a page a Sandbox serves out of the host's origin, its cookies and its API.
+
 Pairing runs in the background in [client-runtime](../../packages/client-runtime/src/sandboxes/environments.ts),
 outside any UI command, where the client-side scope guard fails closed. So `agentctl.pairSandbox`
 is deliberately absent from `CLIENT_GUARDED_RPC_SCOPES`, and only the server checks it.

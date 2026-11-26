@@ -23,6 +23,7 @@ import {
   BearerConnectionCredential,
   BearerConnectionProfile,
   BearerConnectionRegistration,
+  type ConnectionCatalogEntry,
 } from "../connection/catalog.ts";
 import * as ConnectionCredentialStore from "../connection/credentialStore.ts";
 import {
@@ -65,6 +66,10 @@ export function sandboxForTarget(
   const [host, name] = target.connectionId.slice(CONNECTION_ID_PREFIX.length).split(":");
   return host && name ? { hostEnvironmentId: EnvironmentId.make(host), name } : null;
 }
+
+/** Why a Sandbox has no environment: the id it reports is another connection's. */
+export const SANDBOX_ID_TAKEN =
+  "This Sandbox reports the environment id of another connection, so T3 Code does not connect to it.";
 
 /** A Sandbox on its way out, whose environment clients let go of right away. */
 export const isSandboxBeingDeleted = (sandbox: AgentctlSandbox) =>
@@ -248,14 +253,58 @@ export const watchSandboxEnvironments = Effect.fn("SandboxEnvironments.watch")(f
     hostEnvironmentId: EnvironmentId,
     view: HostView,
   ) {
-    yield* SubscriptionRef.update(environments.hosts, (current) =>
-      new Map(current).set(hostEnvironmentId, view.snapshot),
+    // A Sandbox reports its own id, and one made from a copy of another environment's state
+    // reports that one's. It must not take over a saved connection or another Sandbox, nor have
+    // clients write to that environment as if it were this Sandbox, so it goes out without it.
+    const otherHosts = [...(yield* Ref.get(byHost)).entries()].flatMap(([host, registrations]) =>
+      host === hostEnvironmentId
+        ? []
+        : registrations.map((registration) => registration.target.environmentId),
     );
+    const takenBy = (entries: ReadonlyMap<EnvironmentId, ConnectionCatalogEntry>) => {
+      const claimed = new Set<EnvironmentId>(otherHosts);
+      const taken = new Set<string>();
+      for (const sandbox of reachedSandboxes(view.snapshot.sandboxes)) {
+        const holder = entries.get(sandbox.environmentId);
+        const held = holder === undefined ? null : sandboxForTarget(holder.target);
+        if (
+          claimed.has(sandbox.environmentId) ||
+          (holder !== undefined &&
+            (held === null ||
+              held.hostEnvironmentId !== hostEnvironmentId ||
+              held.name !== sandbox.name))
+        ) {
+          taken.add(sandbox.name);
+        } else {
+          claimed.add(sandbox.environmentId);
+        }
+      }
+      return taken;
+    };
+    const publishHost = (taken: ReadonlySet<string>) =>
+      SubscriptionRef.update(environments.hosts, (current) =>
+        new Map(current).set(hostEnvironmentId, {
+          ...view.snapshot,
+          sandboxes: view.snapshot.sandboxes.map((sandbox) =>
+            taken.has(sandbox.name)
+              ? { ...sandbox, environmentId: null, connectError: SANDBOX_ID_TAKEN }
+              : sandbox,
+          ),
+        }),
+      );
+    const taken = takenBy(yield* SubscriptionRef.get(registry.entries));
+    for (const name of taken) {
+      yield* Effect.logWarning("A Sandbox reports an environment id that is already connected.", {
+        name,
+      });
+    }
+    yield* publishHost(taken);
     const registrations: BearerConnectionRegistration[] = [];
     // The rejection each replaced session got, which the new session must not be taken for.
     const replaced = new Map<EnvironmentId, SupervisorConnectionState>();
     let unpaired = false;
     for (const sandbox of reachedSandboxes(view.snapshot.sandboxes)) {
+      if (taken.has(sandbox.name)) continue;
       const environmentId = sandbox.environmentId;
       const connectionId = sandboxConnectionId(hostEnvironmentId, sandbox.name, environmentId);
       let token = yield* savedToken(connectionId);
@@ -288,7 +337,15 @@ export const watchSandboxEnvironments = Effect.fn("SandboxEnvironments.watch")(f
         }),
       );
     }
-    yield* Ref.update(byHost, (current) => new Map(current).set(hostEnvironmentId, registrations));
+    // Pairing takes a while, and a connection with the same id can be saved meanwhile.
+    const late = takenBy(yield* SubscriptionRef.get(registry.entries));
+    const kept = registrations.filter(
+      (registration) => !late.has(sandboxForTarget(registration.target)?.name ?? ""),
+    );
+    if ([...late].some((name) => !taken.has(name))) {
+      yield* publishHost(new Set([...taken, ...late]));
+    }
+    yield* Ref.update(byHost, (current) => new Map(current).set(hostEnvironmentId, kept));
     yield* publish;
 
     // A started Sandbox should not wait out the backoff its stopped time built up.

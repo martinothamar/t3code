@@ -74,7 +74,11 @@ type Call =
       readonly urls: unknown;
       readonly options: unknown;
     }
-  | { readonly _tag: "unlink"; readonly environmentId: EnvironmentId };
+  | {
+      readonly _tag: "unlink";
+      readonly environmentId: EnvironmentId;
+      readonly linkedAt: DateTime.Utc | undefined;
+    };
 
 /**
  * Runs the links layer against queues standing in for agentctl, with links and their records held
@@ -147,11 +151,15 @@ const harness = (
                 }),
               relocate: (environmentId, urls, options) =>
                 record({ _tag: "relocate", environmentId, urls, options }).pipe(Effect.as(true)),
-              unlink: (environmentId) =>
+              unlink: (environmentId, options) =>
                 Effect.sync(() => ({
                   removed: stored.delete(environmentId),
                   endedThere: false,
-                })).pipe(Effect.tap(() => record({ _tag: "unlink", environmentId }))),
+                })).pipe(
+                  Effect.tap(() =>
+                    record({ _tag: "unlink", environmentId, linkedAt: options?.linkedAt }),
+                  ),
+                ),
             }),
             Layer.mock(ServerSettings.ServerSettingsService)({
               subscribeChanges: Effect.succeed(Stream.never),
@@ -163,7 +171,11 @@ const harness = (
     return { changes, reached, calls, upstream, records, stored };
   });
 
-const linkOf = (environmentId: EnvironmentId, name = "worker") => ({
+const linkOf = (
+  environmentId: EnvironmentId,
+  name = "worker",
+  replacing: DateTime.Utc | null = null,
+) => ({
   _tag: "link",
   input: {
     url: "http://127.0.0.1:41001/",
@@ -172,8 +184,9 @@ const linkOf = (environmentId: EnvironmentId, name = "worker") => ({
     expectedEnvironmentId: environmentId,
     expectedLabel: name,
   },
-  // The forward is loopback, which PeerLinks otherwise takes for this machine.
-  options: { ownForward: true },
+  // The forward is loopback, which PeerLinks otherwise takes for this machine. A link the user
+  // made meanwhile is theirs, so only the one checked is replaced.
+  options: { ownForward: true, replacing },
 });
 
 it.effect(
@@ -202,7 +215,8 @@ it.effect(
           _tag: "relocate",
           environmentId: first,
           urls: ["http://127.0.0.1:41002/"],
-          options: { ownForward: true },
+          // Only the link it checked moves, so one re-paired meanwhile stays where it is.
+          options: { ownForward: true, linkedAt: expect.anything() },
         });
         expect(yield* Queue.size(calls)).toBe(0);
       }),
@@ -236,7 +250,11 @@ it.effect(
         // Only the Sandbox with no link of its id is linked.
         expect(yield* Queue.take(calls)).toEqual(linkOf(first));
         yield* Queue.offer(changes, snapshot([]));
-        expect(yield* Queue.take(calls)).toEqual({ _tag: "unlink", environmentId: first });
+        expect(yield* Queue.take(calls)).toEqual({
+          _tag: "unlink",
+          environmentId: first,
+          linkedAt: expect.anything(),
+        });
         expect(yield* Queue.size(calls)).toBe(0);
         expect(stored.get(other)).toEqual(yours);
         expect(stored.get(second)).toEqual(lapsed);
@@ -263,8 +281,17 @@ it.effect(
         });
 
         yield* Queue.offer(changes, snapshot([sandbox({ phase: "stopped", environmentId: null })]));
-        expect(yield* Queue.take(calls)).toEqual({ _tag: "unlink", environmentId: first });
-        expect(yield* Queue.take(calls)).toEqual({ _tag: "unlink", environmentId: second });
+        // Only the links it checked go, so one re-paired meanwhile stays.
+        expect(yield* Queue.take(calls)).toEqual({
+          _tag: "unlink",
+          environmentId: first,
+          linkedAt: epoch,
+        });
+        expect(yield* Queue.take(calls)).toEqual({
+          _tag: "unlink",
+          environmentId: second,
+          linkedAt: epoch,
+        });
         expect(yield* Queue.size(calls)).toBe(0);
         expect(records).toEqual({});
       }),
@@ -291,7 +318,11 @@ it.effect("forgets a link made while its Sandbox was being deleted", () =>
       yield* Queue.offer(changes, snapshot([]));
       yield* Deferred.succeed(pairing, undefined);
       expect(yield* Queue.take(calls)).toEqual(linkOf(first));
-      expect(yield* Queue.take(calls)).toEqual({ _tag: "unlink", environmentId: first });
+      expect(yield* Queue.take(calls)).toEqual({
+        _tag: "unlink",
+        environmentId: first,
+        linkedAt: expect.anything(),
+      });
     }),
   ),
 );
@@ -306,10 +337,10 @@ it.effect("tries a refused link again, and renews a link before it lapses", () =
       expect(stored.has(first)).toBe(false);
       yield* TestClock.adjust("10 minutes");
       expect(yield* Queue.take(calls)).toEqual(linkOf(first));
-      expect(stored.has(first)).toBe(true);
+      const made = stored.get(first)!.linkedAt;
 
       yield* TestClock.adjust("29 days");
-      expect(yield* Queue.take(calls)).toEqual(linkOf(first));
+      expect(yield* Queue.take(calls)).toEqual(linkOf(first, "worker", made));
     }),
   ),
 );

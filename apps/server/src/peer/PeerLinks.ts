@@ -103,7 +103,7 @@ export class PeerLinks extends Context.Service<
     readonly enabled: Effect.Effect<boolean>;
     readonly link: (
       input: PeerLinkCreateInput,
-      options?: PeerLinkAddressOptions,
+      options?: PeerLinkAddressOptions & PeerLinkReplacing,
     ) => Effect.Effect<PeerLink, PeerLinkError>;
     /**
      * Links like `link`, except that a machine whose link has not expired is
@@ -126,11 +126,12 @@ export class PeerLinks extends Context.Service<
     readonly relocate: (
       environmentId: EnvironmentId,
       urls: ReadonlyArray<string>,
-      options?: PeerLinkAddressOptions,
+      options?: PeerLinkAddressOptions & PeerLinkMatch,
     ) => Effect.Effect<boolean, PeerLinkError>;
     /** Forgets the link here, then asks the peer to end the link's session. */
     readonly unlink: (
       environmentId: EnvironmentId,
+      options?: PeerLinkMatch,
     ) => Effect.Effect<{ readonly removed: boolean; readonly endedThere: boolean }, PeerLinkError>;
     /** An address that answers as the linked peer, with its token, ready to call. */
     readonly resolve: (
@@ -251,6 +252,18 @@ export interface PeerLinkAddressOptions {
    * tunnel to an agentctl Sandbox, so loopback there is the peer rather than anything local.
    */
   readonly ownForward?: boolean;
+}
+
+/** For server-side callers that link in the background, while the user may link too. */
+export interface PeerLinkReplacing {
+  /** The link this one replaces, or null for none, so a link made meanwhile stays. */
+  readonly replacing?: DateTime.Utc | null;
+}
+
+/** For server-side callers that checked a link before changing it. */
+export interface PeerLinkMatch {
+  /** Only the link made at this time changes, so one re-paired since is left as it is. */
+  readonly linkedAt?: DateTime.Utc;
 }
 
 /** Whether a host is this machine's own loopback. Tests serve their peers there, so they narrow it. */
@@ -532,7 +545,7 @@ const make = Effect.gen(function* () {
   const linkWith = Effect.fn("PeerLinks.link")(function* (
     input: PeerLinkCreateInput,
     keepLinked: boolean,
-    options?: PeerLinkAddressOptions,
+    options?: PeerLinkAddressOptions & PeerLinkReplacing,
   ) {
     if (!(yield* enabled)) {
       return yield* new PeerLinkError({ reason: "disabled", message: LINKED_ENVIRONMENTS_OFF });
@@ -600,10 +613,13 @@ const make = Effect.gen(function* () {
       .set(secretName, new TextEncoder().encode(issued.access_token))
       .pipe(Effect.catch(failStorage));
     // A token no row names could never be removed.
+    // Without `replacing`, any link is replaced; with it, only that one, or none for null.
+    const replaceAny = options?.replacing === undefined ? 1 : 0;
+    const replacing = options?.replacing == null ? null : DateTime.formatIso(options.replacing);
     const previous = yield* Effect.gen(function* () {
       const urlsJson = yield* encodeUrls(origins).pipe(Effect.catch(failStorage));
       const previous = yield* readRow(peer.environmentId);
-      yield* sql`
+      const written = yield* sql<{ environment_id: string }>`
         INSERT INTO peer_environment_links (
           environment_id, secret_name, label, urls_json, access, linked_at, expires_at,
           last_reached_at, last_error, fenced
@@ -622,7 +638,15 @@ const make = Effect.gen(function* () {
           expires_at = excluded.expires_at,
           last_reached_at = excluded.last_reached_at,
           last_error = NULL
+        WHERE ${replaceAny} = 1 OR peer_environment_links.linked_at = ${replacing}
+        RETURNING environment_id
       `.pipe(Effect.catch(failStorage));
+      if (written.length === 0) {
+        return yield* new PeerLinkError({
+          reason: "pairing_rejected",
+          message: `${peer.label} was linked again meanwhile, and that link stays as it is.`,
+        });
+      }
       return previous;
     }).pipe(Effect.onError(() => secrets.remove(secretName).pipe(Effect.ignore)));
     // Linking again replaces the old token. A racing link may leave its own
@@ -724,20 +748,28 @@ const make = Effect.gen(function* () {
     function* (environmentId, urls, options) {
       const link = yield* get(environmentId);
       if (Option.isNone(link)) return false;
+      const linkedAt =
+        options?.linkedAt === undefined ? null : DateTime.formatIso(options.linkedAt);
+      if (linkedAt !== null && DateTime.formatIso(link.value.linkedAt) !== linkedAt) return false;
       const { origins } = yield* answeringAs(urls, environmentId, link.value.label, options);
       const urlsJson = yield* encodeUrls(origins).pipe(Effect.catch(failStorage));
-      yield* sql`
+      // Probing takes a while, and the peer can be linked again meanwhile.
+      const moved = yield* sql<{ environment_id: string }>`
         UPDATE peer_environment_links SET urls_json = ${urlsJson}
-        WHERE environment_id = ${environmentId}
+        WHERE environment_id = ${environmentId} AND (${linkedAt} IS NULL OR linked_at = ${linkedAt})
+        RETURNING environment_id
       `.pipe(Effect.catch(failStorage));
-      return true;
+      return moved.length > 0;
     },
   );
 
   const unlink: PeerLinks["Service"]["unlink"] = Effect.fn("PeerLinks.unlink")(
-    function* (environmentId) {
+    function* (environmentId, options) {
+      const linkedAt =
+        options?.linkedAt === undefined ? null : DateTime.formatIso(options.linkedAt);
       const deleted = yield* sql<{ secret_name: string; urls_json: string }>`
-        DELETE FROM peer_environment_links WHERE environment_id = ${environmentId}
+        DELETE FROM peer_environment_links
+        WHERE environment_id = ${environmentId} AND (${linkedAt} IS NULL OR linked_at = ${linkedAt})
         RETURNING secret_name, urls_json
       `.pipe(Effect.catch(failStorage));
       let endedThere = false;

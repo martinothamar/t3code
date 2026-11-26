@@ -1153,6 +1153,11 @@ Review triggered.
     assert.deepEqual(evaluatePullRequestWatch(first.next, detail(), [submitted, other]).changes, [
       { kind: "remarks", remarks: [submitted], own: "agent-user" },
     ]);
+    // A draft edited before what was read still joins at its review's later time.
+    const edited = { ...submitted, editedAt: "2026-10-02T12:07:00Z" };
+    assert.deepEqual(evaluatePullRequestWatch(first.next, detail(), [edited, other]).changes, [
+      { kind: "remarks", remarks: [edited], own: "agent-user" },
+    ]);
   });
 
   it("wakes when the user edits the agent's remark and drops the marker", () => {

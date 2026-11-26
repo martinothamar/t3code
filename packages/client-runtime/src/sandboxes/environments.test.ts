@@ -24,6 +24,7 @@ import {
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
+  SANDBOX_ID_TAKEN,
   SandboxEnvironments,
   layer as sandboxEnvironmentsLayer,
   reachedSandboxes,
@@ -253,6 +254,104 @@ describe("Sandbox environment watcher", () => {
           ),
         ),
       );
+    }),
+  );
+  it.effect("never takes over an environment id another connection holds", () =>
+    Effect.gen(function* () {
+      const copy = { ...sandbox, name: "copy" };
+      const other = { ...sandbox, name: "other", environmentId: EnvironmentId.make("other-env") };
+      // Two new Sandboxes from one copied state report one id; the first reached keeps it.
+      const twin = { ...other, name: "twin" };
+      // Paired before, so none needs a new session.
+      const stored = new Map<string, ConnectionCredential>(
+        [copy, other, twin].map((each) => [
+          sandboxConnectionId(HOST, each.name, each.environmentId),
+          new BearerConnectionCredential({ token: `${each.name}-token` }),
+        ]),
+      );
+      // A Sandbox made from a copy of a saved environment's state reports that one's id.
+      const saved = {
+        target: new BearerConnectionTarget({
+          environmentId: SANDBOX,
+          label: "Build server",
+          connectionId: "saved-build-server",
+        }),
+      } as ConnectionCatalogEntry;
+      const state = yield* SubscriptionRef.make(connectionState("connected"));
+      const registry = Layer.mock(EnvironmentRegistry.EnvironmentRegistry)({
+        entries: yield* SubscriptionRef.make(
+          new Map([
+            [HOST, {} as ConnectionCatalogEntry],
+            [SANDBOX, saved],
+          ]) as ReadonlyMap<EnvironmentId, ConnectionCatalogEntry>,
+        ),
+        networkStatus: yield* SubscriptionRef.make<NetworkStatus>("online"),
+        followStream: <A>() =>
+          Stream.concat(
+            Stream.make({
+              snapshot: {
+                status: "available",
+                error: null,
+                sandboxes: [copy, other, twin],
+                homeDirectory: "/",
+              },
+              httpBaseUrl: "http://192.168.1.20:3773/",
+            } as A),
+            Stream.never,
+          ),
+        state: () => SubscriptionRef.get(state),
+        stateChanges: () => SubscriptionRef.changes(state),
+        retryNow: () => Effect.void,
+      });
+
+      const { registered, published } = yield* Effect.gen(function* () {
+        yield* Effect.forkChild(watchSandboxEnvironments());
+        const environments = yield* SandboxEnvironments;
+        const registered = yield* SubscriptionRef.changes(environments.registrations).pipe(
+          Stream.filter((registrations) => registrations.length > 0),
+          Stream.runHead,
+          Effect.map(Option.getOrThrow),
+        );
+        return {
+          registered,
+          published: (yield* SubscriptionRef.get(environments.hosts)).get(HOST),
+        };
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            sandboxEnvironmentsLayer,
+            registry,
+            Layer.succeed(
+              ConnectionCredentialStore.ConnectionCredentialStore,
+              ConnectionCredentialStore.make({
+                get: (id) => Effect.succeed(Option.fromNullishOr(stored.get(id))),
+                put: (id, credential) => Effect.sync(() => void stored.set(id, credential)),
+                remove: (id) => Effect.sync(() => void stored.delete(id)),
+              }),
+            ),
+            Layer.succeed(
+              ClientCapabilities.ClientPresentation,
+              ClientCapabilities.ClientPresentation.of({ metadata: {} }),
+            ),
+            FetchHttpClient.layer,
+          ),
+        ),
+      );
+      expect(registered.map((registration) => registration.target.environmentId)).toEqual([
+        other.environmentId,
+      ]);
+      // Clients set up each Sandbox they see with an id, so the others go out without one.
+      expect(
+        published?.sandboxes.map(({ name, environmentId, connectError }) => ({
+          name,
+          environmentId,
+          taken: connectError === SANDBOX_ID_TAKEN,
+        })),
+      ).toEqual([
+        { name: "copy", environmentId: null, taken: true },
+        { name: "other", environmentId: other.environmentId, taken: false },
+        { name: "twin", environmentId: null, taken: true },
+      ]);
     }),
   );
   it.effect("leaves a stopped Sandbox's turned-down session until it starts", () =>

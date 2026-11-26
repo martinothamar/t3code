@@ -23,7 +23,13 @@ afterEach(async () => {
   for (const dispose of disposers.splice(0)) await dispose();
 });
 
-const fixture = (options: { readonly reachable?: boolean; readonly fail?: boolean } = {}) => {
+const fixture = (
+  options: {
+    readonly reachable?: boolean;
+    readonly fail?: boolean;
+    readonly respond?: () => Response;
+  } = {},
+) => {
   const requests: Array<{
     url: string;
     headers: Readonly<Record<string, string>>;
@@ -43,6 +49,9 @@ const fixture = (options: { readonly reachable?: boolean; readonly fail?: boolea
         return yield* new HttpClientError.HttpClientError({
           reason: new HttpClientError.TransportError({ request, description: "ECONNREFUSED" }),
         });
+      }
+      if (options.respond !== undefined) {
+        return HttpClientResponse.fromWeb(request, options.respond());
       }
       return HttpClientResponse.fromWeb(
         request,
@@ -195,6 +204,36 @@ describe("Sandbox relay", () => {
     expect(requests[0]?.url).toBe(
       `http://127.0.0.1:4010${ASSET_ROUTE_PREFIX}/payload.signature/image.png?v=1`,
     );
+  });
+
+  it("serves nothing from a Sandbox that can run as this server's origin", async () => {
+    const policy = "sandbox allow-scripts allow-forms allow-popups allow-downloads";
+    const served = async (contentType: string, headers: Record<string, string> = {}) => {
+      const { handler } = fixture({
+        respond: () =>
+          new Response("<script>fetch('/api/auth/session')</script>", {
+            headers: { "content-type": contentType, ...headers },
+          }),
+      });
+      return (await handler(new Request("http://host.test/sandbox/worker-1/api/assets/x/page")))
+        .headers;
+    };
+    // A compromised Sandbox can serve HTML without its own server's policy.
+    const html = await served("text/html", { "clear-site-data": '"cookies", "storage"' });
+    // It would clear this server's cookies and storage, whatever the response is.
+    expect(html.get("clear-site-data")).toBeNull();
+    expect(html.get("content-security-policy")).toBe(policy);
+    expect(html.get("x-content-type-options")).toBe("nosniff");
+    // The Sandbox's stricter policy still applies beside this one.
+    expect(
+      (
+        await served("image/svg+xml", { "content-security-policy": "default-src 'none'; sandbox" })
+      ).get("content-security-policy"),
+    ).toBe(`default-src 'none'; sandbox, ${policy}`);
+    // A PDF opens in the browser's viewer, which a sandbox would block.
+    const pdf = await served("application/pdf");
+    expect(pdf.get("content-security-policy")).toBeNull();
+    expect(pdf.get("x-content-type-options")).toBe("nosniff");
   });
 
   it("answers 503 for a Sandbox that is not reachable", async () => {
