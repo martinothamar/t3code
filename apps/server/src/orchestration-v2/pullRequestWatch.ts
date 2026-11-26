@@ -34,6 +34,13 @@ export function withAgentMarker(body: string): string {
   return `${text}\n\n${AGENT_MARKER_TEXT}`;
 }
 
+/** When a remark last changed. A draft's edit can predate its review's submission, its later time. */
+export const remarkActiveAt = (remark: Pick<PullRequestComment, "createdAt" | "editedAt">) =>
+  remark.editedAt != null &&
+  (remark.createdAt == null || Date.parse(remark.editedAt) > Date.parse(remark.createdAt))
+    ? remark.editedAt
+    : remark.createdAt;
+
 export type PullRequestWatchChange =
   | { readonly kind: "checks-failed"; readonly failed: ReadonlyArray<PullRequestCheck> }
   | { readonly kind: "checks-passed"; readonly count: number; readonly required: boolean }
@@ -246,7 +253,7 @@ export function evaluatePullRequestWatch(
 
   const own = (detail.viewer ?? detail.author?.login)?.toLowerCase();
   const through = Date.parse(watch.remarksThrough);
-  const activeAt = (remark: PullRequestComment) => remark.editedAt ?? remark.createdAt;
+  const activeAt = remarkActiveAt;
   const byAgent = (remark: PullRequestComment) =>
     remark.author?.login.toLowerCase() === own && AGENT_MARKER.test(remark.body);
   // Hosts can stamp remarks to the second, so remarks at the boundary time are told apart by ID. A

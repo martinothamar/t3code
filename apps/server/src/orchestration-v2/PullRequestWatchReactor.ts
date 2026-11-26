@@ -52,6 +52,7 @@ import {
   PULL_REQUEST_WATCH_NO_CHECKS_MS,
   pullRequestWatchEndMessage,
   pullRequestWatchMessage,
+  remarkActiveAt,
 } from "./pullRequestWatch.ts";
 
 /** Checks take minutes; faster sweeps waste the account's shared host quota. */
@@ -395,7 +396,7 @@ export const make = Effect.gen(function* () {
       if (activity.commentsTruncated && activity.reviewThreadsTruncated !== false) return null;
 
       const visibleThrough = activity.comments.reduce(
-        (latest, comment) => Math.max(latest, Date.parse(comment.editedAt ?? comment.createdAt)),
+        (latest, comment) => Math.max(latest, Date.parse(remarkActiveAt(comment) ?? "")),
         0,
       );
       const paginated = activity.reviewThreads.filter(
