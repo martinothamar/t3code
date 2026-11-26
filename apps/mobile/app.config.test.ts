@@ -58,7 +58,7 @@ it.each([
   expect(assetLinks.map((link) => link.target.package_name)).toContain(identifier);
 });
 
-it("signs an own-team build with its team and bundle id, keeping push but not updates", async () => {
+it("signs an own-team build with its team and bundle id, keeping capabilities but not updates", async () => {
   const config = await loadConfig("production", {
     T3CODE_IOS_TEAM_ID: "ABCDE12345",
     T3CODE_IOS_BUNDLE_ID: "com.example.t3code",

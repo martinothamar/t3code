@@ -3340,6 +3340,7 @@
   "c0e935e82c6c7ff0": "Monter {tab}",
   "5f562a95198fb06f": "Descendre {tab}",
   "c72fe899b28f3f2f": "Réinitialiser les onglets",
+  "987d2f0e75e37fc7": "Notifications require {product} in this app build.",
   "fe82d02a0fb8f2f9": "Installez un build plus récent de l’app pour activer les notifications",
   "cf77d0d6fcfd8871": "Notifications indisponibles",
   "a54ab9f2dca595ac": "Impossible de demander l’autorisation de notification.",

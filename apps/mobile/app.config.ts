@@ -32,9 +32,9 @@ if (
   );
 }
 
-// Your own Apple team. With a paid team and T3CODE_IOS_BUNDLE_ID, every capability is kept so the
-// app can receive the environment's own pushes (directPush); upstream's OTA channel would ship
-// upstream's JS, so updates stay off unless T3CODE_MOBILE_UPDATES_ENABLED=1. A Personal Team build
+// Your own Apple team. With a paid team and T3CODE_IOS_BUNDLE_ID, every capability is kept;
+// upstream's OTA channel would ship upstream's JS, so updates stay off unless
+// T3CODE_MOBILE_UPDATES_ENABLED=1. A Personal Team build
 // signs with it too; without one, Expo picks the local signing identity's team.
 const ownTeamId = repoEnv.T3CODE_IOS_TEAM_ID?.trim() || undefined;
 const ownTeamBundleIdentifier = repoEnv.T3CODE_IOS_BUNDLE_ID?.trim() || undefined;

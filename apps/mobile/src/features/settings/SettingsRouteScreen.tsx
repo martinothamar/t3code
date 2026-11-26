@@ -34,7 +34,6 @@ import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
 import { filterSettingsSections } from "./settings-search";
 import { usePaneRole } from "../../components/ui/Pane";
 import { useGT, useMessages } from "gt-react-native";
-import { directPushAvailable } from "../agent-awareness/directPushRegistration";
 import { useOffersSandboxes } from "../sandboxes/useSandboxes";
 
 export function SettingsRouteScreen() {
@@ -152,7 +151,6 @@ function LocalSettingsRouteScreen() {
       connections={[
         environmentsRow(gt("Environments"), Object.keys(savedConnectionsById).length),
         ...sandboxes,
-        ...(directPushAvailable() ? [notificationsRow(gt("Notifications"))] : []),
       ]}
     />
   );
